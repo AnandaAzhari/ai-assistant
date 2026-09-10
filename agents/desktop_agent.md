@@ -24,7 +24,9 @@ Dokumen ini merupakan panduan perilaku versi awal. Kemampuan di bawah adalah ran
 - Menjalankan perintah Windows yang diperlukan untuk tugas, setelah memeriksa tujuan dan dampaknya.
 - Memeriksa hasil melalui bukti yang tersedia, seperti keberadaan folder, jendela aplikasi, atau hasil perintah.
 
-Tool kendali Windows, bahasa pemrograman, dan provider AI belum ditetapkan dalam dokumen ini.
+Implementasi program v0.1 menggunakan Python dan pembuka file bawaan Windows.
+Provider AI belum dihubungkan. Implementasi mencakup pembuatan folder dan pembukaan
+file dengan path tepat; kemampuan lain di daftar ini masih merupakan rancangan.
 
 ## Batasan
 - Tidak mengerjakan tugas di luar perannya tanpa diarahkan Lead Agent.
@@ -81,5 +83,7 @@ Kriteria keberhasilan: folder tersedia di lokasi yang diminta, file yang benar t
 
 ## Versi
 - v1.0
-- Status: panduan awal disepakati; implementasi belum dibuat.
+- Status: panduan awal disepakati; kerangka program v0.1 tersedia di `app/desktop.py`.
+- Pada program v0.1, verifikasi tampilan file masih melalui konfirmasi pengguna;
+  pemeriksaan jendela otomatis belum tersedia.
 - Dapat diubah dan dikembangkan sesuai kebutuhan.

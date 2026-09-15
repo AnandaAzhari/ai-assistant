@@ -20,6 +20,20 @@ class FinanceTests(unittest.TestCase):
         self.assertEqual(parse_amount("1,5 juta"), 1500000)
         self.assertEqual(parse_amount("120.000"), 120000)
 
+    def test_opening_balance_before_transactions(self):
+        reply = self.lead.handle_admin_message("Set saldo awal BCA 500 ribu")
+        self.assertEqual(reply.status, "berhasil")
+        self.assertEqual(self.finance.balances()["BCA"], 500000)
+        self.assertIn("Rp500.000", self.lead.handle_admin_message("/akun").text)
+
+    def test_opening_balance_locked_after_transaction(self):
+        self.lead.handle_admin_message("Set saldo awal BCA 500 ribu")
+        self.lead.handle_admin_message(
+            "Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA"
+        )
+        with self.assertRaises(ValueError):
+            self.finance.handle("Set saldo awal BCA 600 ribu")
+
     def test_record_expense_from_natural_language(self):
         reply = self.lead.handle_admin_message(
             "Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA"
@@ -29,6 +43,22 @@ class FinanceTests(unittest.TestCase):
         self.assertIn("Rp80.000", reply.text)
         self.assertIn("Tinta Printer", reply.text)
         self.assertEqual(self.finance.balances()["BCA"], -80000)
+
+    def test_dynamic_category_is_created(self):
+        reply = self.lead.handle_admin_message(
+            "Catat pengeluaran 45 ribu beli kabel USB untuk Taqi DocuTech pakai Cash"
+        )
+        self.assertEqual(reply.status, "berhasil")
+        self.assertIn("Kabel USB", reply.text)
+        self.assertIn("kategori baru dibuat", reply.text)
+        self.assertIn("Kabel USB", self.lead.handle_admin_message("/kategori").text)
+
+    def test_explicit_category_override(self):
+        reply = self.lead.handle_admin_message(
+            "Catat pengeluaran 70 ribu beli rak kecil kategori Perlengkapan untuk Taqi DocuTech pakai Cash"
+        )
+        self.assertEqual(reply.status, "berhasil")
+        self.assertIn("Perlengkapan", reply.text)
 
     def test_missing_business_does_not_write(self):
         reply = self.lead.handle_admin_message("Catat pengeluaran 80 ribu beli tinta pakai BCA")

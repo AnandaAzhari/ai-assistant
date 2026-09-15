@@ -1,5 +1,5 @@
-const CACHE = 'taqi-ai-admin-v1';
-const STATIC = ['/', '/index.html', '/style.css', '/app.js', '/voice.js', '/manifest.webmanifest'];
+const CACHE = 'taqi-ai-admin-v2';
+const STATIC = ['/', '/index.html', '/style.css', '/app.js', '/voice.js', '/pwa.js', '/manifest.webmanifest', '/taqi-ai.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(STATIC)));

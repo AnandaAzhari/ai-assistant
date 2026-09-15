@@ -1,7 +1,8 @@
 """Finance Agent runtime minimum.
 
-V0.1 menyimpan ledger lokal di SQLite. Uang disimpan sebagai integer rupiah.
+V0.2 menyimpan ledger lokal di SQLite. Uang disimpan sebagai integer rupiah.
 Tidak ada koneksi bank, pembayaran otomatis, atau hard-delete transaksi.
+Kategori dapat tumbuh dari transaksi nyata dengan normalisasi sederhana.
 """
 
 from __future__ import annotations
@@ -52,7 +53,8 @@ class FinanceResult:
 
 
 def rupiah(value: int) -> str:
-    return "Rp" + f"{value:,}".replace(",", ".")
+    sign = "-" if value < 0 else ""
+    return sign + "Rp" + f"{abs(value):,}".replace(",", ".")
 
 
 def parse_amount(text: str) -> int | None:
@@ -119,12 +121,68 @@ def detect_kind(text: str) -> str | None:
     return None
 
 
-def auto_category(text: str, kind: str) -> str:
-    lowered = text.casefold()
-    for keywords, category in CATEGORY_RULES.get(kind, ()):
-        if any(keyword in lowered for keyword in keywords):
-            return category
-    return "Lainnya"
+def normalize_category_name(value: str) -> str:
+    value = re.sub(r"\s+", " ", value.strip(" .,:;-_"))
+    if not value:
+        return ""
+    if len(value) > 60:
+        value = value[:60].rstrip()
+    # Pertahankan singkatan umum, judul lain dibuat mudah dibaca.
+    words = []
+    for word in value.split():
+        upper = word.upper()
+        if upper in {"BBM", "PLN", "USB", "SSD", "RAM", "QRIS", "HP", "PC"}:
+            words.append(upper)
+        else:
+            words.append(word[:1].upper() + word[1:].lower())
+    return " ".join(words)
+
+
+def explicit_category(text: str) -> str | None:
+    match = re.search(
+        r"\bkategori\s*[:=]?\s+(.+?)(?=\s+(?:untuk|pakai|via|dari|metode|akun)\b|[,.]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = normalize_category_name(match.group(1))
+    return value or None
+
+
+def category_phrase(text: str, kind: str) -> str | None:
+    """Ambil frasa kegunaan singkat untuk kategori baru bila aturan belum cocok.
+
+    Ini sengaja konservatif: jika frasa tidak cukup jelas, caller harus meminta
+    user menuliskan `kategori ...` daripada membuat kategori acak.
+    """
+    cleaned = text.casefold()
+    # Buang prefix transaksi dan nominal agar frasa inti lebih mudah diambil.
+    cleaned = re.sub(r"\b(?:catat\s+)?(?:pengeluaran|pemasukan|keluar|masuk|pendapatan)\b", " ", cleaned)
+    cleaned = re.sub(r"\b\d+(?:[.,]\d+)?\s*(?:juta|jt|ribu|rb|k)\b", " ", cleaned)
+    cleaned = re.sub(r"\b(?:\d{1,3}(?:\.\d{3})+|\d{4,12})\b", " ", cleaned)
+
+    starters = r"beli|belanja|bayar" if kind == "expense" else r"terima|dapat|penjualan|jual"
+    match = re.search(
+        rf"\b(?:{starters})\b\s+(.+?)(?=\s+(?:untuk|pakai|via|dengan|dari|ke|metode|akun)\b|[,.]|$)",
+        cleaned,
+    )
+    phrase = match.group(1) if match else ""
+    if not phrase and kind == "income":
+        # Contoh: "pemasukan 100 ribu desain poster untuk Pixiva pakai BCA".
+        match = re.search(r"^\s*(.+?)(?=\s+(?:untuk|pakai|via|dengan|dari|ke|metode|akun)\b|[,.]|$)", cleaned)
+        phrase = match.group(1) if match else ""
+
+    phrase = re.sub(r"\bkategori\b.*$", "", phrase).strip()
+    phrase = re.sub(r"\s+", " ", phrase)
+    filler = {"buat", "keperluan", "kebutuhan", "barang", "sesuatu", "lainnya", "lain"}
+    words = [word for word in phrase.split() if word not in filler]
+    if not words or len(words) > 5:
+        return None
+    result = normalize_category_name(" ".join(words))
+    if len(result) < 3:
+        return None
+    return result
 
 
 class FinanceService:
@@ -152,6 +210,13 @@ class FinanceService:
                 created TEXT NOT NULL,
                 PRIMARY KEY(name, kind)
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS finance_category_aliases (
+                alias TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('income','expense')),
+                category TEXT NOT NULL,
+                created TEXT NOT NULL,
+                PRIMARY KEY(alias, kind)
+            )""")
             db.execute("""CREATE TABLE IF NOT EXISTS finance_transactions (
                 id TEXT PRIMARY KEY,
                 created TEXT NOT NULL,
@@ -171,6 +236,91 @@ class FinanceService:
                 [(name,) for name in ACCOUNTS],
             )
 
+    def set_opening_balance(self, account: str, amount: int) -> None:
+        if account not in ACCOUNTS:
+            raise ValueError("Akun belum dikenal.")
+        if type(amount) is not int or not 0 <= amount <= 1_000_000_000_000:
+            raise ValueError("Saldo awal harus rupiah bulat antara Rp0 dan Rp1 triliun.")
+        with self.connect() as db:
+            count = db.execute(
+                "SELECT COUNT(*) FROM finance_transactions WHERE account=? AND status='confirmed'",
+                (account,),
+            ).fetchone()[0]
+            if count:
+                raise ValueError(
+                    "Saldo awal tidak boleh diubah setelah akun memiliki transaksi. "
+                    "Gunakan transaksi koreksi/adjustment pada tahap berikutnya."
+                )
+            db.execute("UPDATE finance_accounts SET opening_balance=? WHERE name=?", (amount, account))
+
+    def account_rows(self) -> list[dict]:
+        balances = self.balances()
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT name, opening_balance FROM finance_accounts WHERE active=1 ORDER BY name"
+            ).fetchall()
+        return [
+            {"name": row["name"], "opening_balance": int(row["opening_balance"]), "balance": balances[row["name"]]}
+            for row in rows
+        ]
+
+    def categories(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT name,kind FROM finance_categories ORDER BY kind,name COLLATE NOCASE"
+            ).fetchall()
+        return [{"name": row["name"], "kind": row["kind"]} for row in rows]
+
+    def _learn_alias(self, alias: str | None, kind: str, category: str) -> None:
+        if not alias:
+            return
+        alias_key = re.sub(r"\s+", " ", alias.casefold().strip())
+        if len(alias_key) < 3 or len(alias_key) > 80:
+            return
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO finance_category_aliases(alias,kind,category,created) VALUES(?,?,?,?)",
+                (alias_key, kind, category, datetime.now().isoformat(timespec="seconds")),
+            )
+
+    def resolve_category(self, text: str, kind: str) -> tuple[str | None, bool]:
+        explicit = explicit_category(text)
+        phrase = category_phrase(text, kind)
+        if explicit:
+            with self.connect() as db:
+                exists = db.execute(
+                    "SELECT 1 FROM finance_categories WHERE name=? AND kind=?", (explicit, kind)
+                ).fetchone() is not None
+            self._learn_alias(phrase, kind, explicit)
+            return explicit, not exists
+
+        lowered = text.casefold()
+        for keywords, category in CATEGORY_RULES.get(kind, ()):
+            if any(keyword in lowered for keyword in keywords):
+                with self.connect() as db:
+                    exists = db.execute(
+                        "SELECT 1 FROM finance_categories WHERE name=? AND kind=?", (category, kind)
+                    ).fetchone() is not None
+                return category, not exists
+
+        with self.connect() as db:
+            aliases = db.execute(
+                "SELECT alias,category FROM finance_category_aliases WHERE kind=? ORDER BY length(alias) DESC",
+                (kind,),
+            ).fetchall()
+        for row in aliases:
+            if row["alias"] in lowered:
+                return row["category"], False
+
+        if phrase:
+            with self.connect() as db:
+                exists = db.execute(
+                    "SELECT 1 FROM finance_categories WHERE name=? AND kind=?", (phrase, kind)
+                ).fetchone() is not None
+            self._learn_alias(phrase, kind, phrase)
+            return phrase, not exists
+        return None, False
+
     def record(self, *, kind: str, amount: int, account: str, business: str,
                category: str, description: str, source: str = "web_admin") -> str:
         if kind not in {"income", "expense"}:
@@ -181,7 +331,9 @@ class FinanceService:
             raise ValueError("Akun pembayaran belum dikenal.")
         if business not in BUSINESSES:
             raise ValueError("Usaha belum dikenal.")
-        category = category.strip() or "Lainnya"
+        category = normalize_category_name(category)
+        if not category:
+            raise ValueError("Kategori transaksi kosong.")
         description = description.strip()
         if not description:
             raise ValueError("Deskripsi transaksi kosong.")
@@ -261,6 +413,49 @@ class FinanceService:
             lines = [f"{name}: {rupiah(value)}" for name, value in balances.items()]
             return FinanceResult("berhasil", "Saldo ledger saat ini:\n" + "\n".join(lines))
 
+        if command == "/akun":
+            lines = [
+                f"{row['name']}: saldo awal {rupiah(row['opening_balance'])} | sekarang {rupiah(row['balance'])}"
+                for row in self.account_rows()
+            ]
+            return FinanceResult(
+                "berhasil",
+                "Akun keuangan:\n" + "\n".join(lines) +
+                "\n\nAtur sebelum ada transaksi, contoh: Set saldo awal BCA 500 ribu."
+            )
+
+        if command == "/kategori":
+            rows = self.categories()
+            if not rows:
+                return FinanceResult(
+                    "berhasil",
+                    "Belum ada kategori tersimpan. Kategori akan dibuat dari transaksi nyata."
+                )
+            income = [row["name"] for row in rows if row["kind"] == "income"]
+            expense = [row["name"] for row in rows if row["kind"] == "expense"]
+            parts = []
+            if income: parts.append("Pemasukan: " + ", ".join(income))
+            if expense: parts.append("Pengeluaran: " + ", ".join(expense))
+            return FinanceResult("berhasil", "Kategori yang sudah dipelajari:\n" + "\n".join(parts))
+
+        if "saldo awal" in text:
+            account = detect_account(raw)
+            amount = parse_amount(raw)
+            missing = []
+            if account is None: missing.append("akun")
+            if amount is None: missing.append("nominal")
+            if missing:
+                return FinanceResult(
+                    "needs_review",
+                    "Saldo awal belum diubah. Mohon lengkapi: " + ", ".join(missing) +
+                    ". Contoh: Set saldo awal BCA 500 ribu."
+                )
+            self.set_opening_balance(account, amount)
+            return FinanceResult(
+                "berhasil",
+                f"Saldo awal {account} disetel ke {rupiah(amount)}. Belum ada uang yang dipindahkan; ini hanya posisi awal ledger."
+            )
+
         if command in {"/hari_ini", "/pemasukan", "/pengeluaran"}:
             data = self.today_summary()
             return FinanceResult(
@@ -296,14 +491,21 @@ class FinanceService:
                     "Belum saya catat. Mohon lengkapi: " + ", ".join(missing) + ".\n"
                     "Contoh: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.",
                 )
-            category = auto_category(raw, kind)
+            category, category_new = self.resolve_category(raw, kind)
+            if not category:
+                return FinanceResult(
+                    "needs_review",
+                    "Belum saya catat karena kegunaan/kategorinya belum cukup jelas. "
+                    "Tambahkan misalnya `kategori Perlengkapan` pada pesan yang sama."
+                )
             self.record(kind=kind, amount=amount, account=account, business=business,
                         category=category, description=raw)
             label = "Pemasukan" if kind == "income" else "Pengeluaran"
+            category_note = " (kategori baru dibuat)" if category_new else ""
             return FinanceResult(
                 "berhasil",
                 f"{label} tercatat.\nNominal: {rupiah(amount)}\nUsaha: {business}\n"
-                f"Akun: {account}\nKategori: {category}",
+                f"Akun: {account}\nKategori: {category}{category_note}",
             )
 
         return FinanceResult("membutuhkan_bantuan", "Finance Agent belum memahami perintah itu.")

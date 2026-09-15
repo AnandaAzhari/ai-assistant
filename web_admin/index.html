@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Taqi AI Admin</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AI ASSISTANT</p>
+        <h1>Taqi AI Admin</h1>
+      </div>
+      <div id="onlineBadge" class="badge badge-warn">Memeriksa...</div>
+    </header>
+
+    <section class="status-grid" id="statusGrid" aria-label="Status sistem"></section>
+
+    <section class="chat-card">
+      <div id="messages" class="messages" aria-live="polite">
+        <article class="bubble assistant">
+          <strong>Lead Agent</strong>
+          <p>Web Admin siap. Ketik <code>/</code> untuk melihat perintah atau tekan mikrofon untuk berbicara.</p>
+        </article>
+      </div>
+
+      <div id="commandPalette" class="command-palette hidden" role="listbox" aria-label="Slash command"></div>
+
+      <form id="chatForm" class="composer">
+        <textarea id="messageInput" rows="1" autocomplete="off" placeholder="Ketik pesan atau /perintah..." aria-label="Pesan"></textarea>
+        <button id="micButton" class="icon-button" type="button" title="Bicara" aria-label="Mulai voice input">🎙️</button>
+        <button class="send-button" type="submit">Kirim</button>
+      </form>
+
+      <div class="voice-row">
+        <span id="voiceStatus">Voice: siap diperiksa</span>
+        <label><input id="speakReplies" type="checkbox"> Bacakan jawaban</label>
+      </div>
+    </section>
+
+    <footer>
+      <span>Web Admin v0.1</span>
+      <span>Default: localhost</span>
+    </footer>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

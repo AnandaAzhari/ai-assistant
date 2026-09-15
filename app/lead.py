@@ -1,6 +1,6 @@
 """Lead Agent routing minimum.
 
-Desktop commands tetap dipertahankan. Telegram/admin messages memakai router aturan
+Desktop commands tetap dipertahankan. Pesan dari channel admin memakai router aturan
 sederhana dulu; model AI belum dihubungkan pada tahap ini.
 """
 
@@ -34,10 +34,10 @@ class LeadAgent:
         return Result("membutuhkan_bantuan", ["Perintah belum dikenal. Ketik bantuan untuk melihat pilihan."])
 
     def handle_admin_message(self, message: str) -> LeadReply:
-        """Router minimum untuk Telegram Admin.
+        """Router minimum untuk channel admin seperti Web Admin atau Telegram.
 
         Tahap ini sengaja belum mengeksekusi transaksi keuangan atau TaqiDesk.
-        Tujuannya menguji jalur Telegram -> allowlist -> Lead Agent secara aman.
+        Tujuannya menguji channel admin -> Lead Agent secara aman.
         """
         raw = (message or "").strip()
         if not raw:
@@ -61,7 +61,7 @@ class LeadAgent:
             return LeadReply(
                 "lead",
                 "berhasil",
-                "Lead Agent: aktif\nTelegram Admin: terhubung\nRouter: aturan minimum\nAI model: belum dihubungkan\nFinance runtime: belum diaktifkan"
+                "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\nRouter: aturan minimum\nAI model: belum dihubungkan\nFinance runtime: belum diaktifkan"
             )
 
         finance_commands = {"/saldo", "/hari_ini", "/bulan_ini", "/pemasukan", "/pengeluaran", "/piutang", "/utang"}
@@ -73,7 +73,7 @@ class LeadAgent:
             return LeadReply(
                 "finance",
                 "terdeteksi",
-                "Saya mengenali ini sebagai tugas Finance Agent. Jalur Telegram -> Lead Agent sudah bekerja. "
+                "Saya mengenali ini sebagai tugas Finance Agent. Jalur channel admin -> Lead Agent sudah bekerja. "
                 "Finance runtime belum diaktifkan, jadi belum ada transaksi yang ditulis."
             )
 
@@ -82,7 +82,7 @@ class LeadAgent:
             return LeadReply(
                 "docutech",
                 "terdeteksi",
-                "Saya mengenali ini sebagai tugas TaqiDesk/DocuTech. Integrasi TaqiDesk belum diaktifkan pada tahap Telegram minimum."
+                "Saya mengenali ini sebagai tugas TaqiDesk/DocuTech. Integrasi TaqiDesk belum diaktifkan pada tahap runtime minimum."
             )
 
         if command.startswith("/"):

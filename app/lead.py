@@ -7,6 +7,7 @@ sederhana dulu; model AI belum dihubungkan pada tahap ini.
 from dataclasses import dataclass
 
 from app.desktop import DesktopAgent, Result
+from app.finance import FinanceService
 
 
 @dataclass(frozen=True)
@@ -17,8 +18,9 @@ class LeadReply:
 
 
 class LeadAgent:
-    def __init__(self, desktop: DesktopAgent | None = None):
+    def __init__(self, desktop: DesktopAgent | None = None, finance: FinanceService | None = None):
         self.desktop = desktop
+        self.finance = finance
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         """Kompatibilitas command desktop v0.1."""
@@ -34,11 +36,7 @@ class LeadAgent:
         return Result("membutuhkan_bantuan", ["Perintah belum dikenal. Ketik bantuan untuk melihat pilihan."])
 
     def handle_admin_message(self, message: str) -> LeadReply:
-        """Router minimum untuk channel admin seperti Web Admin atau Telegram.
-
-        Tahap ini sengaja belum mengeksekusi transaksi keuangan atau TaqiDesk.
-        Tujuannya menguji channel admin -> Lead Agent secara aman.
-        """
+        """Router minimum untuk channel admin seperti Web Admin atau Telegram."""
         raw = (message or "").strip()
         if not raw:
             return LeadReply("lead", "membutuhkan_bantuan", "Pesan kosong. Ketik /bantuan untuk melihat perintah awal.")
@@ -47,21 +45,28 @@ class LeadAgent:
         command = text.split(maxsplit=1)[0].split("@", 1)[0]
 
         if command in {"/start", "/bantuan", "/help"} or text in {"bantuan", "help"}:
+            finance_note = "aktif" if self.finance is not None else "belum diaktifkan"
             return LeadReply(
                 "lead",
                 "berhasil",
                 "AI Assistant aktif.\n\n"
                 "Perintah tahap awal:\n"
-                "/status - cek Lead Agent\n"
-                "/saldo, /hari_ini, /bulan_ini - diarahkan ke Finance Agent (runtime berikutnya)\n"
-                "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta pakai BCA."
+                "/status - cek sistem\n"
+                "/saldo - saldo ledger per akun\n"
+                "/hari_ini - ringkasan hari ini\n"
+                "/bulan_ini - ringkasan bulan ini\n"
+                "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n\n"
+                f"Finance runtime: {finance_note}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
+            finance_status = "aktif" if self.finance is not None else "belum diaktifkan"
             return LeadReply(
                 "lead",
                 "berhasil",
-                "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\nRouter: aturan minimum\nAI model: belum dihubungkan\nFinance runtime: belum diaktifkan"
+                "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\n"
+                "Router: aturan minimum\nAI model: belum dihubungkan\n"
+                f"Finance runtime: {finance_status}"
             )
 
         finance_commands = {"/saldo", "/hari_ini", "/bulan_ini", "/pemasukan", "/pengeluaran", "/piutang", "/utang"}
@@ -70,12 +75,14 @@ class LeadAgent:
             "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai"
         )
         if command in finance_commands or any(word in text for word in finance_words):
-            return LeadReply(
-                "finance",
-                "terdeteksi",
-                "Saya mengenali ini sebagai tugas Finance Agent. Jalur channel admin -> Lead Agent sudah bekerja. "
-                "Finance runtime belum diaktifkan, jadi belum ada transaksi yang ditulis."
-            )
+            if self.finance is None:
+                return LeadReply(
+                    "finance",
+                    "terdeteksi",
+                    "Saya mengenali ini sebagai tugas Finance Agent, tetapi Finance runtime belum diaktifkan."
+                )
+            result = self.finance.handle(raw)
+            return LeadReply("finance", result.status, result.text)
 
         taqidesk_words = ("taqidesk", "taqi desk", "pesanan", "order", "antrean", "pelanggan", "cetak")
         if any(word in text for word in taqidesk_words):

@@ -53,6 +53,8 @@ class LeadAgent:
                 "Perintah tahap awal:\n"
                 "/status - cek sistem\n"
                 "/saldo - saldo ledger per akun\n"
+                "/akun - akun dan saldo awal\n"
+                "/kategori - kategori yang sudah dipelajari\n"
                 "/hari_ini - ringkasan hari ini\n"
                 "/bulan_ini - ringkasan bulan ini\n"
                 "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n\n"
@@ -69,10 +71,13 @@ class LeadAgent:
                 f"Finance runtime: {finance_status}"
             )
 
-        finance_commands = {"/saldo", "/hari_ini", "/bulan_ini", "/pemasukan", "/pengeluaran", "/piutang", "/utang"}
+        finance_commands = {
+            "/saldo", "/akun", "/kategori", "/hari_ini", "/bulan_ini",
+            "/pemasukan", "/pengeluaran", "/piutang", "/utang"
+        }
         finance_words = (
-            "pengeluaran", "pemasukan", "saldo", "cashflow", "arus kas", "laba", "rugi",
-            "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai"
+            "pengeluaran", "pemasukan", "saldo", "saldo awal", "kategori", "cashflow", "arus kas",
+            "laba", "rugi", "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai"
         )
         if command in finance_commands or any(word in text for word in finance_words):
             if self.finance is None:

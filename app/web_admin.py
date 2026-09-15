@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from app.finance import FinanceService
 from app.lead import LeadAgent
 
 
@@ -28,7 +29,7 @@ def system_status() -> dict:
         "name": "Taqi AI Admin",
         "components": [
             {"name": "Lead Agent", "status": "aktif"},
-            {"name": "Finance Agent", "status": "persiapan"},
+            {"name": "Finance Agent", "status": "aktif"},
             {"name": "TaqiDesk", "status": "belum_terhubung"},
             {"name": "Telegram", "status": "opsional"},
         ],
@@ -156,7 +157,10 @@ class WebAdminHandler(BaseHTTPRequestHandler):
 def create_server(host: str, port: int, *, admin_key: str = "") -> WebAdminHTTPServer:
     if not WEB_ROOT.is_dir():
         raise RuntimeError(f"Folder Web Admin tidak ditemukan: {WEB_ROOT}")
-    return WebAdminHTTPServer((host, port), WebAdminHandler, lead=LeadAgent(), admin_key=admin_key)
+    db_path = os.environ.get("DATABASE_PATH", "data/assistant.db").strip() or "data/assistant.db"
+    finance = FinanceService(db_path)
+    lead = LeadAgent(finance=finance)
+    return WebAdminHTTPServer((host, port), WebAdminHandler, lead=lead, admin_key=admin_key)
 
 
 def env_admin_key() -> str:

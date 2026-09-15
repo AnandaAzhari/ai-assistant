@@ -1,54 +1,82 @@
 # AI Assistant
 
-Kerangka asisten lokal untuk Windows, versi program v0.1. Perintah terminal
-diteruskan oleh Lead Agent ke Desktop Agent untuk membuat folder pesanan dan
-membuka dokumen melalui aplikasi bawaan Windows.
+Kerangka asisten lokal untuk Windows. Proyek ini memisahkan AI Assistant Core dari aplikasi bisnis seperti TaqiDesk.
 
-Mulai dari **[Panduan Windows](docs/PANDUAN_WINDOWS.md)**.
+## Web Admin / PWA v0.1
 
-## Menjalankan
+Web Admin minimum sekarang tersedia untuk menguji jalur:
 
-Gunakan Python 3.11 atau lebih baru. Tidak perlu paket tambahan atau API key.
-Ekstrak repo, lalu klik dua kali `jalankan.bat`, atau buka terminal di folder repo:
+`Browser -> Web Admin -> Lead Agent`
+
+Fitur awal:
+- chat ke Lead Agent,
+- slash command seperti `/status`, `/saldo`, `/hari_ini`, `/bulan_ini`, dan `/antrean`,
+- status komponen sistem,
+- voice input Bahasa Indonesia melalui speech recognition browser bila didukung,
+- opsi membacakan jawaban melalui text-to-speech browser,
+- manifest + service worker dasar agar fondasi PWA sudah tersedia.
+
+Jalankan di Windows dengan klik dua kali:
+
+```text
+JALANKAN_WEB_ADMIN.bat
+```
+
+Lalu buka:
+
+```text
+http://localhost:8081
+```
+
+Tahap v0.1 sengaja hanya localhost. Akses tablet/HP melalui LAN + HTTPS akan ditambahkan setelah alur lokal stabil. Ini penting karena microphone dan instalasi PWA penuh pada browser mobile umumnya memerlukan secure context/HTTPS.
+
+Voice v0.1 memakai kemampuan speech recognition browser. Implementasi ini belum berarti STT berjalan lokal/offline; dukungan dan pemrosesan audio bergantung pada browser/platform. Rencana berikutnya dapat menambahkan STT lokal/provider abstraction agar lebih konsisten.
+
+## Telegram Admin
+
+Telegram Adapter minimum juga tersedia tetapi bersifat opsional. Token dan ID admin hanya dibaca dari `.env` lokal dan tidak boleh masuk GitHub.
+
+## Terminal Windows lama
+
+Perintah terminal Desktop Agent tetap tersedia. Mulai dari **[Panduan Windows](docs/PANDUAN_WINDOWS.md)**.
+
+Gunakan Python 3.11 atau lebih baru. Untuk terminal lama:
 
 ```powershell
 py -3 main.py
 ```
 
-Masukkan folder kerja yang sudah ada. Ketik `bantuan` untuk daftar perintah.
-Untuk menentukan folder langsung:
-
-```powershell
-py -3 main.py --workspace "D:\Pesanan"
-```
-
-## Kemampuan versi ini
-
+Perintah:
 - `folder`: membuat folder baru dan memeriksa keberadaannya.
 - `buka`: meminta Windows membuka file yang ditentukan.
-- `pesanan`: membuat folder, lalu membuka file, dengan laporan hasil parsial jika gagal.
-- File yang didukung: PDF, TXT, DOCX, XLSX, PPTX, PNG, JPG/JPEG.
-- File harus berada di dalam folder kerja; gunakan path tepat, bukan pencocokan nama mirip.
-- Folder yang sudah ada dipertahankan. File pelanggan tidak dipindah atau disalin otomatis.
-- Tampilan dokumen dikonfirmasi oleh pengguna. Respons dari Windows sendiri belum
-  membuktikan bahwa aplikasi menampilkan dokumen dengan benar.
+- `pesanan`: membuat folder, lalu membuka file.
 
-Ini masih router perintah tetap. Pemahaman bahasa bebas, provider AI, WhatsApp,
-pembukaan browser, perintah Windows bebas, dan pengaturan sistem belum diimplementasikan.
-Panduan `agents/*.md` menjelaskan peran dan cakupan pengembangan; program belum
-memuat panduan tersebut sebagai prompt AI.
+## Arsitektur arah pengembangan
 
-## Struktur
+```text
+Web/PWA ----\
+Telegram ----> Lead Agent -> Specialist Agent -> Tools/Services
+Discord  ----/                    |
+                                  +-> Finance Service
+                                  +-> TaqiDesk Adapter
+                                  +-> Desktop Agent
+```
+
+Web/PWA adalah control plane utama yang direncanakan. Telegram/Discord menjadi adapter tambahan, bukan pusat business logic.
+
+## Struktur penting
 
 | Lokasi | Isi |
 | --- | --- |
-| `agents/` | Panduan peran agen yang telah disepakati |
-| `app/lead.py` | Pemilihan tugas Desktop Agent |
-| `app/desktop.py` | Pembuatan folder dan permintaan membuka file |
-| `main.py` | Terminal dan laporan hasil |
-| `jalankan.bat` | Peluncur Windows |
-| `docs/PANDUAN_WINDOWS.md` | Pemasangan dan uji manual |
-| `tests/` | Pengujian alur, kegagalan, dan batas tindakan |
+| `agents/` | Panduan peran agent |
+| `app/lead.py` | Lead Agent/router minimum |
+| `app/desktop.py` | Desktop Agent |
+| `app/telegram.py` | Telegram Admin adapter |
+| `app/web_admin.py` | HTTP server Web Admin minimum |
+| `web_admin/` | UI, slash command, voice, dan PWA assets |
+| `JALANKAN_WEB_ADMIN.bat` | Peluncur Web Admin Windows |
+| `docs/` | Arsitektur, Finance, Telegram, dan catatan integrasi TaqiDesk |
+| `tests/` | Pengujian alur dan batas tindakan |
 
 ## Pengujian
 
@@ -56,5 +84,4 @@ memuat panduan tersebut sebagai prompt AI.
 py -3 -m unittest discover -s tests -v
 ```
 
-Tes memakai folder sementara dan pengganti pemanggilan pembuka file. Tes tidak
-membuka aplikasi sungguhan; uji tampilan Windows tetap dilakukan mengikuti panduan.
+Tes tidak membuktikan perilaku microphone atau UI browser secara penuh; keduanya tetap perlu diuji manual pada perangkat nyata.

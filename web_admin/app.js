@@ -9,6 +9,8 @@ const commands = [
   ['/status', 'Cek status sistem'],
   ['/bantuan', 'Lihat bantuan'],
   ['/saldo', 'Lihat saldo'],
+  ['/akun', 'Lihat akun dan saldo awal'],
+  ['/kategori', 'Lihat kategori yang sudah dipelajari'],
   ['/hari_ini', 'Laporan hari ini'],
   ['/bulan_ini', 'Laporan bulan ini'],
   ['/antrean', 'Lihat antrean TaqiDesk']
@@ -50,6 +52,15 @@ async function sendMessage(text = input.value) {
 form.addEventListener('submit', event => {
   event.preventDefault();
   sendMessage();
+});
+
+input.addEventListener('keydown', event => {
+  // Enter mengirim pesan. Shift+Enter tetap membuat baris baru.
+  // Saat IME/composition aktif, jangan memaksa submit.
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    sendMessage();
+  }
 });
 
 input.addEventListener('input', () => {

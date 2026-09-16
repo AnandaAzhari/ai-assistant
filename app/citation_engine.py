@@ -11,7 +11,9 @@ spasi seperti paragraf justify biasa.
 
 Nomor halaman final juga diterapkan deterministik melalui Microsoft Word:
 cover tanpa nomor, bagian awal memakai Romawi kecil mulai i, lalu BAB I memakai
-angka Arab mulai 1 dan berlanjut sampai Daftar Pustaka.
+angka Arab mulai 1 dan berlanjut sampai Daftar Pustaka. PDF diekspor dari sesi Word
+yang sama setelah semua nomor halaman dan daftar isi selesai diperbarui agar DOCX dan
+PDF konsisten.
 """
 
 from __future__ import annotations
@@ -214,11 +216,16 @@ class CitationEngine:
         return replace(spec, sections=spec.sections + (bibliography,)), used_refs, used_sources
 
     @staticmethod
-    def _apply_word_footnotes(docx_path: Path, sources: list[RegisteredSource], timeout: int = 75) -> str:
+    def _apply_word_footnotes(
+        docx_path: Path,
+        sources: list[RegisteredSource],
+        *,
+        create_pdf: bool = True,
+        timeout: int = 90,
+    ) -> str:
         if os.name != "nt":
             return "Footnote Word belum diterapkan: fitur ini membutuhkan Windows + Microsoft Word."
-        if not sources:
-            return ""
+
         citation_file = docx_path.with_suffix(".citations.json")
         payload = []
         for source in sources:
@@ -236,10 +243,13 @@ class CitationEngine:
         env = os.environ.copy()
         env["TAQI_CITATION_DOCX"] = str(docx_path.resolve())
         env["TAQI_CITATION_JSON"] = str(citation_file.resolve())
+        env["TAQI_CITATION_PDF"] = str(docx_path.with_suffix(".pdf").resolve()) if create_pdf else ""
         script = r'''
 $ErrorActionPreference = 'Stop'
 $src = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_DOCX)
 $jsonPath = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_JSON)
+$pdfOut = [string]$env:TAQI_CITATION_PDF
+if (-not [string]::IsNullOrWhiteSpace($pdfOut)) { $pdfOut = [System.IO.Path]::GetFullPath($pdfOut) }
 if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) { throw "Data citation tidak ditemukan: $jsonPath" }
 $items = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -336,8 +346,6 @@ try {
     }
   }
 
-  # Terapkan nomor halaman makalah secara otomatis.
-  # Cover: tanpa nomor. Halaman awal: i, ii, iii... BAB I dst.: 1, 2, 3...
   function Find-TextStart([string]$needle) {
     $search = $doc.Content.Duplicate
     $find = $search.Find
@@ -349,20 +357,34 @@ try {
     return -1
   }
 
-  $prelimStart = Find-TextStart 'KATA PENGANTAR'
-  if ($prelimStart -lt 0) { $prelimStart = Find-TextStart 'DAFTAR ISI' }
-  if ($prelimStart -ge 0) {
-    $r = $doc.Range($prelimStart, $prelimStart)
-    # Continuous section break dipakai agar page break yang sudah dibuat engine tetap menjadi pemisah halaman.
-    $r.InsertBreak(3)
+  # Ganti manual page break sebelum heading batas section dengan Section Break (Next Page).
+  # Cara ini menghindari section continuous ikut menghitung halaman sebelumnya sehingga
+  # BAB I benar-benar dimulai dari nomor 1, bukan 2.
+  function Make-NextPageSectionBefore([string]$needle) {
+    $start = Find-TextStart $needle
+    if ($start -lt 0) { return }
+    $scanStart = [Math]::Max(0, $start - 8)
+    $scan = $doc.Range($scanStart, $start)
+    $findBreak = $scan.Find
+    $findBreak.ClearFormatting()
+    $findBreak.Text = '^m'
+    $findBreak.Forward = $false
+    $findBreak.Wrap = 0
+    if ($findBreak.Execute()) {
+      $scan.Text = ''
+    }
+    $start = Find-TextStart $needle
+    if ($start -ge 0) {
+      $r = $doc.Range($start, $start)
+      $r.InsertBreak(2)
+    }
   }
 
-  # Cari BAB I setelah section awal dibuat agar posisi range selalu terbaru.
-  $mainStart = Find-TextStart 'BAB I'
-  if ($mainStart -ge 0) {
-    $r = $doc.Range($mainStart, $mainStart)
-    $r.InsertBreak(3)
+  Make-NextPageSectionBefore 'KATA PENGANTAR'
+  if ((Find-TextStart 'KATA PENGANTAR') -lt 0) {
+    Make-NextPageSectionBefore 'DAFTAR ISI'
   }
+  Make-NextPageSectionBefore 'BAB I'
 
   if ($doc.Sections.Count -ge 3) {
     $coverSection = $doc.Sections.Item(1)
@@ -430,7 +452,53 @@ try {
     }
   }
 
+  # Repaginasi lalu perbarui TOC setelah section dan nomor halaman final diterapkan.
+  try { $doc.Repaginate() } catch {}
+  foreach ($toc in $doc.TablesOfContents) {
+    try { $toc.Update() | Out-Null } catch {}
+  }
+  try { $doc.Repaginate() } catch {}
+
+  # Rapikan tampilan daftar isi. DAFTAR PUSTAKA adalah level utama seperti BAB,
+  # sehingga tidak boleh terlihat menggantung/terpusat di tengah.
+  foreach ($toc in $doc.TablesOfContents) {
+    foreach ($p in $toc.Range.Paragraphs) {
+      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
+      if ([string]::IsNullOrWhiteSpace($text)) { continue }
+      try { $p.Range.ParagraphFormat.Alignment = 0 } catch {}
+      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceAfter = 0 } catch {}
+      if (($text -match '^BAB\s+[IVXLCDM]+\b') -or ($text -match '^DAFTAR PUSTAKA\b')) {
+        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+      } elseif ($text -match '^\d+\.\d+\.\d+\b') {
+        try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
+      } elseif ($text -match '^\d+\.\d+\b') {
+        try { $p.Range.ParagraphFormat.LeftIndent = 18 } catch {}
+      }
+    }
+  }
+
+  # Update field footer dan TOC sekali lagi agar nomor yang terlihat sama dengan nomor
+  # yang akan dicetak/masuk PDF.
+  foreach ($section in $doc.Sections) {
+    foreach ($footer in $section.Footers) {
+      try { $footer.Range.Fields.Update() | Out-Null } catch {}
+    }
+  }
+  try { $doc.Repaginate() } catch {}
+  foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
+  try { $doc.Repaginate() } catch {}
   $doc.Save()
+
+  # Ekspor PDF dari sesi Word yang sama supaya format Romawi/Arab, TOC, dan pagination
+  # identik dengan DOCX final. Jika gagal, Python akan mencoba fallback converter.
+  if (-not [string]::IsNullOrWhiteSpace($pdfOut)) {
+    try {
+      if (Test-Path -LiteralPath $pdfOut) { Remove-Item -LiteralPath $pdfOut -Force }
+      $doc.ExportAsFixedFormat([string]$pdfOut, 17)
+    } catch {}
+  }
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
   if ($word -ne $null) { try { $word.Quit() } catch {} }
@@ -463,13 +531,18 @@ try {
             docx_path = self.document_engine.build_docx(cited_spec)
         except (OSError, ValueError) as exc:
             return CitationBuildResult("gagal", used_refs=used_refs, warning=f"Gagal membuat DOCX: {exc}")
-        footnote_warning = self._apply_word_footnotes(docx_path, used_sources)
+        footnote_warning = self._apply_word_footnotes(docx_path, used_sources, create_pdf=create_pdf)
         if footnote_warning:
             return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=footnote_warning)
-        pdf_path = None
+
+        pdf_path: Path | None = None
         pdf_warning = ""
         if create_pdf:
-            pdf_path, pdf_warning = self.document_engine.convert_to_pdf(docx_path)
+            same_session_pdf = docx_path.with_suffix(".pdf")
+            if same_session_pdf.is_file():
+                pdf_path = same_session_pdf
+            else:
+                pdf_path, pdf_warning = self.document_engine.convert_to_pdf(docx_path)
         return CitationBuildResult(
             "berhasil", docx_path=str(docx_path), pdf_path=str(pdf_path) if pdf_path else "",
             used_refs=used_refs, warning=pdf_warning,

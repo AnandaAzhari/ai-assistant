@@ -26,6 +26,20 @@ function doPost(e) {
   }
 }
 
+function transactionStatusLabel_(status) {
+  const value = String(status || 'confirmed').toLowerCase();
+  const map = {
+    'confirmed': 'Terverifikasi',
+    'needs_review': 'Pending',
+    'pending': 'Pending',
+    'rejected': 'Dibatalkan',
+    'reversed': 'Dibatalkan',
+    'cancelled': 'Dibatalkan',
+    'canceled': 'Dibatalkan'
+  };
+  return map[value] || 'Pending';
+}
+
 function syncTransactions_(ss, rows) {
   const sheet = ss.getSheetByName('Transaksi');
   if (!sheet) throw new Error('Sheet Transaksi tidak ditemukan.');
@@ -48,7 +62,7 @@ function syncTransactions_(ss, rows) {
       item.description || '',
       item.account || '',
       Number(item.amount || 0),
-      item.status || 'confirmed',
+      transactionStatusLabel_(item.status),
       item.source || '',
       '',
       '',

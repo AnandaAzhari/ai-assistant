@@ -40,8 +40,11 @@ class CitationFormatTests(unittest.TestCase):
         self.assertNotIn("...", short)
         self.assertNotIn("…", short)
 
-    def test_ibid_is_only_for_immediate_same_source_repeat(self):
-        plan = CitationEngine.note_plan(["R1", "R1", "R2", "R1", "R2", "R2"])
+    def test_auto_repeat_mode_uses_ibid_only_for_immediate_repeat(self):
+        plan = CitationEngine.note_plan(
+            ["R1", "R1", "R2", "R1", "R2", "R2"],
+            repeat_mode="auto",
+        )
         self.assertEqual(
             plan,
             (
@@ -55,9 +58,36 @@ class CitationFormatTests(unittest.TestCase):
         )
         self.assertEqual(CitationEngine.IBID_TEXT, "Ibid.")
 
+    def test_short_repeat_mode_never_uses_ibid(self):
+        plan = CitationEngine.note_plan(
+            ["R1", "R1", "R2", "R1", "R2", "R2"],
+            repeat_mode="short",
+        )
+        self.assertEqual(
+            plan,
+            (
+                ("R1", "full"),
+                ("R1", "short"),
+                ("R2", "full"),
+                ("R1", "short"),
+                ("R2", "short"),
+                ("R2", "short"),
+            ),
+        )
+
+    def test_repeat_mode_aliases_are_normalized(self):
+        self.assertEqual(CitationEngine.normalize_repeat_mode(None), "auto")
+        self.assertEqual(CitationEngine.normalize_repeat_mode("pakai ibid"), "auto")
+        self.assertEqual(CitationEngine.normalize_repeat_mode("tanpa ibid"), "short")
+        self.assertEqual(CitationEngine.normalize_repeat_mode("jangan pakai ibid"), "short")
+        with self.assertRaises(ValueError):
+            CitationEngine.normalize_repeat_mode("mode-aneh")
+
     def test_default_footnote_visual_settings(self):
         self.assertEqual(CitationEngine.FOOTNOTE_FONT, "Times New Roman")
         self.assertEqual(CitationEngine.FOOTNOTE_SIZE, 10)
+        self.assertEqual(CitationEngine.DEFAULT_REPEAT_MODE, "auto")
+        self.assertEqual(CitationEngine.VALID_REPEAT_MODES, ("auto", "short"))
 
     def test_citation_skill_is_loaded_into_active_policy(self):
         policy = load_document_format_policy()
@@ -65,6 +95,9 @@ class CitationFormatTests(unittest.TestCase):
         self.assertIn("full note", policy)
         self.assertIn("short note", policy)
         self.assertIn("Ibid.", policy)
+        self.assertIn("citation_repeat_mode", policy)
+        self.assertIn("auto", policy)
+        self.assertIn("short", policy)
         self.assertIn("nama jurnal dicetak miring", policy)
         self.assertIn("Times New Roman 10 pt", policy)
         self.assertIn("tidak memakai `...` atau `…`", policy)

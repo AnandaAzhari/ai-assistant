@@ -13,47 +13,30 @@ AI tidak boleh mengganti struktur hanya karena model lebih menyukai format lain.
 
 ## 1. Makalah
 
-Untuk **makalah**, gunakan pola penomoran seperti contoh referensi pelanggan:
+Default **Makalah** Taqi AI menggunakan BAB untuk bagian utama dan huruf/angka untuk turunannya:
 
-- I. Pendahuluan
+- BAB I — PENDAHULUAN
   - A. Latar Belakang
   - B. Rumusan Masalah
   - C. Tujuan Penulisan
-- II. Tinjauan Pustaka
-  - A. Pengertian Konsep
-  - B. Teori yang Terkait
-    - 1. Teori A
-    - 2. Teori B
-  - C. Kajian Literatur
-- III. Metodologi Penelitian
-  - A. Jenis Penelitian
-  - B. Lokasi dan Waktu Penelitian
-  - C. Teknik Pengumpulan Data
-    - 1. Wawancara
-    - 2. Observasi
-    - 3. Studi Dokumen
-  - D. Analisis Data
-- IV. Hasil Penelitian dan Pembahasan
-  - A. Deskripsi Hasil Penelitian
-  - B. Analisis Data
-    - 1. Analisis Statistik
-      - a. Analisis Regresi
-      - b. Analisis Korelasi
-    - 2. Analisis Deskriptif
-      - a. Analisis Frekuensi
-      - b. Analisis Persentase
-  - C. Pembahasan
-- V. Kesimpulan dan Saran
+  - D. Manfaat Penulisan bila diperlukan
+- BAB II — PEMBAHASAN
+  - A. Subbagian sesuai topik
+  - B. Subbagian sesuai topik
+    - 1. Rincian bila diperlukan
+      - a. Rincian lebih lanjut bila diperlukan
+      - b. Rincian lebih lanjut bila diperlukan
+  - C. Subbagian sesuai topik
+- BAB III — PENUTUP
   - A. Kesimpulan
   - B. Saran
-  - C. Implikasi Penelitian bila diperlukan
-- VI. Daftar Pustaka
+- DAFTAR PUSTAKA
 
-Nama bagian boleh menyesuaikan topik dan kebutuhan tugas, tetapi **pola penomoran default makalah harus tetap**:
+Hierarki default Makalah adalah:
 
-`I, II, III, ...` → `A, B, C, ...` → `1, 2, 3, ...` → `a, b, c, ...`
+`BAB I, BAB II, BAB III, ...` → `A, B, C, ...` → `1, 2, 3, ...` → `a, b, c, ...`
 
-Jangan mengubah makalah menjadi pola `BAB I → 1.1 → 1.1.1` kecuali guru/dosen/sekolah/kampus memang meminta format tersebut.
+Level `1.` dan `a.` tidak wajib muncul. Gunakan hanya jika subbagian memang perlu dipecah lagi. Jangan mengubah Makalah menjadi pola `BAB I → 1.1 → 1.1.1` atau `I → A → 1 → a` tanpa instruksi resmi.
 
 ## 2. Karya Tulis Ilmiah (KTI)
 
@@ -140,9 +123,9 @@ Untuk skripsi, format `BAB I` versus `Bab 1`, letak nomor halaman, margin, gaya 
 
 ## 4. Tiga jenis dokumen tidak boleh dicampur
 
-Default harus dibedakan dengan tegas:
+Default dibedakan dengan tegas:
 
-- **Makalah:** `I → A → 1 → a`
+- **Makalah:** `BAB I → A → 1 → a`
 - **KTI:** `1 → 1.1 → 1.1.1`
 - **Skripsi:** `BAB I/BAB 1 → 1.1 → 1.1.1`
 

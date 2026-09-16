@@ -1,4 +1,4 @@
-"""Document Engine v0.6 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.7 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
@@ -220,7 +220,9 @@ class DocumentEngine:
 
     @staticmethod
     def _heading_left(level: int) -> int:
-        return {1: 0, 2: 360, 3: 720, 4: 1080}.get(level, 0)
+        # Fallback Makalah tanpa pedoman instansi:
+        # H1 0 cm, H2 0 cm, H3 ±0,63 cm, H4 ±1,27 cm.
+        return {1: 0, 2: 0, 3: 360, 4: 720}.get(level, 0)
 
     @staticmethod
     def _styles_xml() -> str:
@@ -321,7 +323,7 @@ class DocumentEngine:
             body.append(self._paragraph("KATA PENGANTAR", align="center", bold=True, size=14, after=220))
             for paragraph in spec.preface:
                 if paragraph.strip():
-                    body.append(self._paragraph(paragraph.strip(), align="both", first_line=709))
+                    body.append(self._paragraph(paragraph.strip(), align="both", first_line=720))
             body.append(self._page_break())
         body.append(self._paragraph("DAFTAR ISI", align="center", bold=True, size=14))
         body.append(self._toc())
@@ -357,7 +359,9 @@ class DocumentEngine:
             )
             for paragraph in section.paragraphs:
                 if paragraph.strip():
-                    body.append(self._paragraph(paragraph.strip(), align="both", first_line=709))
+                    # Isi paragraf selalu kembali ke margin utama, justify, dan
+                    # first-line indent 1,27 cm; tidak mewarisi indent heading.
+                    body.append(self._paragraph(paragraph.strip(), align="both", left=0, first_line=720))
 
         body.append(
             self._section_properties(

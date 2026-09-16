@@ -1,8 +1,8 @@
 """Footnote + Daftar Pustaka Engine untuk dokumen makalah.
 
-Engine ini tidak memakai model AI. Draft cukup memakai marker [[R1]], [[R2]], dst.
-Daftar pustaka dibentuk dari source registry, lalu Microsoft Word COM mengubah marker
-menjadi footnote asli dengan nomor otomatis dan posisi di bawah halaman.
+Default style memakai Chicago Notes & Bibliography karena dokumen Taqi AI memakai
+footnote bernomor di bawah halaman sekaligus daftar pustaka. Engine ini tidak memakai
+model AI. Draft cukup memakai marker [[R1]], [[R2]], dst.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from app.document_engine import DocumentBuildResult, DocumentEngine, DocumentSection, MakalahSpec
+from app.document_engine import DocumentEngine, DocumentSection, MakalahSpec
 from app.source_registry import RegisteredSource
 
 
@@ -31,26 +31,68 @@ class CitationBuildResult:
 
 
 class CitationEngine:
+    STYLE_NAME = "Chicago Notes & Bibliography"
+
     def __init__(self, document_engine: DocumentEngine):
         self.document_engine = document_engine
 
     @property
     def status_text(self) -> str:
-        return "Footnote + Daftar Pustaka Engine siap. Marker sumber: [[R1]], [[R2]], dst."
+        return f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. Marker: [[R1]], [[R2]], dst."
 
     @staticmethod
-    def _author_text(source: RegisteredSource, *, short: bool = False) -> str:
-        authors = [str(name).strip() for name in source.authors if str(name).strip()]
+    def _clean(value: str) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip())
+
+    @classmethod
+    def _split_name(cls, name: str) -> tuple[str, str]:
+        clean = cls._clean(name)
+        parts = clean.split()
+        if len(parts) <= 1:
+            return clean, ""
+        return parts[-1], " ".join(parts[:-1])
+
+    @classmethod
+    def _note_authors(cls, source: RegisteredSource, *, short: bool = False) -> str:
+        authors = [cls._clean(name) for name in source.authors if cls._clean(name)]
         if not authors:
             return "Penulis tidak tercantum"
         if short:
-            return authors[0] + (" dkk." if len(authors) > 1 else "")
-        if len(authors) <= 3:
-            return ", ".join(authors)
-        return ", ".join(authors[:3]) + " dkk."
+            surname, _ = cls._split_name(authors[0])
+            return surname or authors[0]
+        if len(authors) == 1:
+            return authors[0]
+        if len(authors) == 2:
+            return f"{authors[0]} dan {authors[1]}"
+        return f"{authors[0]} dkk."
+
+    @classmethod
+    def _bibliography_authors(cls, source: RegisteredSource) -> str:
+        authors = [cls._clean(name) for name in source.authors if cls._clean(name)]
+        if not authors:
+            return "Penulis tidak tercantum"
+        first_last, first_given = cls._split_name(authors[0])
+        first = f"{first_last}, {first_given}" if first_given else first_last
+        if len(authors) == 1:
+            return first
+        if len(authors) == 2:
+            return f"{first}, dan {authors[1]}"
+        # Untuk daftar pustaka tampilkan sampai 10 penulis; bila sangat banyak ringkas sisanya.
+        if len(authors) <= 10:
+            return f"{first}, " + ", ".join(authors[1:-1]) + f", dan {authors[-1]}"
+        return f"{first}, " + ", ".join(authors[1:7]) + ", dkk."
+
+    @classmethod
+    def _sort_key(cls, source: RegisteredSource) -> tuple[str, int, str]:
+        if source.authors:
+            surname, _ = cls._split_name(source.authors[0])
+            author_key = surname.casefold()
+        else:
+            author_key = "zzzz"
+        return author_key, source.year or 0, cls._clean(source.title).casefold()
 
     @staticmethod
-    def _short_title(title: str, max_words: int = 8) -> str:
+    def _short_title(title: str, max_words: int = 7) -> str:
         words = re.sub(r"\s+", " ", (title or "").strip()).split()
         if len(words) <= max_words:
             return " ".join(words)
@@ -58,42 +100,73 @@ class CitationEngine:
 
     @classmethod
     def footnote_full(cls, source: RegisteredSource) -> str:
-        author = cls._author_text(source)
-        title = (source.title or "Tanpa judul").strip()
-        parts = [f'{author}, “{title}”']
-        if source.venue:
-            parts.append(source.venue.strip())
+        author = cls._note_authors(source)
+        title = cls._clean(source.title) or "Tanpa judul"
+        venue = cls._clean(source.venue)
+        details = ""
+        if source.volume:
+            details += f" {source.volume}"
+        if source.issue:
+            details += f", no. {source.issue}"
         if source.year:
-            parts.append(f"({source.year})")
-        locator = ""
-        if source.doi:
-            locator = f"https://doi.org/{source.doi}"
-        elif source.url:
-            locator = source.url.strip()
-        text = ", ".join(part for part in parts if part)
+            details += f" ({source.year})"
+        if source.pages:
+            details += f": {source.pages}"
+        if venue:
+            text = f'{author}, “{title},” {venue}{details}'
+        else:
+            publisher = cls._clean(source.publisher)
+            if publisher and source.year:
+                text = f"{author}, {title} ({publisher}, {source.year})"
+            elif source.year:
+                text = f"{author}, {title} ({source.year})"
+            else:
+                text = f"{author}, {title}"
+        locator = f"https://doi.org/{source.doi}" if source.doi else cls._clean(source.url)
         if locator:
             text += f", {locator}"
         return text.rstrip(". ") + "."
 
     @classmethod
     def footnote_short(cls, source: RegisteredSource) -> str:
-        author = cls._author_text(source, short=True)
+        author = cls._note_authors(source, short=True)
         title = cls._short_title(source.title)
-        return f'{author}, “{title}”.'
+        return f'{author}, “{title}.”'
 
     @classmethod
     def bibliography_entry(cls, source: RegisteredSource) -> str:
-        author = cls._author_text(source)
-        title = (source.title or "Tanpa judul").strip()
-        text = f'{author}. “{title}.”'
-        if source.venue:
-            text += f" {source.venue.strip()}."
-        if source.year:
-            text += f" {source.year}."
-        if source.doi:
-            text += f" https://doi.org/{source.doi}."
-        elif source.url:
-            text += f" {source.url.strip()}"
+        """Format default Chicago Notes & Bibliography berbasis metadata yang tersedia."""
+        author = cls._bibliography_authors(source)
+        title = cls._clean(source.title) or "Tanpa judul"
+        venue = cls._clean(source.venue)
+        work_type = cls._clean(source.work_type).casefold()
+        locator = f"https://doi.org/{source.doi}" if source.doi else cls._clean(source.url)
+
+        is_article = bool(venue) or "article" in work_type or "journal" in work_type
+        if is_article:
+            text = f'{author}. “{title}.”'
+            if venue:
+                text += f" {venue}"
+            if source.volume:
+                text += f" {source.volume}"
+            if source.issue:
+                text += f", no. {source.issue}"
+            if source.year:
+                text += f" ({source.year})"
+            if source.pages:
+                text += f": {source.pages}"
+            text += "."
+        else:
+            text = f"{author}. {title}."
+            if source.publisher:
+                text += f" {cls._clean(source.publisher)}"
+                if source.year:
+                    text += f", {source.year}"
+                text += "."
+            elif source.year:
+                text += f" {source.year}."
+        if locator:
+            text += f" {locator}."
         return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
@@ -118,19 +191,13 @@ class CitationEngine:
         used_sources = [source_map[ref] for ref in used_refs if ref in source_map]
         if not used_sources:
             return spec, used_refs, []
-
-        # Jangan menambah dua kali bila draft sudah memiliki heading Daftar Pustaka.
         has_bibliography = any(
             re.sub(r"\s+", " ", section.title.strip().casefold()) == "daftar pustaka"
             for section in spec.sections
         )
         if has_bibliography:
             return spec, used_refs, used_sources
-
-        sorted_sources = sorted(
-            used_sources,
-            key=lambda item: ((item.authors[0] if item.authors else "zzzz").casefold(), item.year or 0, item.title.casefold()),
-        )
+        sorted_sources = sorted(used_sources, key=cls._sort_key)
         entries = tuple(cls.bibliography_entry(source) for source in sorted_sources)
         bibliography = DocumentSection("DAFTAR PUSTAKA", entries, 1)
         return replace(spec, sections=spec.sections + (bibliography,)), used_refs, used_sources
@@ -141,18 +208,12 @@ class CitationEngine:
             return "Footnote Word belum diterapkan: fitur ini membutuhkan Windows + Microsoft Word."
         if not sources:
             return ""
-
         citation_file = docx_path.with_suffix(".citations.json")
         payload = [
-            {
-                "ref_id": source.ref_id.upper(),
-                "first": CitationEngine.footnote_full(source),
-                "repeat": CitationEngine.footnote_short(source),
-            }
+            {"ref_id": source.ref_id.upper(), "first": CitationEngine.footnote_full(source), "repeat": CitationEngine.footnote_short(source)}
             for source in sources
         ]
         citation_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-
         env = os.environ.copy()
         env["TAQI_CITATION_DOCX"] = str(docx_path.resolve())
         env["TAQI_CITATION_JSON"] = str(citation_file.resolve())
@@ -204,11 +265,7 @@ try {
         try:
             completed = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                env=env,
+                capture_output=True, text=True, timeout=timeout, check=False, env=env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return f"Footnote Word belum berhasil diterapkan: {exc}"
@@ -217,7 +274,6 @@ try {
                 citation_file.unlink(missing_ok=True)
             except OSError:
                 pass
-
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote.").strip()
             return f"Footnote Word belum berhasil diterapkan: {detail[:420]}"
@@ -228,35 +284,19 @@ try {
         source_ids = {source.ref_id.upper() for source in sources}
         unknown = tuple(ref for ref in used_refs if ref not in source_ids)
         if unknown:
-            return CitationBuildResult(
-                "gagal",
-                used_refs=used_refs,
-                warning="Marker sumber tidak ditemukan di Source Registry: " + ", ".join(unknown),
-            )
-
+            return CitationBuildResult("gagal", used_refs=used_refs, warning="Marker sumber tidak ditemukan di Source Registry: " + ", ".join(unknown))
         try:
             docx_path = self.document_engine.build_docx(cited_spec)
         except (OSError, ValueError) as exc:
             return CitationBuildResult("gagal", used_refs=used_refs, warning=f"Gagal membuat DOCX: {exc}")
-
         footnote_warning = self._apply_word_footnotes(docx_path, used_sources)
         if footnote_warning:
-            return CitationBuildResult(
-                "gagal",
-                docx_path=str(docx_path),
-                used_refs=used_refs,
-                warning=footnote_warning,
-            )
-
+            return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=footnote_warning)
         pdf_path = None
         pdf_warning = ""
         if create_pdf:
             pdf_path, pdf_warning = self.document_engine.convert_to_pdf(docx_path)
-
         return CitationBuildResult(
-            "berhasil",
-            docx_path=str(docx_path),
-            pdf_path=str(pdf_path) if pdf_path else "",
-            used_refs=used_refs,
-            warning=pdf_warning,
+            "berhasil", docx_path=str(docx_path), pdf_path=str(pdf_path) if pdf_path else "",
+            used_refs=used_refs, warning=pdf_warning,
         )

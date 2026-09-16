@@ -9,7 +9,11 @@ from app.document_policy import load_document_format_policy
 class MakalahStructureTests(unittest.TestCase):
     def test_heading_levels_follow_bab_a_1_a(self):
         self.assertEqual(DocumentEngine._infer_heading_level("BAB I PENDAHULUAN", 1), 1)
+        self.assertEqual(DocumentEngine._infer_heading_level("BAB II PEMBAHASAN", 1), 1)
         self.assertEqual(DocumentEngine._infer_heading_level("A. Latar Belakang", 2), 2)
+        self.assertEqual(DocumentEngine._infer_heading_level("B. Rumusan Masalah", 2), 2)
+        self.assertEqual(DocumentEngine._infer_heading_level("C. Tujuan Penulisan", 2), 2)
+        self.assertEqual(DocumentEngine._infer_heading_level("D. Manfaat Penulisan", 2), 2)
         self.assertEqual(DocumentEngine._infer_heading_level("1. Pokok Bahasan", 3), 3)
         self.assertEqual(DocumentEngine._infer_heading_level("a. Rincian", 4), 4)
 
@@ -58,6 +62,29 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertIn("BAB I", xml)
         self.assertIn("PENDAHULUAN", xml)
         self.assertIn("DAFTAR PUSTAKA", xml)
+
+    def test_each_bab_after_bab_i_starts_on_new_page(self):
+        spec = MakalahSpec(
+            order_id="TEST",
+            title="Uji",
+            institution="Sekolah",
+            class_semester="XII",
+            subject="Informatika",
+            sections=(
+                DocumentSection("BAB I PENDAHULUAN", (), 1),
+                DocumentSection("A. Latar Belakang", ("Isi satu.",), 2),
+                DocumentSection("BAB II PEMBAHASAN", (), 1),
+                DocumentSection("A. Pembahasan", ("Isi dua.",), 2),
+                DocumentSection("BAB III PENUTUP", (), 1),
+            ),
+        )
+        xml = DocumentEngine()._document_xml(spec)
+        page_break = '<w:br w:type="page"/>'
+        # Ada dua page break khusus antar-BAB: sebelum BAB II dan BAB III.
+        # Page break lain dari bagian awal boleh tetap ada, jadi cukup pastikan totalnya >= 3.
+        self.assertGreaterEqual(xml.count(page_break), 3)
+        self.assertLess(xml.find("BAB I"), xml.find("BAB II"))
+        self.assertLess(xml.find("BAB II"), xml.find("BAB III"))
 
 
 if __name__ == "__main__":

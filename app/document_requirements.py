@@ -2,8 +2,8 @@
 
 Lima data utama dikumpulkan sebelum AI membuat kerangka makalah. Arahan guru/dosen
 bersifat opsional agar pelanggan tidak dipaksa mengisi hal yang memang tidak ada.
-Parser lokal menangani bentuk umum; Document Agent dapat memakai AI fallback ringan
-untuk bahasa pelanggan yang ambigu/typo tanpa mengganti data yang sudah pasti.
+Parser lokal menangani bentuk umum dan singkatan chat Indonesia; Document Agent dapat
+memakai AI fallback ringan untuk bahasa pelanggan yang tetap ambigu/typo.
 """
 
 from __future__ import annotations
@@ -17,6 +17,26 @@ _EMPTY_TOPIC_VALUES = {
     "belum", "belum ada", "belum ditentukan", "belum punya", "tidak ada", "-",
     "makalah belum", "judul belum", "judul makalah belum", "belum ada judul",
 }
+
+# Normalisasi singkatan chat yang sangat umum. Ini sengaja konservatif supaya kata
+# normal tidak berubah sembarangan. AI fallback tetap tersedia untuk bahasa yang
+# lebih tidak terstruktur.
+_CHAT_REPLACEMENTS = (
+    (r"\bsy\b|\bsya\b", "saya"),
+    (r"\bttg\b", "tentang"),
+    (r"\bkls\b", "kelas"),
+    (r"\bsmstr\b|\bsmt\b", "semester"),
+    (r"\bmapel\b", "mata pelajaran"),
+    (r"\bjml\b", "jumlah"),
+    (r"\bblm\b", "belum"),
+    (r"\bsdh\b", "sudah"),
+    (r"\btdk\b|\bgk\b|\bga\b|\bgak\b|\bnggak\b|\bngga\b", "tidak"),
+    (r"\bdgn\b", "dengan"),
+    (r"\butk\b", "untuk"),
+    (r"\byg\b", "yang"),
+    (r"\bkrn\b", "karena"),
+    (r"\btlg\b", "tolong"),
+)
 
 
 @dataclass
@@ -61,10 +81,22 @@ class MakalahRequirements:
                 missing.append(key)
         return missing
 
+    @staticmethod
+    def _normalize_chat_text(raw: str) -> str:
+        text = re.sub(r"\s+", " ", (raw or "").strip())
+        for pattern, replacement in _CHAT_REPLACEMENTS:
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        # Singkatan satuan halaman hanya diubah bila berada dekat angka, supaya kata
+        # "hal" pada kalimat biasa tidak selalu dianggap "halaman".
+        text = re.sub(r"\b(\d+)\s*(?:hal|hlm)\b", r"\1 halaman", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:hal|hlm)\s*(\d+)\b", r"halaman \1", text, flags=re.IGNORECASE)
+        return text
+
     def update(self, message: str) -> None:
-        raw = (message or "").strip()
-        if not raw:
+        raw_original = (message or "").strip()
+        if not raw_original:
             return
+        raw = self._normalize_chat_text(raw_original)
         lowered = raw.casefold()
 
         if self.target_length == _DEFAULT_LENGTH_SENTINEL:
@@ -127,7 +159,6 @@ class MakalahRequirements:
             "kelas": "class_semester",
             "semester": "class_semester",
             "kelas/semester": "class_semester",
-            "mapel": "subject",
             "mata pelajaran": "subject",
             "mata kuliah": "subject",
             "mata pelajaran/mata kuliah": "subject",
@@ -179,16 +210,18 @@ class MakalahRequirements:
         text = re.sub(r"\s+", " ", (raw or "").strip())
 
         match = re.search(
-            r"\b(\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|kata))\b",
+            r"\b(\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|hal|hlm|kata))\b",
             text,
             re.IGNORECASE,
         )
         if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
+            found = re.sub(r"\s+", " ", match.group(1)).strip()
+            found = re.sub(r"\b(?:hal|hlm|page|pages)\b", "halaman", found, flags=re.IGNORECASE)
+            return found
 
         match = re.search(
             r"\b(?:jumlah\s+|target\s+|sekitar\s+|kira[- ]?kira\s+)?"
-            r"(halaman|page|pages|kata)\s*(?:sebanyak\s*)?(\d+)"
+            r"(halaman|page|pages|hal|hlm|kata)\s*(?:sebanyak\s*)?(\d+)"
             r"(?:\s*[-–—]\s*(\d+))?\b",
             text,
             re.IGNORECASE,
@@ -197,11 +230,11 @@ class MakalahRequirements:
             unit = match.group(1).casefold()
             start = match.group(2)
             end = match.group(3)
-            canonical_unit = "halaman" if unit in {"halaman", "page", "pages"} else "kata"
+            canonical_unit = "halaman" if unit in {"halaman", "page", "pages", "hal", "hlm"} else "kata"
             return f"{start}-{end} {canonical_unit}" if end else f"{start} {canonical_unit}"
 
         match = re.search(
-            r"\b(?:jumlah|target)\s+(halaman|page|pages|kata)\s*[:=]?\s*(\d+)"
+            r"\b(?:jumlah|target)\s+(halaman|page|pages|hal|hlm|kata)\s*[:=]?\s*(\d+)"
             r"(?:\s*[-–—]\s*(\d+))?\b",
             text,
             re.IGNORECASE,
@@ -210,7 +243,7 @@ class MakalahRequirements:
             unit = match.group(1).casefold()
             start = match.group(2)
             end = match.group(3)
-            canonical_unit = "halaman" if unit in {"halaman", "page", "pages"} else "kata"
+            canonical_unit = "halaman" if unit in {"halaman", "page", "pages", "hal", "hlm"} else "kata"
             return f"{start}-{end} {canonical_unit}" if end else f"{start} {canonical_unit}"
         return ""
 
@@ -235,7 +268,6 @@ class MakalahRequirements:
                     break
 
         if not self.class_semester:
-            # `kelas XII semester 2`, `XII semester 2`, atau `kelas XII`.
             match = re.search(
                 r"\b(?:kelas\s+)?([0-9]{1,2}|[ivxlcdm]{1,7})\s*(?:[,/-]?\s*semester\s+([0-9]{1,2}|[ivxlcdm]{1,7}))\b",
                 raw,
@@ -265,7 +297,6 @@ class MakalahRequirements:
                     break
 
         if not self.topic_title:
-            # Toleransi typo umum `tentan`/`tenteng` dari pelanggan.
             match = re.search(
                 r"\b(?:makalah\s+tent(?:ang|an|eng)|tent(?:ang|an|eng)|topik(?:nya)?\s*[:=]?|judul(?:nya)?\s*[:=]?)\s*[\"“]?([^\n?.]+)",
                 raw,
@@ -273,9 +304,10 @@ class MakalahRequirements:
             )
             if match:
                 value = match.group(1).strip(" \t\"”'")
-                # Potong jika sesudah judul pelanggan lanjut memberi field lain.
+                # Pelanggan sering menaruh banyak data dalam satu kalimat. Potong
+                # judul saat setelah koma mulai bagian profil/kelas/mapel/target lain.
                 value = re.split(
-                    r"\s*,\s*(?:jumlah|target|kelas|semester|mata\s+pelajaran|mapel|arahan|instruksi)\b",
+                    r"\s*,\s*(?:saya|aku|anak|jenjang|smk|sma|smp|mts|man|sd|mi|jumlah|target|kelas|semester|mata\s+pelajaran|mata\s+kuliah|arahan|instruksi)\b",
                     value,
                     maxsplit=1,
                     flags=re.IGNORECASE,

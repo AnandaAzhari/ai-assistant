@@ -1,21 +1,24 @@
-"""Document/Makalah Agent v0.8.
+"""Document/Makalah Agent v0.9.
 
 Requirement dasar dan data cover dikumpulkan secara lokal tanpa token AI.
 DeepSeek dipakai hanya untuk pekerjaan bernalar seperti menyusun/revisi outline.
 Research Manager mencari metadata sumber akademik nyata tanpa token model AI.
+Source Registry menyimpan sumber terpilih sebagai R1/R2/... di SQLite.
 Formatting DOCX/PDF tetap ditangani Document Engine lokal.
 """
 
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 
 from app.document_cover import MakalahCoverData
 from app.document_engine import DocumentEngine, demo_spec
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
-from app.research_manager import ResearchManager
+from app.research_manager import ResearchManager, ResearchResult
+from app.source_registry import SourceRegistry
 
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
@@ -49,16 +52,24 @@ class DocumentAgent:
         *,
         engine: DocumentEngine | None = None,
         research: ResearchManager | None = None,
+        registry: SourceRegistry | None = None,
         history_limit: int = 10,
     ):
         self.provider = provider
         self.engine = engine
         self.research = research or ResearchManager.from_env()
+        self.registry = registry or SourceRegistry.from_env()
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
+        self._last_research: ResearchResult | None = None
         self.requirements = MakalahRequirements()
         self.cover = MakalahCoverData()
         self.phase = "requirements"
+        self.source_scope = self._new_source_scope()
+
+    @staticmethod
+    def _new_source_scope() -> str:
+        return "DOCSRC-" + uuid.uuid4().hex[:12].upper()
 
     @property
     def configured(self) -> bool:
@@ -84,16 +95,17 @@ class DocumentAgent:
     def status(self) -> DocumentResult:
         engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
+        registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Requirement dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi. "
                 "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n"
-                + engine_note + "\n" + research_note,
+                + engine_note + "\n" + research_note + "\n" + registry_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n"
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n"
             "Requirement + data cover diproses lokal tanpa token AI; model dipakai untuk outline/draft saja.",
         )
 
@@ -105,7 +117,8 @@ class DocumentAgent:
     def research_status(self) -> DocumentResult:
         if not self.research:
             return DocumentResult("belum_dikonfigurasi", "Research Manager belum tersedia pada runtime ini.")
-        return DocumentResult("siap", self.research.status_text)
+        registry = "Source Registry siap." if self.registry else "Source Registry belum tersedia."
+        return DocumentResult("siap", self.research.status_text + " " + registry)
 
     def research_search(self, raw: str) -> DocumentResult:
         if not self.research:
@@ -120,7 +133,66 @@ class DocumentAgent:
                 "Tulis topik setelah perintah, misalnya: `/research pencemaran lingkungan`, atau mulai sesi makalah dahulu.",
             )
         result = self.research.search(query, limit=10)
+        if result.status == "berhasil":
+            self._last_research = result
         return DocumentResult(result.status, self.research.format_result(result))
+
+    @staticmethod
+    def _parse_source_selection(value: str, total: int) -> list[int]:
+        text = (value or "").strip().casefold()
+        if not text or text in {"all", "semua"}:
+            return list(range(1, total + 1))
+        selected: set[int] = set()
+        for chunk in re.split(r"[,;\s]+", text):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            range_match = re.fullmatch(r"(\d+)\s*[-–]\s*(\d+)", chunk)
+            if range_match:
+                start, end = int(range_match.group(1)), int(range_match.group(2))
+                if start > end:
+                    start, end = end, start
+                selected.update(range(start, end + 1))
+            elif chunk.isdigit():
+                selected.add(int(chunk))
+        return sorted(index for index in selected if 1 <= index <= total)
+
+    def research_save(self, raw: str) -> DocumentResult:
+        if not self.registry:
+            return DocumentResult("belum_dikonfigurasi", "Source Registry belum tersedia.")
+        if not self._last_research or self._last_research.status != "berhasil":
+            return DocumentResult(
+                "membutuhkan_bantuan",
+                "Belum ada hasil research pada sesi ini. Jalankan `/research <topik>` terlebih dahulu.",
+            )
+        parts = raw.split(maxsplit=1)
+        selection_text = parts[1] if len(parts) > 1 else "all"
+        indices = self._parse_source_selection(selection_text, len(self._last_research.sources))
+        if not indices:
+            return DocumentResult(
+                "membutuhkan_bantuan",
+                "Pilihan sumber tidak dikenali. Contoh: `/research_save all` atau `/research_save 1,2,4-6`.",
+            )
+        chosen = [self._last_research.sources[index - 1] for index in indices]
+        added = self.registry.add_sources(self.source_scope, chosen)
+        current = self.registry.list_sources(self.source_scope)
+        if not added:
+            return DocumentResult(
+                "berhasil",
+                "Tidak ada sumber baru yang ditambahkan karena pilihan tersebut sudah ada di Source Registry.\n\n"
+                + self.registry.format_sources(current),
+            )
+        ids = ", ".join(source.ref_id for source in added)
+        return DocumentResult(
+            "berhasil",
+            f"{len(added)} sumber disimpan ke Source Registry sebagai **{ids}**. Proses ini tidak memakai token AI.\n\n"
+            + self.registry.format_sources(current),
+        )
+
+    def source_list(self) -> DocumentResult:
+        if not self.registry:
+            return DocumentResult("belum_dikonfigurasi", "Source Registry belum tersedia.")
+        return DocumentResult("berhasil", self.registry.format_sources(self.registry.list_sources(self.source_scope)))
 
     def build_demo(self) -> DocumentResult:
         if not self.engine_ready:
@@ -143,9 +215,11 @@ class DocumentAgent:
 
     def reset(self) -> DocumentResult:
         self._history.clear()
+        self._last_research = None
         self.requirements.reset()
         self.cover.reset()
         self.phase = "requirements"
+        self.source_scope = self._new_source_scope()
         return DocumentResult(
             "berhasil",
             "Sesi Document Agent direset. Silakan mulai permintaan dokumen baru. "
@@ -219,6 +293,10 @@ class DocumentAgent:
             return self.research_status()
         if command in {"/research", "/riset"}:
             return self.research_search(raw)
+        if command in {"/research_save", "/riset_simpan"}:
+            return self.research_save(raw)
+        if command in {"/sources", "/sumber"}:
+            return self.source_list()
 
         if self.phase == "requirements":
             self.requirements.update(raw)

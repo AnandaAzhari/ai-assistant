@@ -120,7 +120,9 @@ button, textarea, input { font: inherit; }
 }
 .command-palette.hidden { display: none; }
 .command-item { width: 100%; text-align: left; padding: 10px; background: transparent; color: white; }
-.command-item:hover { background: #1c2a49; }
+.command-item:hover,
+.command-item.active,
+.command-item[aria-selected="true"] { background: #1c2a49; outline: 1px solid #5d7dff; }
 .command-item strong, .command-item span { display: block; }
 .command-item span { color: #9ca3af; font-size: 12px; }
 

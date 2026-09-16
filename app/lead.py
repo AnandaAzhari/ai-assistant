@@ -35,7 +35,6 @@ class LeadAgent:
         self.document = document
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
-        """Kompatibilitas command desktop v0.1."""
         command = command.strip().lower()
         if self.desktop is None:
             return Result("tidak_tersedia", ["Desktop Agent belum diaktifkan pada proses ini."])
@@ -49,7 +48,6 @@ class LeadAgent:
 
     @staticmethod
     def _finance_write_succeeded(raw: str, result) -> bool:
-        """Tentukan apakah Finance Agent baru saja mengubah ledger/config lokal."""
         if result.status != "berhasil":
             return False
         text = raw.casefold()
@@ -63,7 +61,6 @@ class LeadAgent:
 
     @staticmethod
     def _topup_needs_source_account(text: str) -> bool:
-        """Top up/transfer wajib punya sumber eksplisit agar tujuan tidak dianggap akun sumber."""
         lowered = text.casefold()
         if not re.search(r"\b(?:top\s*up|transfer|kirim)\b", lowered):
             return False
@@ -71,12 +68,10 @@ class LeadAgent:
         return re.search(source_marker, lowered) is None
 
     def _auto_sync_after_finance_write(self, raw: str, result) -> str:
-        """Auto-sync best effort; kegagalan mirror tidak membatalkan ledger lokal."""
         if not self._finance_write_succeeded(raw, result):
             return ""
         if self.sheets_sync is None or not self.sheets_sync.configured:
             return ""
-
         sync_result = self.sheets_sync.sync_now(timeout=8)
         if sync_result.status == "berhasil":
             return "\n\nGoogle Sheets: tersinkron otomatis."
@@ -86,7 +81,6 @@ class LeadAgent:
         )
 
     def handle_admin_message(self, message: str) -> LeadReply:
-        """Router minimum untuk channel admin seperti Web Admin atau Telegram."""
         raw = (message or "").strip()
         if not raw:
             return LeadReply("lead", "membutuhkan_bantuan", "Pesan kosong. Ketik /bantuan untuk melihat perintah awal.")
@@ -103,6 +97,7 @@ class LeadAgent:
                 document_note = f"siap ({self.document.model_label})"
             else:
                 document_note = "menunggu DeepSeek API key"
+            engine_note = "siap" if self.document and self.document.engine_ready else "belum tersedia"
             return LeadReply(
                 "lead",
                 "berhasil",
@@ -117,13 +112,15 @@ class LeadAgent:
                 "/sync_status - status Google Sheets Sync\n"
                 "/sync - sinkronkan ledger ke Google Sheets secara manual\n"
                 "/dokumen_status - cek Document Agent\n"
+                "/dokumen_engine_status - cek mesin DOCX/PDF lokal\n"
+                "/dokumen_demo - buat DOCX/PDF demo tanpa token AI\n"
                 "/makalah <permintaan> - bicara dengan Document Agent\n"
                 "/dokumen_baru - reset konteks percakapan dokumen\n"
-                "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n"
-                "Kamu juga boleh menulis bahasa biasa, misalnya: Saya mau membuat makalah tentang pencemaran lingkungan untuk kelas 8.\n\n"
+                "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n\n"
                 f"Finance runtime: {finance_note}.\n"
                 f"Google Sheets Sync: {sync_note}.\n"
-                f"Document Agent: {document_note}."
+                f"Document Agent: {document_note}.\n"
+                f"Document Engine: {engine_note}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
@@ -135,12 +132,14 @@ class LeadAgent:
                 document_status = f"siap ({self.document.model_label})"
             else:
                 document_status = "tersedia, menunggu API key"
+            engine_status = "siap" if self.document and self.document.engine_ready else "belum tersedia"
             return LeadReply(
                 "lead",
                 "berhasil",
                 "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\n"
                 "Router Lead: aturan minimum\nLead AI model: belum dihubungkan\n"
                 f"Document Agent: {document_status}\n"
+                f"Document Engine: {engine_status}\n"
                 f"Finance runtime: {finance_status}\nGoogle Sheets Sync: {sync_status}"
             )
 
@@ -148,6 +147,12 @@ class LeadAgent:
             if self.document is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.status()
+            return LeadReply("document", result.status, result.text)
+
+        if command in {"/dokumen_engine_status", "/dokumen_demo"}:
+            if self.document is None:
+                return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
+            result = self.document.handle(raw)
             return LeadReply("document", result.status, result.text)
 
         if command in {"/dokumen_baru", "/makalah_baru"}:
@@ -202,11 +207,7 @@ class LeadAgent:
         )
         if command in finance_commands or any(word in text for word in finance_words):
             if self.finance is None:
-                return LeadReply(
-                    "finance",
-                    "terdeteksi",
-                    "Saya mengenali ini sebagai tugas Finance Agent, tetapi Finance runtime belum diaktifkan."
-                )
+                return LeadReply("finance", "terdeteksi", "Saya mengenali ini sebagai tugas Finance Agent, tetapi Finance runtime belum diaktifkan.")
             if self._topup_needs_source_account(text) and any(word in text for word in ("pengeluaran", "catat keluar", "beli", "belanja")):
                 return LeadReply(
                     "finance",

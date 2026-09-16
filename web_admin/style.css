@@ -139,7 +139,23 @@ button { color: inherit; }
   border: 1px solid transparent;
   border-radius: 12px;
 }
+.status-item {
+  position: relative;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
 .status-item:hover { background: #121d33; border-color: #1e2e4c; }
+.status-item.active {
+  background: linear-gradient(90deg, rgba(109, 124, 255, .18), rgba(109, 124, 255, .055));
+  border-color: rgba(109, 124, 255, .38);
+  box-shadow: inset 3px 0 0 var(--accent), 0 8px 24px rgba(24, 34, 80, .12);
+}
+.status-item.active .status-icon {
+  background: linear-gradient(145deg, rgba(109, 124, 255, .42), rgba(139, 92, 246, .24));
+  border: 1px solid rgba(139, 150, 255, .34);
+  color: #ffffff;
+}
+.status-item.active .status-copy strong { color: #ffffff; }
+.status-item.active .status-copy span { color: #b7c3dd; }
 .status-icon {
   width: 31px;
   height: 31px;
@@ -173,6 +189,7 @@ button { color: inherit; }
 }
 .status-dot.ok { background: var(--success); box-shadow: 0 0 0 4px rgba(110, 231, 183, .08); }
 .status-dot.warn { background: var(--warning); box-shadow: 0 0 0 4px rgba(251, 191, 36, .08); }
+.status-item.active .status-dot.ok { box-shadow: 0 0 0 4px rgba(110, 231, 183, .12), 0 0 12px rgba(110, 231, 183, .26); }
 
 .nav-placeholder { color: #6f7f9d; font-size: 13px; }
 .nav-placeholder > span:first-child { width: 31px; text-align: center; font-size: 18px; }
@@ -221,6 +238,7 @@ button { color: inherit; }
   background: linear-gradient(145deg, rgba(109,124,255,.25), rgba(139,92,246,.12));
   color: #dfe5ff;
   font-weight: 900;
+  box-shadow: 0 8px 26px rgba(67, 74, 180, .1);
 }
 .active-context h1 {
   margin: 0;
@@ -318,9 +336,16 @@ button { color: inherit; }
 .bubble-content ol { margin: 8px 0 12px; padding-left: 24px; }
 .bubble-content li + li { margin-top: 5px; }
 .model-meta {
+  display: inline-flex;
+  width: auto;
   margin-top: 13px !important;
+  padding: 4px 8px;
+  border: 1px solid rgba(83, 104, 153, .28);
+  border-radius: 999px;
+  background: rgba(16, 26, 44, .62);
   color: #71809d;
   font-size: 10px;
+  line-height: 1.2;
   letter-spacing: .01em;
 }
 

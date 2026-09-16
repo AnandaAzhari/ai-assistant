@@ -1,7 +1,7 @@
-"""Pengumpul requirement makalah lokal.
+"""Pengumpul data awal makalah secara lokal tanpa token AI.
 
-Tujuan utama modul ini adalah mengumpulkan enam data wajib tanpa memanggil model AI
-pada setiap pesan. Model baru dipakai setelah requirement dasar lengkap.
+Lima data utama dikumpulkan sebelum AI membuat kerangka makalah. Arahan guru/dosen
+bersifat opsional agar pelanggan tidak dipaksa mengisi hal yang memang tidak ada.
 """
 
 from __future__ import annotations
@@ -23,13 +23,21 @@ class MakalahRequirements:
     target_length: str = ""
 
     FIELD_LABELS = {
-        "institution_level": "Jenjang/instansi",
+        "institution_level": "Jenjang",
         "class_semester": "Kelas/semester",
         "subject": "Mata pelajaran/mata kuliah",
         "topic_title": "Topik/judul",
-        "teacher_instructions": "Instruksi guru/dosen",
-        "target_length": "Target panjang",
+        "teacher_instructions": "Arahan guru/dosen",
+        "target_length": "Jumlah halaman/kata",
     }
+
+    REQUIRED_FIELDS = (
+        "institution_level",
+        "class_semester",
+        "subject",
+        "topic_title",
+        "target_length",
+    )
 
     def reset(self) -> None:
         for item in fields(self):
@@ -41,7 +49,7 @@ class MakalahRequirements:
 
     def missing_fields(self) -> list[str]:
         missing: list[str] = []
-        for key in self.FIELD_LABELS:
+        for key in self.REQUIRED_FIELDS:
             value = getattr(self, key)
             if not value or value == _DEFAULT_LENGTH_SENTINEL:
                 missing.append(key)
@@ -53,8 +61,6 @@ class MakalahRequirements:
             return
         lowered = raw.casefold()
 
-        # Jika pelanggan sudah menyatakan tidak ada ketentuan panjang, tawarkan
-        # default 8-12 halaman dan tunggu persetujuan eksplisit.
         if self.target_length == _DEFAULT_LENGTH_SENTINEL:
             if re.search(r"\b(?:setuju|boleh|oke|ok|ya|iya|sip)\b", lowered):
                 self.target_length = "8-12 halaman"
@@ -83,9 +89,15 @@ class MakalahRequirements:
             "instruksi guru": "teacher_instructions",
             "instruksi dosen": "teacher_instructions",
             "instruksi guru/dosen": "teacher_instructions",
+            "arahan": "teacher_instructions",
+            "arahan guru": "teacher_instructions",
+            "arahan dosen": "teacher_instructions",
+            "arahan guru/dosen": "teacher_instructions",
             "target": "target_length",
             "target panjang": "target_length",
             "panjang": "target_length",
+            "jumlah halaman": "target_length",
+            "jumlah kata": "target_length",
         }
         for line in raw.splitlines():
             match = re.match(r"^\s*(?:[-*>•]\s*)?([^:]{2,40})\s*:\s*(.+?)\s*$", line)
@@ -99,8 +111,10 @@ class MakalahRequirements:
             value_lower = value.casefold()
             if key == "topic_title" and value_lower in {"belum ada", "belum ditentukan", "tidak ada", "-"}:
                 continue
-            if key == "teacher_instructions" and value_lower in {"tidak ada", "tidak ada instruksi", "-"}:
-                value = "Tidak ada"
+            if key == "teacher_instructions" and value_lower in {
+                "tidak ada", "tidak ada instruksi", "tidak ada arahan", "-", "skip"
+            }:
+                value = "Tidak ada arahan khusus"
             if key == "target_length" and re.search(r"tidak ada|belum ada|belum ditentukan", value_lower):
                 setattr(self, key, _DEFAULT_LENGTH_SENTINEL)
                 continue
@@ -169,9 +183,7 @@ class MakalahRequirements:
 
         if not self.teacher_instructions:
             if re.search(r"\b(?:tidak ada|tanpa)\s+(?:instruksi|arahan|ketentuan)(?:\s+khusus)?\b", lowered):
-                self.teacher_instructions = "Tidak ada"
-            elif lowered.strip() == "tidak ada" and self.missing_fields() == ["teacher_instructions"]:
-                self.teacher_instructions = "Tidak ada"
+                self.teacher_instructions = "Tidak ada arahan khusus"
 
         if not self.target_length:
             length = self._extract_length(raw)
@@ -183,32 +195,33 @@ class MakalahRequirements:
     def question_text(self) -> str:
         missing = self.missing_fields()
         if not missing:
-            return "Requirement dasar makalah sudah lengkap."
+            return "Data utama makalah sudah lengkap."
 
         if self.target_length == _DEFAULT_LENGTH_SENTINEL and missing == ["target_length"]:
-            return "Tidak ada ketentuan panjang. Saya sarankan **8–12 halaman** untuk makalah standar. Apakah Anda setuju?"
+            return "Kalau tidak ada ketentuan jumlah halaman, saya sarankan **8–12 halaman**. Apakah boleh?"
 
         questions = {
-            "institution_level": "Jenjang/instansi (mis. SD, SMP/MTs, SMA/MA/MAN, SMK, atau perguruan tinggi)",
-            "class_semester": "Kelas/semester",
-            "subject": "Mata pelajaran/mata kuliah",
-            "topic_title": "Topik/judul",
-            "teacher_instructions": "Instruksi guru/dosen (jika tidak ada, tulis `tidak ada`)",
-            "target_length": "Target panjang (jumlah halaman/kata; jika tidak ada ketentuan, tulis `tidak ada ketentuan`)",
+            "institution_level": "Jenjang sekolah/kampus (mis. SMP, SMA, SMK, atau kuliah)",
+            "class_semester": "Kelas atau semester",
+            "subject": "Mata pelajaran atau mata kuliah",
+            "topic_title": "Topik atau judul makalah",
+            "target_length": "Jumlah halaman atau kata yang diinginkan",
         }
-        lines = ["Sebelum membuat outline, saya masih perlu data berikut:"]
+        lines = ["Sebelum saya buat kerangka makalah, saya masih perlu:"]
         for index, key in enumerate(missing, start=1):
             lines.append(f"{index}. **{questions[key]}**")
-        lines.append("\nAnda boleh menjawab semuanya sekaligus. Tahap ini diproses lokal tanpa memakai token AI.")
+        lines.append("\nBoleh dijawab sekaligus.")
+        lines.append("Kalau ada arahan khusus dari guru/dosen, boleh dikirim juga **(opsional)**.")
         return "\n".join(lines)
 
     def structured_text(self) -> str:
         target = "8-12 halaman" if self.target_length == _DEFAULT_LENGTH_SENTINEL else self.target_length
+        teacher_note = self.teacher_instructions or "Tidak ada arahan khusus"
         return (
-            f"Jenjang/instansi: {self.institution_level}\n"
+            f"Jenjang: {self.institution_level}\n"
             f"Kelas/semester: {self.class_semester}\n"
             f"Mata pelajaran/mata kuliah: {self.subject}\n"
             f"Topik/judul: {self.topic_title}\n"
-            f"Instruksi guru/dosen: {self.teacher_instructions}\n"
-            f"Target panjang: {target}"
+            f"Arahan guru/dosen: {teacher_note}\n"
+            f"Jumlah halaman/kata: {target}"
         )

@@ -3,51 +3,109 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
+  <meta name="theme-color" content="#080d1a">
   <title>Taqi AI Admin</title>
+  <link rel="icon" href="/taqi-ai.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">AI ASSISTANT</p>
-        <h1>Taqi AI Admin</h1>
-      </div>
-      <div id="onlineBadge" class="badge badge-warn">Memeriksa...</div>
-    </header>
-
-    <section class="status-grid" id="statusGrid" aria-label="Status sistem"></section>
-
-    <section class="chat-card">
-      <div id="messages" class="messages" aria-live="polite">
-        <article class="bubble assistant">
-          <strong>Lead Agent</strong>
-          <p>Web Admin siap. Ketik <code>/</code> untuk melihat perintah atau tekan mikrofon untuk berbicara.</p>
-        </article>
+  <div id="appShell" class="app-shell">
+    <aside id="sidebar" class="sidebar" aria-label="Navigasi Taqi AI">
+      <div class="brand-row">
+        <div class="brand-lockup">
+          <img class="brand-logo" src="/taqi-ai.svg" alt="Logo Taqi AI">
+          <div>
+            <strong>Taqi AI</strong>
+            <span>Admin Console</span>
+          </div>
+        </div>
+        <button id="sidebarClose" class="ghost-icon mobile-only" type="button" aria-label="Tutup sidebar">×</button>
       </div>
 
-      <div id="commandPalette" class="command-palette hidden" role="listbox" aria-label="Slash command"></div>
+      <button id="newChatButton" class="new-chat-button" type="button">
+        <span aria-hidden="true">＋</span>
+        <span>Chat baru</span>
+      </button>
 
-      <form id="chatForm" class="composer">
-        <textarea id="messageInput" rows="1" autocomplete="off" placeholder="Ketik pesan atau /perintah..." aria-label="Pesan"></textarea>
-        <button id="micButton" class="icon-button" type="button" title="Bicara" aria-label="Mulai voice input">🎙️</button>
-        <button class="send-button" type="submit">Kirim</button>
-      </form>
+      <nav class="sidebar-nav" aria-label="Agent dan layanan">
+        <section class="nav-section">
+          <p class="nav-heading">AGENTS</p>
+          <div id="agentStatusList" class="status-list" aria-label="Status agent"></div>
+        </section>
 
-      <div class="voice-row">
-        <span id="voiceStatus">Voice: siap diperiksa</span>
-        <span>Enter = kirim · Shift+Enter = baris baru</span>
-        <label><input id="speakReplies" type="checkbox"> Bacakan jawaban</label>
+        <section class="nav-section">
+          <p class="nav-heading">SERVICES</p>
+          <div id="serviceStatusList" class="status-list" aria-label="Status layanan"></div>
+        </section>
+
+        <section class="nav-section nav-coming-soon">
+          <p class="nav-heading">WORKSPACE</p>
+          <div class="nav-placeholder"><span>▦</span><span>AI Office</span><small>segera</small></div>
+          <div class="nav-placeholder"><span>⌁</span><span>Documents</span><small>segera</small></div>
+          <div class="nav-placeholder"><span>◫</span><span>Orders</span><small>segera</small></div>
+        </section>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span>Web Admin v0.3</span>
+        <span>Local runtime</span>
       </div>
-    </section>
+    </aside>
 
-    <footer>
-      <span>Web Admin v0.2</span>
-      <span>Default: localhost</span>
-    </footer>
-  </main>
+    <button id="sidebarScrim" class="sidebar-scrim" type="button" aria-label="Tutup sidebar"></button>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="sidebarToggle" class="ghost-icon menu-button" type="button" aria-label="Buka atau tutup sidebar" aria-expanded="true">☰</button>
+          <div class="active-context">
+            <div class="active-agent-mark" id="activeAgentMark">T</div>
+            <div>
+              <h1 id="activeAgentName">Taqi AI Admin</h1>
+              <p id="activeAgentSubtitle">Smart Business Assistant</p>
+            </div>
+          </div>
+        </div>
+        <div id="onlineBadge" class="badge badge-warn">Memeriksa...</div>
+      </header>
+
+      <section class="chat-card" aria-label="Percakapan">
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="empty-brand" aria-hidden="true">
+            <img src="/taqi-ai.svg" alt="">
+          </div>
+          <article class="bubble assistant">
+            <div class="bubble-heading">
+              <span class="bubble-avatar">L</span>
+              <strong>Lead Agent</strong>
+            </div>
+            <div class="bubble-content">
+              <p>Web Admin siap. Ketik <code>/</code> untuk melihat perintah atau tekan mikrofon untuk berbicara.</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="composer-zone">
+          <div id="commandPalette" class="command-palette hidden" role="listbox" aria-label="Slash command"></div>
+
+          <form id="chatForm" class="composer">
+            <textarea id="messageInput" rows="1" autocomplete="off" placeholder="Ketik pesan atau /perintah..." aria-label="Pesan"></textarea>
+            <button id="micButton" class="icon-button" type="button" title="Bicara" aria-label="Mulai voice input">🎙️</button>
+            <button class="send-button" type="submit" aria-label="Kirim pesan">
+              <span>Kirim</span><span class="send-arrow" aria-hidden="true">↑</span>
+            </button>
+          </form>
+
+          <div class="voice-row">
+            <span id="voiceStatus">Voice: siap diperiksa</span>
+            <span class="keyboard-hint">Enter = kirim · Shift+Enter = baris baru</span>
+            <label><input id="speakReplies" type="checkbox"> Bacakan jawaban</label>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <script src="/app.js" defer></script>
   <script src="/voice.js" defer></script>

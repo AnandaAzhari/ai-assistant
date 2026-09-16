@@ -1,10 +1,11 @@
-"""Document/Makalah Agent v1.4.
+"""Document/Makalah Agent v1.5.
 
 Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
 AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
 yang kemungkinan disebut tetapi belum terbaca. DeepSeek dipakai untuk kerangka dan
 isi makalah. Struktur default dikunci oleh policies/document_format_policy.md;
 instruksi guru/dosen/sekolah/kampus dapat mengoverride bagian yang relevan.
+Document Preferences memproses preferensi pelanggan secara lokal per order/scope.
 Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki,
 daftar pustaka, DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
 """
@@ -21,6 +22,11 @@ from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
 from app.document_intake import IntakeInterpreter
 from app.document_policy import load_document_format_policy
+from app.document_preferences import (
+    DocumentPreferences,
+    DocumentPreferenceStore,
+    PreferenceParseResult,
+)
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
@@ -63,6 +69,7 @@ class DocumentAgent:
         engine: DocumentEngine | None = None,
         research: ResearchManager | None = None,
         registry: SourceRegistry | None = None,
+        preference_store: DocumentPreferenceStore | None = None,
         history_limit: int = 10,
     ):
         self.provider = provider
@@ -72,6 +79,7 @@ class DocumentAgent:
         self.draft_generator = DraftGenerator(provider)
         self.intake_interpreter = IntakeInterpreter(provider)
         self.citation_engine = CitationEngine(engine) if engine is not None else None
+        self.preference_store = preference_store or DocumentPreferenceStore.from_env()
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
         self._last_research: ResearchResult | None = None
@@ -83,6 +91,7 @@ class DocumentAgent:
         self.cover = MakalahCoverData()
         self.phase = "requirements"
         self.source_scope = os.environ.get("DOCUMENT_SOURCE_SCOPE", "DOCSRC-ADMIN-DEFAULT").strip() or "DOCSRC-ADMIN-DEFAULT"
+        self.preferences = self.preference_store.load(self.source_scope)
 
     @property
     def configured(self) -> bool:
@@ -109,6 +118,10 @@ class DocumentAgent:
     def draft_spec(self) -> MakalahSpec | None:
         return self._draft_spec
 
+    @property
+    def citation_repeat_mode(self) -> str:
+        return self.preferences.citation_repeat_mode
+
     def status(self) -> DocumentResult:
         engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
@@ -116,16 +129,17 @@ class DocumentAgent:
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
         intake_note = "Pemahaman pesan pelanggan: hybrid lokal + AI fallback" if self.configured else "Pemahaman pesan pelanggan: lokal"
         policy_note = "Format makalah: policy Markdown aktif"
+        preference_note = f"Preferensi sitasi: {self.preferences.citation_repeat_mode}"
         final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
-                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + policy_note + "\n" + final_note,
+                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + policy_note + "\n" + preference_note + "\n" + final_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{policy_note}.\n{final_note}.\n"
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{policy_note}.\n{preference_note}.\n{final_note}.\n"
             "Parser lokal dipakai lebih dulu; AI fallback hanya membantu memahami pesan pelanggan yang ambigu.",
         )
 
@@ -223,6 +237,8 @@ class DocumentAgent:
         self._final_pdf_path = ""
         self.requirements.reset()
         self.cover.reset()
+        self.preference_store.reset(self.source_scope)
+        self.preferences = DocumentPreferences()
         self.phase = "requirements"
         if self.registry:
             self.registry.clear_scope(self.source_scope)
@@ -250,6 +266,26 @@ class DocumentAgent:
         result = self.intake_interpreter.interpret(raw, self.requirements.structured_text())
         if result.status == "berhasil":
             self.requirements.apply_ai_values(result.values)
+
+    def _apply_preferences(self, raw: str) -> PreferenceParseResult:
+        updated, result = self.preference_store.apply_message(self.source_scope, raw)
+        self.preferences = updated
+        if result.changed and self.phase == "final_ready":
+            self._final_docx_path = ""
+            self._final_pdf_path = ""
+            self.phase = "draft_ready"
+        return result
+
+    @staticmethod
+    def _preference_only_message(raw: str) -> bool:
+        clean = re.sub(r"\s+", " ", (raw or "").strip().casefold())
+        workflow_or_data_terms = (
+            "halaman", "kelas", "semester", "mapel", "mata pelajaran", "mata kuliah",
+            "topik", "judul", "tentang", "tema", "cover", "nama", "sekolah", "kampus",
+            "universitas", "smk", "sma", "smp", "sd", "setuju", "sesuai", "lanjut",
+            "buat file", "buat word", "buat pdf", "word", "pdf",
+        )
+        return not any(term in clean for term in workflow_or_data_terms)
 
     def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
         messages = [
@@ -371,7 +407,12 @@ class DocumentAgent:
         if not sources:
             return DocumentResult("membutuhkan_sumber", "Daftar sumber kosong, sehingga catatan kaki dan daftar pustaka belum bisa dibuat.")
 
-        result = self.citation_engine.build(self._draft_spec, sources, create_pdf=True)
+        result = self.citation_engine.build(
+            self._draft_spec,
+            sources,
+            create_pdf=True,
+            citation_repeat_mode=self.preferences.citation_repeat_mode,
+        )
         if result.status != "berhasil":
             lines = ["File makalah belum berhasil dibuat."]
             if result.docx_path:
@@ -394,6 +435,10 @@ class DocumentAgent:
             lines.append("PDF: belum berhasil dibuat otomatis, tetapi file Word sudah tersedia.")
         if result.used_refs:
             lines.append("Sumber yang benar-benar dipakai: " + ", ".join(result.used_refs))
+        if self.preferences.citation_repeat_mode == "short":
+            lines.append("Pengulangan catatan kaki: tanpa Ibid.; memakai short note.")
+        else:
+            lines.append("Pengulangan catatan kaki: Ibid. boleh dipakai bila sumber langsung berurutan.")
         lines.append("Catatan kaki dan daftar pustaka dibuat otomatis dari sumber yang dipakai di isi makalah.")
         if result.warning:
             lines.append("Catatan: " + result.warning)
@@ -434,6 +479,18 @@ class DocumentAgent:
             return self.generate_draft()
         if command in {"/final", "/buat_file", "/word_pdf"}:
             return self.build_final()
+
+        preference_result = self._apply_preferences(raw)
+        if preference_result.ambiguous:
+            return DocumentResult("needs_preference", preference_result.message)
+        if preference_result.matched and self._preference_only_message(raw):
+            extra = ""
+            if preference_result.changed and self.phase == "draft_ready" and not self._final_docx_path:
+                extra = "\nPreferensi ini akan dipakai saat file Word/PDF dibuat."
+            return DocumentResult(
+                "preference_updated",
+                preference_result.message + extra,
+            )
 
         if self.phase == "requirements":
             self.requirements.update(raw)

@@ -39,17 +39,37 @@ const agentMeta = {
   taqidesk: {name: 'TaqiDesk Agent', mark: 'T', subtitle: 'Operasional dan order'}
 };
 
+const statusTargetMap = {
+  'Lead Agent': 'lead',
+  'Finance Agent': 'finance',
+  'Document Agent': 'document',
+  'TaqiDesk': 'docutech',
+  'TaqiDesk Agent': 'docutech'
+};
+
 let selectedCommandIndex = -1;
+let activeAgentTarget = 'lead';
 
 function metaFor(target = 'lead') {
   return agentMeta[target] || {name: 'Taqi AI', mark: 'T', subtitle: 'Smart Business Assistant'};
 }
 
+function updateSidebarActive() {
+  for (const item of agentStatusList.querySelectorAll('.status-item')) {
+    const active = item.dataset.agentTarget === activeAgentTarget;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'true');
+    else item.removeAttribute('aria-current');
+  }
+}
+
 function setActiveAgent(target) {
-  const meta = metaFor(target);
+  activeAgentTarget = agentMeta[target] ? target : 'lead';
+  const meta = metaFor(activeAgentTarget);
   activeAgentName.textContent = meta.name;
   activeAgentSubtitle.textContent = meta.subtitle;
   activeAgentMark.textContent = meta.mark;
+  updateSidebarActive();
 }
 
 function appendInline(parent, text) {
@@ -300,6 +320,8 @@ function statusIcon(name) {
 function statusItem(item) {
   const row = document.createElement('div');
   row.className = 'status-item';
+  const target = statusTargetMap[item.name];
+  if (target) row.dataset.agentTarget = target;
 
   const icon = document.createElement('span');
   icon.className = 'status-icon';
@@ -334,6 +356,7 @@ async function loadStatus() {
       const isService = ['Google Sheets', 'Telegram'].includes(item.name);
       (isService ? serviceStatusList : agentStatusList).appendChild(statusItem(item));
     }
+    updateSidebarActive();
   } catch {
     onlineBadge.textContent = '● Offline';
     onlineBadge.className = 'badge badge-warn';
@@ -394,5 +417,6 @@ if (!isMobileSidebar() && localStorage.getItem('taqiSidebarCollapsed') === '1') 
 }
 
 window.taqiSendMessage = sendMessage;
+setActiveAgent('lead');
 loadStatus();
 resetTextareaHeight();

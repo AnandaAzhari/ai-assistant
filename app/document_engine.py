@@ -196,7 +196,6 @@ class DocumentEngine:
                 if paragraph.strip():
                     body.append(self._paragraph(paragraph.strip(), align="both"))
 
-        # A4: 11906 x 16838 twips. Margin default makalah: kiri 4 cm, atas/kanan/bawah 3 cm.
         body.append(
             '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
             '<w:pgMar w:top="1701" w:right="1701" w:bottom="1701" w:left="2268" w:header="720" w:footer="720" w:gutter="0"/>'
@@ -228,28 +227,37 @@ class DocumentEngine:
 
     @staticmethod
     def convert_to_pdf(docx_path: Path, timeout: int = 75) -> tuple[Path | None, str]:
-        """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia."""
+        """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia.
+
+        Hindari overload Documents.Open dengan parameter boolean karena PowerShell COM
+        binder pada sebagian instalasi Word gagal mengubah System.Boolean ke Object.
+        """
         if os.name != "nt":
             return None, "PDF belum dibuat: konversi Word COM hanya tersedia di Windows pada tahap ini."
 
         pdf_path = docx_path.with_suffix(".pdf")
         script = r'''
 $ErrorActionPreference = 'Stop'
-$src = $args[0]
-$dst = $args[1]
+$src = [System.IO.Path]::GetFullPath([string]$args[0])
+$dst = [System.IO.Path]::GetFullPath([string]$args[1])
 $word = $null
 $doc = $null
 try {
+  if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
   $word = New-Object -ComObject Word.Application
   $word.Visible = $false
   $word.DisplayAlerts = 0
-  $doc = $word.Documents.Open($src, $false, $true)
+
+  # Memakai overload satu argumen paling kompatibel dengan PowerShell COM binder.
+  $doc = $word.Documents.Open([string]$src)
   try { $doc.Fields.Update() | Out-Null } catch {}
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
-  $doc.SaveAs2($dst, 17)
+
+  # wdExportFormatPDF = 17. ExportAsFixedFormat tidak mengubah DOCX sumber.
+  $doc.ExportAsFixedFormat([string]$dst, 17)
 } finally {
-  if ($doc -ne $null) { $doc.Close($false) }
-  if ($word -ne $null) { $word.Quit() }
+  if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
+  if ($word -ne $null) { try { $word.Quit() } catch {} }
 }
 '''
         try:
@@ -268,7 +276,7 @@ try {
 
         if completed.returncode != 0 or not pdf_path.is_file():
             detail = (completed.stderr or completed.stdout or "Microsoft Word tidak tersedia.").strip()
-            return None, f"PDF belum dibuat otomatis: {detail[:240]}"
+            return None, f"PDF belum dibuat otomatis: {detail[:360]}"
         return pdf_path, ""
 
     def build(self, spec: MakalahSpec, *, create_pdf: bool = True) -> DocumentBuildResult:

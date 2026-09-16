@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from app.desktop import DesktopAgent, Result
 from app.finance import FinanceService
+from app.google_sheets_sync import GoogleSheetsSync
 
 
 @dataclass(frozen=True)
@@ -18,9 +19,15 @@ class LeadReply:
 
 
 class LeadAgent:
-    def __init__(self, desktop: DesktopAgent | None = None, finance: FinanceService | None = None):
+    def __init__(
+        self,
+        desktop: DesktopAgent | None = None,
+        finance: FinanceService | None = None,
+        sheets_sync: GoogleSheetsSync | None = None,
+    ):
         self.desktop = desktop
         self.finance = finance
+        self.sheets_sync = sheets_sync
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         """Kompatibilitas command desktop v0.1."""
@@ -46,6 +53,7 @@ class LeadAgent:
 
         if command in {"/start", "/bantuan", "/help"} or text in {"bantuan", "help"}:
             finance_note = "aktif" if self.finance is not None else "belum diaktifkan"
+            sync_note = "siap" if self.sheets_sync and self.sheets_sync.configured else "belum dikonfigurasi"
             return LeadReply(
                 "lead",
                 "berhasil",
@@ -57,19 +65,34 @@ class LeadAgent:
                 "/kategori - kategori yang sudah dipelajari\n"
                 "/hari_ini - ringkasan hari ini\n"
                 "/bulan_ini - ringkasan bulan ini\n"
+                "/sync_status - status Google Sheets Sync\n"
+                "/sync - sinkronkan ledger ke Google Sheets\n"
                 "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n\n"
-                f"Finance runtime: {finance_note}."
+                f"Finance runtime: {finance_note}.\nGoogle Sheets Sync: {sync_note}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
             finance_status = "aktif" if self.finance is not None else "belum diaktifkan"
+            sync_status = "siap" if self.sheets_sync and self.sheets_sync.configured else "belum dikonfigurasi"
             return LeadReply(
                 "lead",
                 "berhasil",
                 "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\n"
                 "Router: aturan minimum\nAI model: belum dihubungkan\n"
-                f"Finance runtime: {finance_status}"
+                f"Finance runtime: {finance_status}\nGoogle Sheets Sync: {sync_status}"
             )
+
+        if command == "/sync_status":
+            if self.sheets_sync is None:
+                return LeadReply("finance", "belum_dikonfigurasi", "Google Sheets Sync belum tersedia pada runtime ini.")
+            result = self.sheets_sync.status()
+            return LeadReply("finance", result.status, result.text)
+
+        if command == "/sync":
+            if self.sheets_sync is None:
+                return LeadReply("finance", "belum_dikonfigurasi", "Google Sheets Sync belum tersedia pada runtime ini.")
+            result = self.sheets_sync.sync_now()
+            return LeadReply("finance", result.status, result.text)
 
         finance_commands = {
             "/saldo", "/akun", "/kategori", "/hari_ini", "/bulan_ini",

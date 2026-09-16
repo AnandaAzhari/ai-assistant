@@ -22,12 +22,15 @@ def demo_sources() -> list[RegisteredSource]:
             title="Pengembangan Perangkat Pembelajaran Konsep Pencemaran Lingkungan Menggunakan Model Pembelajaran Berdasarkan Masalah untuk SMA Kelas X",
             authors=("Agustina Fatmawati",),
             year=2016,
-            venue="Edu Sains Jurnal Pendidikan Sains & Matematika",
+            venue="Edu Sains: Jurnal Pendidikan Sains dan Matematika",
             doi="10.23971/eds.v4i2.512",
             url="https://doi.org/10.23971/eds.v4i2.512",
             work_type="journal-article",
-            is_open_access=False,
+            is_open_access=True,
             created=now,
+            volume="4",
+            issue="2",
+            pages="94-103",
         ),
         RegisteredSource(
             ref_id="R2",
@@ -39,8 +42,12 @@ def demo_sources() -> list[RegisteredSource]:
             doi="10.14710/mmh.48.2.2019.147-163",
             url="https://doi.org/10.14710/mmh.48.2.2019.147-163",
             work_type="journal-article",
-            is_open_access=False,
+            is_open_access=True,
             created=now,
+            volume="48",
+            issue="2",
+            pages="147-163",
+            publisher="Faculty of Law, Universitas Diponegoro",
         ),
     ]
 
@@ -88,6 +95,7 @@ def build_demo(engine: DocumentEngine | None = None) -> CitationBuildResult:
 def main() -> None:
     result = build_demo()
     print("Status:", result.status)
+    print("Gaya sitasi: Chicago Notes & Bibliography")
     print("DOCX:", result.docx_path or "-")
     print("PDF:", result.pdf_path or "-")
     print("Sumber dipakai:", ", ".join(result.used_refs) or "-")

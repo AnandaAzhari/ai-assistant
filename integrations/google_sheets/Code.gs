@@ -1,16 +1,22 @@
 /* Taqi AI Assistant - Google Sheets mirror receiver
  * Pasang sebagai bound Apps Script pada spreadsheet Finance Dashboard.
- * Secret disimpan di Script Properties dengan key SYNC_SECRET.
+ * Script Properties yang wajib:
+ *   SYNC_SECRET     = secret lokal yang sama dengan .env
+ *   SPREADSHEET_ID  = ID spreadsheet Finance Dashboard
  */
 
 function doPost(e) {
   try {
     const payload = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    const expected = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+    const props = PropertiesService.getScriptProperties();
+    const expected = props.getProperty('SYNC_SECRET');
+    const spreadsheetId = props.getProperty('SPREADSHEET_ID');
+
     if (!expected) return json_({ok:false,error:'SYNC_SECRET belum diatur di Script Properties.'});
+    if (!spreadsheetId) return json_({ok:false,error:'SPREADSHEET_ID belum diatur di Script Properties.'});
     if (!payload.secret || payload.secret !== expected) return json_({ok:false,error:'Secret tidak cocok.'});
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.openById(spreadsheetId);
     const txCount = syncTransactions_(ss, payload.transactions || []);
     const accountCount = syncAccounts_(ss, payload.accounts || []);
     const categoryCount = syncCategories_(ss, payload.categories || []);

@@ -67,6 +67,20 @@ class LeadAgent:
         source_marker = r"\b(?:pakai|menggunakan|via|dari|bayar\s+pakai|dibayar\s+dengan)\b"
         return re.search(source_marker, lowered) is None
 
+    def _document_session_active(self) -> bool:
+        """True jika Document Agent sudah mengumpulkan sebagian requirement.
+
+        Follow-up seperti `Kelas: XI` tidak selalu mengandung kata 'makalah'. Tanpa
+        affinity sederhana ini, router aturan minimum akan mengembalikannya ke Lead.
+        """
+        if self.document is None:
+            return False
+        requirements = getattr(self.document, "requirements", None)
+        if requirements is None:
+            return False
+        labels = getattr(requirements, "FIELD_LABELS", {})
+        return any(bool(getattr(requirements, key, "")) for key in labels)
+
     def _auto_sync_after_finance_write(self, raw: str, result) -> str:
         if not self._finance_write_succeeded(raw, result):
             return ""
@@ -226,6 +240,14 @@ class LeadAgent:
                 "terdeteksi",
                 "Saya mengenali ini sebagai tugas TaqiDesk/DocuTech. Integrasi TaqiDesk belum diaktifkan pada tahap runtime minimum."
             )
+
+        # Jika percakapan makalah sudah dimulai, pertahankan affinity ke Document Agent.
+        # Ini menangani follow-up seperti `Jenjang: SMA`, `Kelas: XI`, atau `Target: 10 halaman`
+        # yang memang tidak mengandung kata kunci 'makalah'. Perintah eksplisit Finance/TaqiDesk
+        # tetap diprioritaskan di atas affinity ini.
+        if self._document_session_active():
+            result = self.document.handle(raw)
+            return LeadReply("document", result.status, result.text)
 
         if command.startswith("/"):
             return LeadReply("lead", "membutuhkan_bantuan", "Perintah belum dikenal. Ketik /bantuan.")

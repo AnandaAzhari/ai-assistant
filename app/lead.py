@@ -4,10 +4,12 @@ Desktop commands tetap dipertahankan. Pesan dari channel admin memakai router at
 sederhana dulu; model AI belum dihubungkan pada tahap ini.
 """
 
+import re
 from dataclasses import dataclass
 
 from app.desktop import DesktopAgent, Result
 from app.finance import FinanceService
+from app.finance_corrections import correct_latest_account
 from app.google_sheets_sync import GoogleSheetsSync
 
 
@@ -44,17 +46,26 @@ class LeadAgent:
 
     @staticmethod
     def _finance_write_succeeded(raw: str, result) -> bool:
-        """Tentukan apakah Finance Agent baru saja mengubah ledger/config lokal.
-
-        V0.3 hanya memiliki dua jalur write dari chat: set saldo awal dan catat
-        pemasukan/pengeluaran. Report/read command tidak boleh memicu auto-sync.
-        """
+        """Tentukan apakah Finance Agent baru saja mengubah ledger/config lokal."""
         if result.status != "berhasil":
             return False
         text = raw.casefold()
         if "saldo awal" in text:
             return True
-        return result.text.startswith(("Pemasukan tercatat.", "Pengeluaran tercatat."))
+        return result.text.startswith((
+            "Pemasukan tercatat.",
+            "Pengeluaran tercatat.",
+            "Koreksi transaksi berhasil.",
+        ))
+
+    @staticmethod
+    def _topup_needs_source_account(text: str) -> bool:
+        """Top up/transfer wajib punya sumber eksplisit agar tujuan tidak dianggap akun sumber."""
+        lowered = text.casefold()
+        if not re.search(r"\b(?:top\s*up|transfer|kirim)\b", lowered):
+            return False
+        source_marker = r"\b(?:pakai|menggunakan|via|dari|bayar\s+pakai|dibayar\s+dengan)\b"
+        return re.search(source_marker, lowered) is None
 
     def _auto_sync_after_finance_write(self, raw: str, result) -> str:
         """Auto-sync best effort; kegagalan mirror tidak membatalkan ledger lokal."""
@@ -96,6 +107,7 @@ class LeadAgent:
                 "/bulan_ini - ringkasan bulan ini\n"
                 "/sync_status - status Google Sheets Sync\n"
                 "/sync - sinkronkan ledger ke Google Sheets secara manual\n"
+                "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n"
                 "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n\n"
                 f"Finance runtime: {finance_note}.\nGoogle Sheets Sync: {sync_note}."
             )
@@ -117,7 +129,7 @@ class LeadAgent:
             result = self.sheets_sync.status()
             text_result = result.text
             if self.sheets_sync.configured:
-                text_result += " Auto-sync aktif setelah transaksi atau perubahan saldo awal berhasil disimpan."
+                text_result += " Auto-sync aktif setelah transaksi, koreksi, atau perubahan saldo awal berhasil disimpan."
             return LeadReply("finance", result.status, text_result)
 
         if command == "/sync":
@@ -126,13 +138,22 @@ class LeadAgent:
             result = self.sheets_sync.sync_now()
             return LeadReply("finance", result.status, result.text)
 
+        correction_words = ("koreksi transaksi", "ubah transaksi", "akun seharusnya", "akun harusnya")
+        if any(word in text for word in correction_words):
+            if self.finance is None:
+                return LeadReply("finance", "terdeteksi", "Finance runtime belum diaktifkan.")
+            result = correct_latest_account(self.finance, raw)
+            sync_note = self._auto_sync_after_finance_write(raw, result)
+            return LeadReply("finance", result.status, result.text + sync_note)
+
         finance_commands = {
             "/saldo", "/akun", "/kategori", "/hari_ini", "/bulan_ini",
             "/pemasukan", "/pengeluaran", "/piutang", "/utang"
         }
         finance_words = (
             "pengeluaran", "pemasukan", "saldo", "saldo awal", "kategori", "cashflow", "arus kas",
-            "laba", "rugi", "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai"
+            "laba", "rugi", "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai",
+            "top up", "transfer", "kirim"
         )
         if command in finance_commands or any(word in text for word in finance_words):
             if self.finance is None:
@@ -140,6 +161,13 @@ class LeadAgent:
                     "finance",
                     "terdeteksi",
                     "Saya mengenali ini sebagai tugas Finance Agent, tetapi Finance runtime belum diaktifkan."
+                )
+            if self._topup_needs_source_account(text) and any(word in text for word in ("pengeluaran", "catat keluar", "beli", "belanja")):
+                return LeadReply(
+                    "finance",
+                    "needs_review",
+                    "Belum saya catat karena akun sumber belum disebutkan. Untuk top up/transfer, tulis sumbernya agar akun tujuan tidak salah dianggap sebagai sumber.\n"
+                    "Contoh: Catat pengeluaran 300 ribu top up saldo DANA istri pakai BNI."
                 )
             result = self.finance.handle(raw)
             sync_note = self._auto_sync_after_finance_write(raw, result)

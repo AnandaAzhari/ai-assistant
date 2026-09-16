@@ -3,14 +3,15 @@
   "short_name": "Taqi AI",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#111827",
+  "background_color": "#080d1a",
+  "theme_color": "#080d1a",
   "lang": "id-ID",
   "icons": [
     {
       "src": "/taqi-ai.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }

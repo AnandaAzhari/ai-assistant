@@ -18,13 +18,29 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertEqual(DocumentEngine._infer_heading_level("a. Rincian", 4), 4)
         self.assertEqual(DocumentEngine._infer_heading_level("DAFTAR PUSTAKA", 1), 1)
 
-    def test_policy_and_draft_prompt_use_same_default(self):
+    def test_default_heading_indents_follow_academic_fallback(self):
+        self.assertEqual(DocumentEngine._heading_left(1), 0)
+        self.assertEqual(DocumentEngine._heading_left(2), 0)
+        self.assertEqual(DocumentEngine._heading_left(3), 360)
+        self.assertEqual(DocumentEngine._heading_left(4), 720)
+
+    def test_body_paragraph_is_justify_with_127cm_first_line(self):
+        paragraph = DocumentEngine._paragraph(
+            "Isi paragraf uji.", align="both", left=0, first_line=720
+        )
+        self.assertIn('w:jc w:val="both"', paragraph)
+        self.assertIn('w:left="0" w:firstLine="720"', paragraph)
+
+    def test_policy_and_skill_use_same_default(self):
         policy = load_document_format_policy()
         self.assertIn("BAB I", policy)
         self.assertIn("A.", policy)
         self.assertIn("1.", policy)
         self.assertIn("a.", policy)
         self.assertIn("DAFTAR PUSTAKA", policy)
+        self.assertIn("Document Academic Skill", policy)
+        self.assertIn("first-line indent 1,27 cm", policy)
+        self.assertIn("Justify", policy)
         self.assertIn("BAB I -> A. -> 1. -> a.", DRAFT_PROMPT)
 
     def test_bibliography_is_not_numbered_as_an_extra_bab(self):
@@ -61,6 +77,8 @@ class MakalahStructureTests(unittest.TestCase):
         xml = DocumentEngine()._document_xml(spec)
         self.assertIn('w:fmt="lowerRoman" w:start="1"', xml)
         self.assertIn('w:fmt="decimal" w:start="1"', xml)
+        self.assertIn('w:jc w:val="both"', xml)
+        self.assertIn('w:firstLine="720"', xml)
         self.assertIn("BAB I", xml)
         self.assertIn("PENDAHULUAN", xml)
         self.assertIn("DAFTAR PUSTAKA", xml)

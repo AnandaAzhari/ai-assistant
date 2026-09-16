@@ -128,6 +128,9 @@ class LeadAgent:
                 "/dokumen_demo - buat DOCX/PDF demo tanpa token AI\n"
                 "/research <topik> - cari sumber akademik tanpa token AI\n"
                 "/research_status - cek Research Manager\n"
+                "/research_save all - simpan semua hasil research sebagai R1/R2/...\n"
+                "/research_save 1,2,4-6 - simpan pilihan hasil research\n"
+                "/sources - lihat Source Registry sesi saat ini\n"
                 "/makalah <permintaan> - bicara dengan Document Agent\n"
                 "/dokumen_baru - reset konteks percakapan dokumen\n"
                 "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n\n"
@@ -139,7 +142,7 @@ class LeadAgent:
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
             finance_status = "aktif" if self.finance is not None else "belum diaktifkan"
-            sync_status = "siap + auto-sync" if self.sheets_sync and self.sheets_sync.configured else "belum dikonfigurasi"
+            sync_status = "siap + auto-sync" if self.sheets_sync and self.sheets_sync.configured else "belum_dikonfigurasi"
             if self.document is None:
                 document_status = "belum tersedia"
             elif self.document.configured:
@@ -163,7 +166,12 @@ class LeadAgent:
             result = self.document.status()
             return LeadReply("document", result.status, result.text)
 
-        if command in {"/dokumen_engine_status", "/dokumen_demo", "/research_status", "/riset_status", "/research", "/riset"}:
+        document_utility_commands = {
+            "/dokumen_engine_status", "/dokumen_demo",
+            "/research_status", "/riset_status", "/research", "/riset",
+            "/research_save", "/riset_simpan", "/sources", "/sumber",
+        }
+        if command in document_utility_commands:
             if self.document is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.handle(raw)

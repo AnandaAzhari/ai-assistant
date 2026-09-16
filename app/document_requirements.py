@@ -2,6 +2,8 @@
 
 Lima data utama dikumpulkan sebelum AI membuat kerangka makalah. Arahan guru/dosen
 bersifat opsional agar pelanggan tidak dipaksa mengisi hal yang memang tidak ada.
+Parser lokal menangani bentuk umum; Document Agent dapat memakai AI fallback ringan
+untuk bahasa pelanggan yang ambigu/typo tanpa mengganti data yang sudah pasti.
 """
 
 from __future__ import annotations
@@ -11,6 +13,10 @@ from dataclasses import dataclass, fields
 
 
 _DEFAULT_LENGTH_SENTINEL = "__confirm_default_8_12_pages__"
+_EMPTY_TOPIC_VALUES = {
+    "belum", "belum ada", "belum ditentukan", "belum punya", "tidak ada", "-",
+    "makalah belum", "judul belum", "judul makalah belum", "belum ada judul",
+}
 
 
 @dataclass
@@ -72,6 +78,47 @@ class MakalahRequirements:
         self._parse_labeled_lines(raw)
         self._parse_natural_text(raw)
 
+    def apply_ai_values(self, values: dict[str, object]) -> None:
+        """Gabungkan hasil interpreter AI secara konservatif.
+
+        AI hanya boleh mengisi kolom yang masih kosong. Nilai yang sudah ditemukan
+        parser lokal tidak ditimpa agar biaya/AI tidak mengambil alih aturan pasti.
+        """
+        if not isinstance(values, dict):
+            return
+        allowed = set(self.FIELD_LABELS)
+        for key, raw_value in values.items():
+            if key not in allowed or getattr(self, key):
+                continue
+            if raw_value is None:
+                continue
+            value = re.sub(r"\s+", " ", str(raw_value).strip())
+            if not value:
+                continue
+            lowered = value.casefold()
+            if key == "topic_title" and self._topic_is_missing(lowered):
+                continue
+            if key == "teacher_instructions" and lowered in {
+                "tidak ada", "tidak ada instruksi", "tidak ada arahan", "-", "skip"
+            }:
+                value = "Tidak ada arahan khusus"
+            if key == "target_length":
+                parsed = self._extract_length(value)
+                if parsed:
+                    value = parsed
+                elif re.search(r"tidak ada|belum ada|belum ditentukan", lowered):
+                    value = _DEFAULT_LENGTH_SENTINEL
+                else:
+                    continue
+            setattr(self, key, value[:300])
+
+    @staticmethod
+    def _topic_is_missing(value: str) -> bool:
+        clean = re.sub(r"\s+", " ", (value or "").strip().casefold())
+        if clean in _EMPTY_TOPIC_VALUES:
+            return True
+        return bool(re.fullmatch(r"(?:judul\s+)?(?:makalah\s+)?belum(?:\s+(?:ada|ditentukan|punya))?", clean))
+
     def _parse_labeled_lines(self, raw: str) -> None:
         label_map = {
             "jenjang": "institution_level",
@@ -111,7 +158,7 @@ class MakalahRequirements:
             if not key or not value:
                 continue
             value_lower = value.casefold()
-            if key == "topic_title" and value_lower in {"belum ada", "belum ditentukan", "tidak ada", "-"}:
+            if key == "topic_title" and self._topic_is_missing(value_lower):
                 continue
             if key == "teacher_instructions" and value_lower in {
                 "tidak ada", "tidak ada instruksi", "tidak ada arahan", "-", "skip"
@@ -128,14 +175,9 @@ class MakalahRequirements:
 
     @staticmethod
     def _extract_length(raw: str) -> str:
-        """Ambil target panjang dari bahasa natural dengan urutan yang fleksibel.
-
-        Contoh yang didukung: `8 halaman`, `sekitar 8 halaman`,
-        `jumlah halaman 8`, `halaman 8`, `target 1200 kata`.
-        """
+        """Ambil target panjang dari bahasa natural dengan urutan yang fleksibel."""
         text = re.sub(r"\s+", " ", (raw or "").strip())
 
-        # Bentuk paling umum: angka lalu satuan.
         match = re.search(
             r"\b(\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|kata))\b",
             text,
@@ -144,7 +186,6 @@ class MakalahRequirements:
         if match:
             return re.sub(r"\s+", " ", match.group(1)).strip()
 
-        # Bahasa natural Indonesia sering membalik urutan: `jumlah halaman 8`.
         match = re.search(
             r"\b(?:jumlah\s+|target\s+|sekitar\s+|kira[- ]?kira\s+)?"
             r"(halaman|page|pages|kata)\s*(?:sebanyak\s*)?(\d+)"
@@ -159,7 +200,6 @@ class MakalahRequirements:
             canonical_unit = "halaman" if unit in {"halaman", "page", "pages"} else "kata"
             return f"{start}-{end} {canonical_unit}" if end else f"{start} {canonical_unit}"
 
-        # Bentuk `jumlah halaman: 8` / `target halaman = 8`.
         match = re.search(
             r"\b(?:jumlah|target)\s+(halaman|page|pages|kata)\s*[:=]?\s*(\d+)"
             r"(?:\s*[-–—]\s*(\d+))?\b",
@@ -195,17 +235,22 @@ class MakalahRequirements:
                     break
 
         if not self.class_semester:
-            match = re.search(r"\bkelas\s+([0-9]{1,2}|[ivxlcdm]{1,7})(?:\s+([a-z]+\s*\d*))?", raw, re.IGNORECASE)
+            # `kelas XII semester 2`, `XII semester 2`, atau `kelas XII`.
+            match = re.search(
+                r"\b(?:kelas\s+)?([0-9]{1,2}|[ivxlcdm]{1,7})\s*(?:[,/-]?\s*semester\s+([0-9]{1,2}|[ivxlcdm]{1,7}))\b",
+                raw,
+                re.IGNORECASE,
+            )
             if match:
-                extra = (match.group(2) or "").strip()
-                value = f"Kelas {match.group(1).upper()}"
-                if extra and extra.casefold() not in {"atau", "dan", "dengan", "untuk"}:
-                    value += f" {extra.upper()}"
-                self.class_semester = value[:80]
+                self.class_semester = f"Kelas {match.group(1).upper()}, Semester {match.group(2).upper()}"[:80]
             else:
-                match = re.search(r"\bsemester\s+([0-9]{1,2}|[ivxlcdm]{1,7})\b", raw, re.IGNORECASE)
+                match = re.search(r"\bkelas\s+([0-9]{1,2}|[ivxlcdm]{1,7})\b", raw, re.IGNORECASE)
                 if match:
-                    self.class_semester = f"Semester {match.group(1).upper()}"
+                    self.class_semester = f"Kelas {match.group(1).upper()}"
+                else:
+                    match = re.search(r"\bsemester\s+([0-9]{1,2}|[ivxlcdm]{1,7})\b", raw, re.IGNORECASE)
+                    if match:
+                        self.class_semester = f"Semester {match.group(1).upper()}"
 
         if not self.subject:
             common_subjects = [
@@ -220,14 +265,22 @@ class MakalahRequirements:
                     break
 
         if not self.topic_title:
+            # Toleransi typo umum `tentan`/`tenteng` dari pelanggan.
             match = re.search(
-                r"\b(?:makalah\s+tentang|tentang|topik(?:nya)?\s*[:=]?|judul(?:nya)?\s*[:=]?)\s*[\"“]?([^\n?.]+)",
+                r"\b(?:makalah\s+tent(?:ang|an|eng)|tent(?:ang|an|eng)|topik(?:nya)?\s*[:=]?|judul(?:nya)?\s*[:=]?)\s*[\"“]?([^\n?.]+)",
                 raw,
                 re.IGNORECASE,
             )
             if match:
                 value = match.group(1).strip(" \t\"”'")
-                if value and value.casefold() not in {"belum ada", "belum ditentukan", "tidak ada"}:
+                # Potong jika sesudah judul pelanggan lanjut memberi field lain.
+                value = re.split(
+                    r"\s*,\s*(?:jumlah|target|kelas|semester|mata\s+pelajaran|mapel|arahan|instruksi)\b",
+                    value,
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0].strip()
+                if value and not self._topic_is_missing(value):
                     self.topic_title = value[:240]
 
         if not self.teacher_instructions:

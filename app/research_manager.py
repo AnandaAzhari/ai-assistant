@@ -1,12 +1,14 @@
-"""Research Manager v0.1.
+"""Research Manager v0.2.
 
 Mencari sumber akademik nyata tanpa memakai token model AI.
 Tahap awal memakai OpenAlex + Crossref, lalu menggabungkan dan menghapus duplikat
-berdasarkan DOI/judul. Google Scholar tidak discrape otomatis.
+berdasarkan DOI/judul. Metadata bibliografi diperkaya agar footnote dan daftar
+pustaka dapat diformat dengan benar. Google Scholar tidak discrape otomatis.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import os
@@ -30,6 +32,11 @@ class ResearchSource:
     cited_by_count: int = 0
     is_open_access: bool = False
     score: float = 0.0
+    volume: str = ""
+    issue: str = ""
+    pages: str = ""
+    publisher: str = ""
+    abstract: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,7 +82,8 @@ class ResearchManager:
 
     @staticmethod
     def _clean_text(value: object) -> str:
-        text = str(value or "")
+        text = html.unescape(str(value or ""))
+        text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
 
@@ -106,7 +114,6 @@ class ResearchManager:
         title_tokens = cls._query_tokens(source.title)
         overlap = len(q & title_tokens) / max(1, len(q))
         score = overlap * 70.0
-
         type_lower = source.work_type.casefold()
         if any(token in type_lower for token in ("journal", "article", "book", "proceedings")):
             score += 8.0
@@ -116,15 +123,14 @@ class ResearchManager:
             score += 3.0
         if source.is_open_access:
             score += 3.0
+        if source.abstract:
+            score += 2.0
         if source.cited_by_count > 0:
             score += min(9.0, math.log10(source.cited_by_count + 1) * 4.0)
         return round(score, 3)
 
     def _get_json(self, url: str) -> dict:
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "TaqiAI-ResearchManager/0.1",
-        }
+        headers = {"Accept": "application/json", "User-Agent": "TaqiAI-ResearchManager/0.2"}
         if self.crossref_mailto:
             headers["User-Agent"] += f" (mailto:{self.crossref_mailto})"
         request = urllib.request.Request(url, headers=headers, method="GET")
@@ -141,11 +147,23 @@ class ResearchManager:
                 authors.append(name)
         return tuple(authors[:12])
 
+    @staticmethod
+    def _openalex_abstract(item: dict) -> str:
+        index = item.get("abstract_inverted_index") or {}
+        if not isinstance(index, dict) or not index:
+            return ""
+        positions: list[tuple[int, str]] = []
+        for word, values in index.items():
+            if not isinstance(values, list):
+                continue
+            for pos in values:
+                if isinstance(pos, int):
+                    positions.append((pos, str(word)))
+        positions.sort(key=lambda pair: pair[0])
+        return " ".join(word for _, word in positions)[:6000]
+
     def _search_openalex(self, query: str, rows: int) -> list[ResearchSource]:
-        params = {
-            "search": query,
-            "per_page": str(max(1, min(rows, 25))),
-        }
+        params = {"search": query, "per_page": str(max(1, min(rows, 25)))}
         if self.openalex_api_key:
             params["api_key"] = self.openalex_api_key
         url = self.OPENALEX_URL + "?" + urllib.parse.urlencode(params)
@@ -157,17 +175,17 @@ class ResearchManager:
                 continue
             primary_location = item.get("primary_location") or {}
             source_meta = primary_location.get("source") or {}
+            biblio = item.get("biblio") or {}
             venue = self._clean_text(source_meta.get("display_name"))
             doi = self._normalize_doi(item.get("doi") or "")
             open_access = item.get("open_access") or {}
-            url_value = ""
-            if doi:
-                url_value = f"https://doi.org/{doi}"
-            elif primary_location.get("landing_page_url"):
-                url_value = self._clean_text(primary_location.get("landing_page_url"))
-            else:
-                url_value = self._clean_text(item.get("id"))
-            source = ResearchSource(
+            first_page = self._clean_text(biblio.get("first_page"))
+            last_page = self._clean_text(biblio.get("last_page"))
+            pages = first_page
+            if first_page and last_page and last_page != first_page:
+                pages = f"{first_page}-{last_page}"
+            url_value = f"https://doi.org/{doi}" if doi else self._clean_text(primary_location.get("landing_page_url") or item.get("id"))
+            results.append(ResearchSource(
                 provider="OpenAlex",
                 title=title,
                 authors=self._openalex_authors(item),
@@ -178,8 +196,12 @@ class ResearchManager:
                 work_type=self._clean_text(item.get("type")),
                 cited_by_count=int(item.get("cited_by_count") or 0),
                 is_open_access=bool(open_access.get("is_oa")),
-            )
-            results.append(source)
+                volume=self._clean_text(biblio.get("volume")),
+                issue=self._clean_text(biblio.get("issue")),
+                pages=pages,
+                publisher=self._clean_text(source_meta.get("host_organization_name")),
+                abstract=self._openalex_abstract(item),
+            ))
         return results
 
     @staticmethod
@@ -205,10 +227,7 @@ class ResearchManager:
         return tuple(authors[:12])
 
     def _search_crossref(self, query: str, rows: int) -> list[ResearchSource]:
-        params = {
-            "query.bibliographic": query,
-            "rows": str(max(1, min(rows, 20))),
-        }
+        params = {"query.bibliographic": query, "rows": str(max(1, min(rows, 20)))}
         if self.crossref_mailto:
             params["mailto"] = self.crossref_mailto
         url = self.CROSSREF_URL + "?" + urllib.parse.urlencode(params)
@@ -224,7 +243,7 @@ class ResearchManager:
             container = item.get("container-title") or []
             venue = self._clean_text(container[0] if container else "")
             url_value = f"https://doi.org/{doi}" if doi else self._clean_text(item.get("URL"))
-            source = ResearchSource(
+            results.append(ResearchSource(
                 provider="Crossref",
                 title=title,
                 authors=self._crossref_authors(item),
@@ -235,8 +254,12 @@ class ResearchManager:
                 work_type=self._clean_text(item.get("type")),
                 cited_by_count=int(item.get("is-referenced-by-count") or 0),
                 is_open_access=False,
-            )
-            results.append(source)
+                volume=self._clean_text(item.get("volume")),
+                issue=self._clean_text(item.get("issue")),
+                pages=self._clean_text(item.get("page")),
+                publisher=self._clean_text(item.get("publisher")),
+                abstract=self._clean_text(item.get("abstract"))[:6000],
+            ))
         return results
 
     @classmethod
@@ -262,35 +285,23 @@ class ResearchManager:
         clean_query = self._clean_text(query)
         if len(clean_query) < 3:
             return ResearchResult("membutuhkan_bantuan", clean_query, warning="Topik riset terlalu pendek.")
-
         per_provider = max(5, min(12, int(limit) + 2))
         found: list[ResearchSource] = []
         warnings: list[str] = []
-
         try:
             found.extend(self._search_openalex(clean_query, per_provider))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             warnings.append(f"OpenAlex belum berhasil: {exc}")
-
         try:
             found.extend(self._search_crossref(clean_query, per_provider))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             warnings.append(f"Crossref belum berhasil: {exc}")
-
         unique = self._dedupe(found)
-        scored = [
-            ResearchSource(**{**source.__dict__, "score": self._relevance_score(source, clean_query)})
-            for source in unique
-        ]
+        scored = [ResearchSource(**{**source.__dict__, "score": self._relevance_score(source, clean_query)}) for source in unique]
         scored.sort(key=lambda item: (item.score, item.cited_by_count, item.year or 0), reverse=True)
         selected = tuple(scored[: max(1, min(int(limit), 20))])
-
         if not selected:
-            return ResearchResult(
-                "gagal",
-                clean_query,
-                warning="; ".join(warnings) or "Tidak ada sumber yang ditemukan.",
-            )
+            return ResearchResult("gagal", clean_query, warning="; ".join(warnings) or "Tidak ada sumber yang ditemukan.")
         return ResearchResult("berhasil", clean_query, selected, "; ".join(warnings))
 
     @staticmethod

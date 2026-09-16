@@ -38,7 +38,8 @@ Format heading:
 - Heading 2: `A.`, `B.`, `C.`, dst.; rata kiri pada margin utama (left indent 0 cm).
 - Heading 3: `1.`, `2.`, `3.`, dst.; left indent sekitar 0,63 cm.
 - Heading 4: `a.`, `b.`, `c.`, dst.; left indent sekitar 1,27 cm.
-- Isi paragraf tidak mengikuti indent heading; isi memakai margin utama dengan first-line indent sekitar 1,25–1,27 cm dan Justify.
+- Isi setelah Heading 2 dan Heading 3 memakai margin utama dengan first-line indent sekitar 1,25–1,27 cm dan Justify.
+- **Khusus isi setelah Heading 4 (`a.`, `b.`, `c.`)**, gunakan left indent sekitar **0,63 cm** dan first-line indent sekitar **0,63 cm**. Jadi awal baris pertama tetap sekitar **1,27 cm** dari margin utama, sementara baris berikutnya dimulai sekitar **0,63 cm** dari margin utama. Ini adalah fallback visual yang dipilih agar hubungan sub-subbagian dengan paragrafnya lebih mudah dibaca tanpa membuat blok teks terlalu sempit.
 - Level `1.` dan `a.` hanya dipakai jika memang dibutuhkan.
 
 Penomoran halaman default Makalah:
@@ -105,6 +106,7 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Justify = properti paragraph alignment.
 - First-line indent = properti paragraph indentation.
 - Heading memakai style Heading 1/2/3/4 sesuai hierarki agar Daftar Isi otomatis stabil.
+- Fallback visual level-4 tidak dibuat dengan karakter TAB manual; engine harus menggunakan `left indent` dan `first-line indent` Word.
 
 ## Referensi awal fallback
 

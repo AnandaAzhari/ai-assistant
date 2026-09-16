@@ -1,10 +1,10 @@
-"""Document Engine v0.3 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.4 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
 dan isi utama dibuat langsung di struktur DOCX agar Word/PDF stabil.
 
-Default Makalah mengikuti policy Taqi AI: I. -> A. -> 1. -> a.
+Default Makalah mengikuti policy Taqi AI: BAB I -> A. -> 1. -> a.
 """
 
 from __future__ import annotations
@@ -297,6 +297,7 @@ class DocumentEngine:
         body.append(self._paragraph(f"Disusun untuk Memenuhi Tugas Mata Pelajaran/Mata Kuliah {spec.subject}", align="center", after=120))
         if spec.teacher:
             body.append(self._paragraph(f"Guru/Dosen Pembimbing: {spec.teacher}", align="center", after=160))
+
         if spec.group_name or spec.members or spec.author:
             body.append(self._paragraph("Disusun Oleh:", align="center", bold=True, after=80))
         if spec.group_name:
@@ -326,8 +327,11 @@ class DocumentEngine:
         # SECTION 3 — ISI UTAMA: footer PAGE + decimal mulai 1.
         for section in spec.sections:
             level = self._infer_heading_level(section.title, section.level)
-            title = self._legacy_chapter_title(section.title) if re.match(r"^BAB\s+", section.title.strip(), re.IGNORECASE) else section.title
-            align = "center" if re.match(r"^BAB\s+", section.title.strip(), re.IGNORECASE) else "left"
+            clean_title = re.sub(r"\s+", " ", section.title.strip())
+            is_chapter = bool(re.match(r"^BAB\s+", clean_title, re.IGNORECASE))
+            is_bibliography = clean_title.casefold() == "daftar pustaka"
+            title = self._legacy_chapter_title(section.title) if is_chapter else section.title
+            align = "center" if (is_chapter or is_bibliography) else "left"
             body.append(
                 self._paragraph(
                     title,
@@ -335,7 +339,7 @@ class DocumentEngine:
                     align=align,
                     bold=True,
                     size=14 if level == 1 else 12,
-                    left=self._heading_left(level),
+                    left=0 if (is_chapter or is_bibliography) else self._heading_left(level),
                 )
             )
             for paragraph in section.paragraphs:
@@ -468,7 +472,7 @@ def demo_spec() -> MakalahSpec:
             "Makalah ini dibuat sebagai dokumen uji untuk memastikan struktur dan penomoran halaman Taqi AI.",
         ),
         sections=(
-            DocumentSection("I. Pendahuluan", (), 1),
+            DocumentSection("BAB I PENDAHULUAN", (), 1),
             DocumentSection("A. Latar Belakang", (
                 "Pencemaran lingkungan merupakan perubahan kondisi lingkungan akibat masuknya zat, energi, atau komponen lain yang dapat menurunkan kualitas lingkungan.",
             ), 2),
@@ -478,17 +482,18 @@ def demo_spec() -> MakalahSpec:
             DocumentSection("C. Tujuan Penulisan", (
                 "Tujuan penulisan makalah ini adalah menjelaskan penyebab, dampak, dan upaya mengurangi pencemaran lingkungan.",
             ), 2),
-            DocumentSection("II. Tinjauan Pustaka", (), 1),
+            DocumentSection("BAB II PEMBAHASAN", (), 1),
             DocumentSection("A. Pengertian Pencemaran", (
                 "Pencemaran dapat terjadi pada air, udara, dan tanah.",
             ), 2),
-            DocumentSection("1. Jenis Pencemaran", (
-                "Jenis pencemaran dibedakan berdasarkan media lingkungan yang terdampak.",
-            ), 3),
-            DocumentSection("a. Pencemaran Air", (
+            DocumentSection("B. Jenis Pencemaran", (), 2),
+            DocumentSection("1. Pencemaran Air", (
                 "Pencemaran air terjadi ketika kualitas air menurun akibat masuknya bahan pencemar.",
+            ), 3),
+            DocumentSection("a. Sumber Pencemar", (
+                "Sumber pencemar air dapat berasal dari kegiatan rumah tangga, industri, dan aktivitas lain.",
             ), 4),
-            DocumentSection("V. Kesimpulan dan Saran", (), 1),
+            DocumentSection("BAB III PENUTUP", (), 1),
             DocumentSection("A. Kesimpulan", (
                 "Upaya pencegahan pencemaran membutuhkan kesadaran bersama dan pengelolaan lingkungan yang bertanggung jawab.",
             ), 2),

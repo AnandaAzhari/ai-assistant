@@ -384,10 +384,13 @@ try {
       while ($prelimFooter.PageNumbers.Count -gt 0) { $prelimFooter.PageNumbers.Item(1).Delete() }
       $prelimFooter.Range.Text = ''
       $prelimFooter.Range.ParagraphFormat.Alignment = 1
+      $prelimFooter.PageNumbers.Add(1, $true) | Out-Null
+      $prelimFooter.PageNumbers.ShowFirstPageNumber = $true
       $prelimFooter.PageNumbers.RestartNumberingAtSection = $true
       $prelimFooter.PageNumbers.StartingNumber = 1
       $prelimFooter.PageNumbers.NumberStyle = 2
-      $prelimFooter.PageNumbers.Add(1, $true) | Out-Null
+      try { $prelimFooter.Range.Font.Name = 'Times New Roman' } catch {}
+      try { $prelimFooter.Range.Font.Size = 12 } catch {}
     } catch {}
 
     # BAB I dimulai dari angka Arab 1 dan berlanjut sampai Daftar Pustaka.
@@ -397,11 +400,34 @@ try {
       while ($mainFooter.PageNumbers.Count -gt 0) { $mainFooter.PageNumbers.Item(1).Delete() }
       $mainFooter.Range.Text = ''
       $mainFooter.Range.ParagraphFormat.Alignment = 1
+      $mainFooter.PageNumbers.Add(1, $true) | Out-Null
+      $mainFooter.PageNumbers.ShowFirstPageNumber = $true
       $mainFooter.PageNumbers.RestartNumberingAtSection = $true
       $mainFooter.PageNumbers.StartingNumber = 1
       $mainFooter.PageNumbers.NumberStyle = 0
-      $mainFooter.PageNumbers.Add(1, $true) | Out-Null
+      try { $mainFooter.Range.Font.Name = 'Times New Roman' } catch {}
+      try { $mainFooter.Range.Font.Size = 12 } catch {}
     } catch {}
+  }
+
+  # Heading subbab tetap rata kiri tanpa TAB. Paragraf isi memakai first-line indent 1,25 cm.
+  $mainBodyStart = Find-TextStart 'BAB I'
+  $biblioHeadingStart = Find-TextStart 'DAFTAR PUSTAKA'
+  if ($mainBodyStart -ge 0) {
+    $mainBodyEnd = if ($biblioHeadingStart -gt $mainBodyStart) { $biblioHeadingStart } else { $doc.Content.End }
+    $mainBodyRange = $doc.Range($mainBodyStart, $mainBodyEnd)
+    foreach ($p in $mainBodyRange.Paragraphs) {
+      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
+      if ([string]::IsNullOrWhiteSpace($text)) { continue }
+      $isHeading = ($text -match '^BAB\s+[IVXLCDM]+\b') -or ($text -match '^\d+(?:\.\d+){1,2}\s+\S')
+      if ($isHeading) {
+        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+        try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
+      } else {
+        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+        try { $p.Range.ParagraphFormat.FirstLineIndent = 35.43 } catch {}
+      }
+    }
   }
 
   $doc.Save()

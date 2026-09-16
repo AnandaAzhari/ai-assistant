@@ -19,7 +19,7 @@ from app.providers.base import ModelProvider
 from app.source_registry import RegisteredSource
 
 
-DRAFT_PROMPT = """Kamu adalah penulis makalah Taqi DocuTech.
+DRAFT_PROMPT = """Kamu adalah penulis Makalah Taqi DocuTech.
 Buat isi makalah berdasarkan data dan kerangka yang SUDAH DISETUJUI.
 
 ATURAN SUMBER WAJIB:
@@ -35,10 +35,10 @@ ATURAN DOKUMEN:
 - Bahasa Indonesia formal dan mudah dipahami sesuai jenjang.
 - Instruksi guru/dosen/sekolah/kampus lebih tinggi prioritasnya daripada format default.
 - WAJIB mengikuti DOCUMENT FORMAT POLICY yang diberikan.
-- Pertahankan struktur BAB/subbab dari kerangka yang disetujui.
-- Heading tingkat 3 harus berbentuk 1.1.1, 1.1.2, dst., bukan bullet.
+- Pertahankan struktur heading dari kerangka yang disetujui.
+- Default Makalah Taqi AI adalah I. -> A. -> 1. -> a.; jangan menggantinya dengan BAB I -> 1.1 kecuali kerangka/pedoman resmi memang meminta begitu.
 - Bullet hanya boleh berada di dalam isi bila memang berupa daftar, bukan sebagai pengganti heading.
-- Hormati target jumlah halaman. Jika target adalah 8 halaman total, jangan menulis seolah-olah 8 halaman itu hanya untuk isi utama.
+- Hormati target jumlah halaman setelah cover. Cover tidak dihitung kecuali pelanggan secara khusus berkata lain.
 - Sertakan Kata Pengantar singkat.
 - Jangan membuat Cover, Daftar Isi, atau Daftar Pustaka di JSON; engine lokal membuatnya.
 - Jangan menulis Markdown.
@@ -47,9 +47,10 @@ KELUARKAN JSON VALID SAJA dengan bentuk persis:
 {
   "preface": ["paragraf 1", "paragraf 2"],
   "sections": [
-    {"title": "BAB I PENDAHULUAN", "level": 1, "paragraphs": []},
-    {"title": "1.1 Latar Belakang", "level": 2, "paragraphs": ["..."]},
-    {"title": "2.1.1 Contoh Subbagian", "level": 3, "paragraphs": ["..."]}
+    {"title": "I. Pendahuluan", "level": 1, "paragraphs": []},
+    {"title": "A. Latar Belakang", "level": 2, "paragraphs": ["..."]},
+    {"title": "1. Pokok Bahasan", "level": 3, "paragraphs": ["..."]},
+    {"title": "a. Rincian", "level": 4, "paragraphs": ["..."]}
   ]
 }
 """
@@ -96,7 +97,7 @@ class DraftGenerator:
 
     @staticmethod
     def _length_guidance(requirements_text: str) -> str:
-        """Beri panduan panjang tanpa menganggap target halaman sebagai halaman isi saja."""
+        """Target halaman default dihitung setelah cover; cover tidak termasuk."""
         text = requirements_text or ""
         word_match = re.search(r"Jumlah halaman/kata:\s*(\d+)\s*kata", text, re.IGNORECASE)
         if word_match:
@@ -109,15 +110,16 @@ class DraftGenerator:
         pages = max(1, int(page_match.group(1)))
         if pages <= 8:
             return (
-                f"Target dokumen final sekitar {pages} halaman TOTAL. Halaman awal dan daftar pustaka ikut dihitung. "
-                "Jaga BAB II ringkas, umumnya 3–4 subbab utama, dan jangan memperpanjang isi hanya untuk memenuhi token."
+                f"Target dokumen sekitar {pages} halaman SETELAH COVER; cover tidak dihitung. "
+                "Kata Pengantar, Daftar Isi, isi utama, dan Daftar Pustaka ikut dalam target. "
+                "Gunakan struktur ringkas dan jangan membuat tingkat heading yang tidak perlu."
             )
         if pages <= 12:
             return (
-                f"Target dokumen final sekitar {pages} halaman TOTAL. Halaman awal dan daftar pustaka ikut dihitung. "
-                "BAB II umumnya cukup 4–6 subbab utama."
+                f"Target dokumen sekitar {pages} halaman SETELAH COVER; cover tidak dihitung. "
+                "Kata Pengantar, Daftar Isi, isi utama, dan Daftar Pustaka ikut dalam target."
             )
-        return f"Target dokumen final sekitar {pages} halaman TOTAL; jaga pembagian panjang antar-BAB tetap proporsional."
+        return f"Target dokumen sekitar {pages} halaman SETELAH COVER; jaga pembagian panjang antarbagian tetap proporsional."
 
     @classmethod
     def _messages(
@@ -166,10 +168,10 @@ class DraftGenerator:
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "").strip()
-            if not title or title.casefold() == "daftar pustaka":
+            if not title or re.sub(r"^[IVXLCDM]+\.\s*", "", title, flags=re.IGNORECASE).strip().casefold() == "daftar pustaka":
                 continue
             try:
-                level = max(1, min(3, int(item.get("level") or 1)))
+                level = max(1, min(4, int(item.get("level") or 1)))
             except (TypeError, ValueError):
                 level = 1
             paragraphs_raw = item.get("paragraphs") or []
@@ -177,12 +179,12 @@ class DraftGenerator:
                 paragraphs_raw = []
             paragraphs: list[str] = []
             for paragraph in paragraphs_raw:
-                text = str(paragraph).strip()
-                if not text:
+                value = str(paragraph).strip()
+                if not value:
                     continue
-                for match in marker_pattern.finditer(text):
+                for match in marker_pattern.finditer(value):
                     used_markers.add(match.group(1).upper())
-                paragraphs.append(text)
+                paragraphs.append(value)
             sections.append(DocumentSection(title, tuple(paragraphs), level))
         unknown = sorted(used_markers - allowed_refs)
         if unknown:
@@ -211,15 +213,29 @@ class DraftGenerator:
             timeout=120,
         )
         if reply.status != "berhasil":
-            return DraftGenerationResult(reply.status, model=reply.model, input_tokens=reply.input_tokens,
-                                         output_tokens=reply.output_tokens, warning=reply.text)
+            return DraftGenerationResult(
+                reply.status,
+                model=reply.model,
+                input_tokens=reply.input_tokens,
+                output_tokens=reply.output_tokens,
+                warning=reply.text,
+            )
         try:
             payload = self._extract_json(reply.text)
             preface, sections = self._validate(payload, {source.ref_id.upper() for source in sources})
         except (ValueError, json.JSONDecodeError) as exc:
-            return DraftGenerationResult("gagal", model=reply.model, input_tokens=reply.input_tokens,
-                                         output_tokens=reply.output_tokens, warning=str(exc))
+            return DraftGenerationResult(
+                "gagal",
+                model=reply.model,
+                input_tokens=reply.input_tokens,
+                output_tokens=reply.output_tokens,
+                warning=str(exc),
+            )
         return DraftGenerationResult(
-            "berhasil", preface=preface, sections=sections, model=reply.model,
-            input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
+            "berhasil",
+            preface=preface,
+            sections=sections,
+            model=reply.model,
+            input_tokens=reply.input_tokens,
+            output_tokens=reply.output_tokens,
         )

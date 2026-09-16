@@ -41,12 +41,12 @@ Jumlah dan nama subbagian boleh menyesuaikan topik dan kebutuhan tugas. Jangan m
 
 Default hierarki Makalah:
 
-- Tingkat utama / **Heading 1**: `BAB I`, `BAB II`, `BAB III`, dst.
+- Tingkat utama / **Heading 1**: `BAB I`, `BAB II`, `BAB III`, dst., serta `DAFTAR PUSTAKA` sebagai bagian akhir setingkat BAB.
 - Tingkat kedua / **Heading 2**: `A.`, `B.`, `C.`, `D.`, dst.
 - Tingkat ketiga / **Heading 3** bila diperlukan: `1.`, `2.`, `3.`, dst.
 - Tingkat keempat / **Heading 4** bila diperlukan: `a.`, `b.`, `c.`, dst.
 - Jadi pola default resmi Makalah adalah: **`BAB I → A. → 1. → a.`**
-- Huruf seperti `C.`, `D.`, atau `M.` pada Makalah tetap harus dibaca sebagai **subbagian Heading 2**, bukan dianggap angka Romawi untuk Heading 1. Heading 1 hanya boleh berasal dari label `BAB ...`.
+- Huruf seperti `C.`, `D.`, atau `M.` pada Makalah tetap harus dibaca sebagai **subbagian Heading 2**, bukan dianggap angka Romawi untuk Heading 1. Heading 1 BAB hanya berasal dari label `BAB ...`; `DAFTAR PUSTAKA` juga diperlakukan sebagai Heading 1 khusus bagian akhir.
 - Jangan memakai `BAB I → 1.1 → 1.1.1` sebagai default Makalah.
 - Jangan memakai `I. → A. → 1. → a.` sebagai default Makalah.
 - Heading BAB ditampilkan terpisah, misalnya `BAB I` pada satu baris dan `PENDAHULUAN` pada baris berikutnya, rata tengah dan tebal.
@@ -56,12 +56,13 @@ Default hierarki Makalah:
 - Bullet atau numbered list hanya dipakai di dalam isi jika memang berupa daftar, bukan sebagai pengganti hierarki heading.
 - Pada tampilan kerangka untuk pelanggan, tampilkan struktur heading saja tanpa ringkasan paragraf di bawah setiap heading.
 
-## Pergantian BAB
+## Pergantian Heading 1 / bagian utama
 
 - `BAB I` dimulai pada halaman baru setelah Daftar Isi.
-- **Setiap BAB berikutnya juga wajib dimulai pada halaman baru.** Jadi `BAB II` tidak boleh langsung menyambung di bawah bagian terakhir BAB I pada halaman yang sama, begitu juga `BAB III` dan BAB berikutnya.
-- Pergantian BAB memakai page break biasa, bukan reset nomor halaman.
-- Nomor halaman Arab tetap berlanjut antar-BAB.
+- **Setiap Heading 1 berikutnya wajib dimulai pada halaman baru.** Ini mencakup `BAB II`, `BAB III`, BAB berikutnya, dan `DAFTAR PUSTAKA`.
+- `DAFTAR PUSTAKA` tidak boleh menempel di bawah isi `BAB III` pada halaman yang sama; bagian ini harus dimulai pada halaman baru sendiri.
+- Pergantian Heading 1 memakai page break biasa, bukan reset nomor halaman.
+- Nomor halaman Arab tetap berlanjut dari BAB I sampai Daftar Pustaka.
 
 ## Target jumlah halaman
 
@@ -104,7 +105,8 @@ Default penomoran halaman:
 - Marker internal `[[R1]]`, `[[R2]]`, dst. hanya untuk mesin dan tidak boleh terlihat pada dokumen final.
 - Citation Engine mengubah marker menjadi catatan kaki Word asli.
 - Daftar pustaka hanya memuat sumber yang benar-benar digunakan.
-- Judul bagian ditulis **`DAFTAR PUSTAKA`** sebagai bagian akhir setingkat BAB, tetapi tidak diberi label `BAB IV` atau nomor Romawi/huruf tambahan kecuali instruksi resmi meminta begitu.
+- Judul bagian ditulis **`DAFTAR PUSTAKA`** sebagai bagian akhir setingkat BAB / Heading 1, tetapi tidak diberi label `BAB IV` atau nomor Romawi/huruf tambahan kecuali instruksi resmi meminta begitu.
+- `DAFTAR PUSTAKA` wajib dimulai pada halaman baru dan nomor halaman Arab tetap melanjutkan halaman sebelumnya.
 - Entri daftar pustaka disusun alfabetis, rata kiri, memakai hanging indent sekitar **1,27 cm**, spasi tunggal, dan jarak antar-entri yang rapi.
 - Nama jurnal untuk artikel atau judul buku/sumber non-jurnal dicetak miring sesuai format engine.
 - Tata letak daftar pustaka mengikuti format engine yang telah ditetapkan; model AI tidak boleh mengubahnya sendiri.

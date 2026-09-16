@@ -1,10 +1,11 @@
-"""Document Engine v0.8 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.9 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
 dan isi utama dibuat langsung di struktur DOCX agar Word/PDF stabil.
 
 Default Makalah mengikuti policy Taqi AI: BAB I -> A. -> 1. -> a.
+Daftar Isi default Makalah menampilkan Heading 1 sampai Heading 3.
 """
 
 from __future__ import annotations
@@ -116,10 +117,13 @@ class DocumentEngine:
 
     @staticmethod
     def _toc() -> str:
+        # Default Makalah: Daftar Isi hanya sampai Heading 3.
+        # Heading 4 (a., b., c.) tetap ada di isi dokumen tetapi tidak masuk TOC,
+        # kecuali nanti pedoman resmi institusi menentukan kedalaman berbeda.
         return (
             '<w:p><w:pPr><w:jc w:val="left"/></w:pPr>'
             '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
-            '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-4" \\h \\z \\u </w:instrText></w:r>'
+            '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>'
             '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
             '<w:r><w:t>Daftar isi akan diperbarui saat dokumen dibuka di Microsoft Word.</w:t></w:r>'
             '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'

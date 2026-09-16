@@ -35,6 +35,8 @@ class CitationEngine:
     FOOTNOTE_FONT = "Times New Roman"
     FOOTNOTE_SIZE = 10
     IBID_TEXT = "Ibid."
+    DEFAULT_REPEAT_MODE = "auto"
+    VALID_REPEAT_MODES = ("auto", "short")
 
     def __init__(self, document_engine: DocumentEngine):
         self.document_engine = document_engine
@@ -43,12 +45,40 @@ class CitationEngine:
     def status_text(self) -> str:
         return (
             f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. "
-            "Catatan pertama lengkap; pengulangan berurutan memakai Ibid., pengulangan lain short note."
+            "citation_repeat_mode=auto; pelanggan dapat memilih short untuk tanpa Ibid."
         )
 
     @staticmethod
     def _clean(value: str) -> str:
         return re.sub(r"\s+", " ", (value or "").strip())
+
+    @classmethod
+    def normalize_repeat_mode(cls, value: str | None) -> str:
+        """Normalisasi preferensi pengulangan citation per order.
+
+        `auto`  : full note -> Ibid. untuk pengulangan langsung -> short note jika diselingi.
+        `short` : full note pada kemunculan pertama -> semua pengulangan memakai short note.
+        """
+        raw = cls._clean(value or cls.DEFAULT_REPEAT_MODE).casefold().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "auto": "auto",
+            "default": "auto",
+            "ibid": "auto",
+            "with_ibid": "auto",
+            "pakai_ibid": "auto",
+            "short": "short",
+            "short_note": "short",
+            "no_ibid": "short",
+            "without_ibid": "short",
+            "tanpa_ibid": "short",
+            "jangan_pakai_ibid": "short",
+        }
+        mode = aliases.get(raw, raw)
+        if mode not in cls.VALID_REPEAT_MODES:
+            raise ValueError(
+                "citation_repeat_mode tidak dikenal. Gunakan 'auto' atau 'short'."
+            )
+        return mode
 
     @classmethod
     def _split_name(cls, name: str) -> tuple[str, str]:
@@ -136,18 +166,20 @@ class CitationEngine:
 
     @classmethod
     def footnote_short(cls, source: RegisteredSource) -> str:
-        """Short note untuk pengulangan yang tidak berurutan dari sumber yang sama."""
+        """Short note untuk pengulangan sumber yang sudah pernah dipakai."""
         author = cls._note_authors(source, short=True)
         title = cls._short_title(source.title)
         return f'{author}, “{title}.”'
 
     @classmethod
-    def note_plan(cls, ref_ids: tuple[str, ...] | list[str]) -> tuple[tuple[str, str], ...]:
-        """Rencana full/ibid/short berdasarkan urutan catatan kaki.
-
-        Ibid. hanya aman bila catatan yang tepat sebelumnya merujuk sumber yang sama.
-        Bila sumber sudah pernah dipakai tetapi diselingi sumber lain, gunakan short note.
-        """
+    def note_plan(
+        cls,
+        ref_ids: tuple[str, ...] | list[str],
+        *,
+        repeat_mode: str = "auto",
+    ) -> tuple[tuple[str, str], ...]:
+        """Rencana full/ibid/short berdasarkan urutan catatan kaki dan preferensi order."""
+        mode = cls.normalize_repeat_mode(repeat_mode)
         seen: set[str] = set()
         previous = ""
         plan: list[tuple[str, str]] = []
@@ -157,7 +189,7 @@ class CitationEngine:
                 continue
             if ref_id not in seen:
                 kind = "full"
-            elif ref_id == previous:
+            elif mode == "auto" and ref_id == previous:
                 kind = "ibid"
             else:
                 kind = "short"
@@ -251,12 +283,14 @@ class CitationEngine:
         docx_path: Path,
         sources: list[RegisteredSource],
         *,
+        citation_repeat_mode: str = "auto",
         create_pdf: bool = True,
         timeout: int = 90,
     ) -> str:
         if os.name != "nt":
             return "Footnote Word belum diterapkan: fitur ini membutuhkan Windows + Microsoft Word."
 
+        repeat_mode = CitationEngine.normalize_repeat_mode(citation_repeat_mode)
         citation_file = docx_path.with_suffix(".citations.json")
         payload = []
         for source in sources:
@@ -279,6 +313,7 @@ class CitationEngine:
         env["TAQI_CITATION_PDF"] = str(docx_path.with_suffix(".pdf").resolve()) if create_pdf else ""
         env["TAQI_FOOTNOTE_FONT"] = CitationEngine.FOOTNOTE_FONT
         env["TAQI_FOOTNOTE_SIZE"] = str(CitationEngine.FOOTNOTE_SIZE)
+        env["TAQI_CITATION_REPEAT_MODE"] = repeat_mode
 
         script = r'''
 $ErrorActionPreference = 'Stop'
@@ -287,6 +322,8 @@ $jsonPath = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_JSON)
 $pdfOut = [string]$env:TAQI_CITATION_PDF
 $footnoteFont = [string]$env:TAQI_FOOTNOTE_FONT
 $footnoteSize = [double]$env:TAQI_FOOTNOTE_SIZE
+$repeatMode = ([string]$env:TAQI_CITATION_REPEAT_MODE).Trim().ToLowerInvariant()
+if ([string]::IsNullOrWhiteSpace($repeatMode)) { $repeatMode = 'auto' }
 if (-not [string]::IsNullOrWhiteSpace($pdfOut)) { $pdfOut = [System.IO.Path]::GetFullPath($pdfOut) }
 if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) { throw "Data citation tidak ditemukan: $jsonPath" }
@@ -305,8 +342,6 @@ try {
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
 
   # Tahap 1: marker internal -> footnote Word dengan token sumber sementara.
-  # Token diproses lagi dalam urutan footnote aktual agar Ibid. hanya dipakai
-  # ketika catatan tepat sebelumnya benar-benar berasal dari sumber yang sama.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
     $searchStart = 0
@@ -328,7 +363,9 @@ try {
     }
   }
 
-  # Tahap 2: format full note / Ibid. / short note berdasarkan urutan aktual.
+  # Tahap 2: format berdasarkan citation_repeat_mode order.
+  # auto  = full -> Ibid. bila sumber sama persis dengan note sebelumnya -> short.
+  # short = full -> semua pengulangan short note; tidak pernah memakai Ibid.
   $seen = @{}
   $previousRef = ''
   foreach ($fn in $doc.Footnotes) {
@@ -342,7 +379,7 @@ try {
     $isImmediateRepeat = (-not $isFirst) -and ($previousRef -eq $refId)
     if ($isFirst) {
       $noteText = [string]$item.first
-    } elseif ($isImmediateRepeat) {
+    } elseif (($repeatMode -eq 'auto') -and $isImmediateRepeat) {
       $noteText = [string]$item.ibid
     } else {
       $noteText = [string]$item.repeat
@@ -501,7 +538,19 @@ try {
             return f"Footnote/daftar pustaka/PDF belum berhasil diterapkan: {detail[:420]}"
         return ""
 
-    def build(self, spec: MakalahSpec, sources: list[RegisteredSource], *, create_pdf: bool = True) -> CitationBuildResult:
+    def build(
+        self,
+        spec: MakalahSpec,
+        sources: list[RegisteredSource],
+        *,
+        create_pdf: bool = True,
+        citation_repeat_mode: str = "auto",
+    ) -> CitationBuildResult:
+        try:
+            repeat_mode = self.normalize_repeat_mode(citation_repeat_mode)
+        except ValueError as exc:
+            return CitationBuildResult("gagal", warning=str(exc))
+
         cited_spec, used_refs, used_sources = self._with_bibliography(spec, sources)
         source_ids = {source.ref_id.upper() for source in sources}
         unknown = tuple(ref for ref in used_refs if ref not in source_ids)
@@ -516,7 +565,12 @@ try {
         except (OSError, ValueError) as exc:
             return CitationBuildResult("gagal", used_refs=used_refs, warning=f"Gagal membuat DOCX: {exc}")
 
-        warning = self._apply_word_footnotes(docx_path, used_sources, create_pdf=create_pdf)
+        warning = self._apply_word_footnotes(
+            docx_path,
+            used_sources,
+            citation_repeat_mode=repeat_mode,
+            create_pdf=create_pdf,
+        )
         if warning:
             return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=warning)
 

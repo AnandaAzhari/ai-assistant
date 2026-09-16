@@ -8,6 +8,10 @@ Tata letak daftar pustaka mengikuti format makalah yang dipilih untuk Taqi AI:
 judul DAFTAR PUSTAKA di tengah, entri rata kiri, hanging indent 1,27 cm,
 spasi tunggal, dan jarak antar-entri ringan. Dengan begitu Word tidak merenggangkan
 spasi seperti paragraf justify biasa.
+
+Nomor halaman final juga diterapkan deterministik melalui Microsoft Word:
+cover tanpa nomor, bagian awal memakai Romawi kecil mulai i, lalu BAB I memakai
+angka Arab mulai 1 dan berlanjut sampai Daftar Pustaka.
 """
 
 from __future__ import annotations
@@ -43,7 +47,10 @@ class CitationEngine:
 
     @property
     def status_text(self) -> str:
-        return f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. Marker: [[R1]], [[R2]], dst."
+        return (
+            f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. "
+            "Marker: [[R1]], [[R2]], dst. Nomor halaman: cover tanpa nomor, Romawi pada halaman awal, Arab mulai BAB I."
+        )
 
     @staticmethod
     def _clean(value: str) -> str:
@@ -329,6 +336,74 @@ try {
     }
   }
 
+  # Terapkan nomor halaman makalah secara otomatis.
+  # Cover: tanpa nomor. Halaman awal: i, ii, iii... BAB I dst.: 1, 2, 3...
+  function Find-TextStart([string]$needle) {
+    $search = $doc.Content.Duplicate
+    $find = $search.Find
+    $find.ClearFormatting()
+    $find.Text = $needle
+    $find.Forward = $true
+    $find.Wrap = 0
+    if ($find.Execute()) { return [int]$search.Start }
+    return -1
+  }
+
+  $prelimStart = Find-TextStart 'KATA PENGANTAR'
+  if ($prelimStart -lt 0) { $prelimStart = Find-TextStart 'DAFTAR ISI' }
+  if ($prelimStart -ge 0) {
+    $r = $doc.Range($prelimStart, $prelimStart)
+    # Continuous section break dipakai agar page break yang sudah dibuat engine tetap menjadi pemisah halaman.
+    $r.InsertBreak(3)
+  }
+
+  # Cari BAB I setelah section awal dibuat agar posisi range selalu terbaru.
+  $mainStart = Find-TextStart 'BAB I'
+  if ($mainStart -ge 0) {
+    $r = $doc.Range($mainStart, $mainStart)
+    $r.InsertBreak(3)
+  }
+
+  if ($doc.Sections.Count -ge 3) {
+    $coverSection = $doc.Sections.Item(1)
+    $prelimSection = $doc.Sections.Item(2)
+    $mainSection = $doc.Sections.Item(3)
+
+    # Cover tanpa nomor halaman.
+    try {
+      $coverFooter = $coverSection.Footers.Item(1)
+      $coverFooter.LinkToPrevious = $false
+      while ($coverFooter.PageNumbers.Count -gt 0) { $coverFooter.PageNumbers.Item(1).Delete() }
+      $coverFooter.Range.Text = ''
+    } catch {}
+
+    # Kata Pengantar + Daftar Isi memakai Romawi kecil mulai i.
+    try {
+      $prelimFooter = $prelimSection.Footers.Item(1)
+      $prelimFooter.LinkToPrevious = $false
+      while ($prelimFooter.PageNumbers.Count -gt 0) { $prelimFooter.PageNumbers.Item(1).Delete() }
+      $prelimFooter.Range.Text = ''
+      $prelimFooter.Range.ParagraphFormat.Alignment = 1
+      $prelimFooter.PageNumbers.RestartNumberingAtSection = $true
+      $prelimFooter.PageNumbers.StartingNumber = 1
+      $prelimFooter.PageNumbers.NumberStyle = 2
+      $prelimFooter.PageNumbers.Add(1, $true) | Out-Null
+    } catch {}
+
+    # BAB I dimulai dari angka Arab 1 dan berlanjut sampai Daftar Pustaka.
+    try {
+      $mainFooter = $mainSection.Footers.Item(1)
+      $mainFooter.LinkToPrevious = $false
+      while ($mainFooter.PageNumbers.Count -gt 0) { $mainFooter.PageNumbers.Item(1).Delete() }
+      $mainFooter.Range.Text = ''
+      $mainFooter.Range.ParagraphFormat.Alignment = 1
+      $mainFooter.PageNumbers.RestartNumberingAtSection = $true
+      $mainFooter.PageNumbers.StartingNumber = 1
+      $mainFooter.PageNumbers.NumberStyle = 0
+      $mainFooter.PageNumbers.Add(1, $true) | Out-Null
+    } catch {}
+  }
+
   $doc.Save()
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
@@ -341,15 +416,15 @@ try {
                 capture_output=True, text=True, timeout=timeout, check=False, env=env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"Footnote/format daftar pustaka belum berhasil diterapkan: {exc}"
+            return f"Footnote/format daftar pustaka/nomor halaman belum berhasil diterapkan: {exc}"
         finally:
             try:
                 citation_file.unlink(missing_ok=True)
             except OSError:
                 pass
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote/format daftar pustaka.").strip()
-            return f"Footnote/format daftar pustaka belum berhasil diterapkan: {detail[:420]}"
+            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote/format daftar pustaka/nomor halaman.").strip()
+            return f"Footnote/format daftar pustaka/nomor halaman belum berhasil diterapkan: {detail[:420]}"
         return ""
 
     def build(self, spec: MakalahSpec, sources: list[RegisteredSource], *, create_pdf: bool = True) -> CitationBuildResult:

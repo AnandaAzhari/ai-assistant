@@ -53,17 +53,20 @@ class IntakeInterpreter:
 
     @staticmethod
     def should_use(raw: str, missing_fields: list[str]) -> bool:
-        """Gunakan AI hanya jika pesan cukup natural/ambigu dan masih ada data kosong."""
+        """Panggil AI hanya bila pesan tampak menyebut field yang parser lokal masih lewatkan."""
         text = re.sub(r"\s+", " ", (raw or "").strip())
-        if not text or not missing_fields:
+        if not text or not missing_fields or text.startswith("/"):
             return False
-        if text.startswith("/"):
-            return False
-        # Jawaban singkat sederhana lebih baik ditangani parser lokal.
-        if len(text.split()) <= 2 and ":" not in text and "," not in text:
-            return False
-        # Pesan yang memuat beberapa potong data, typo, atau kalimat bebas layak dibantu AI.
-        return len(text) >= 18 or "," in text or "makalah" in text.casefold()
+        lowered = text.casefold()
+        cues = {
+            "institution_level": r"\b(?:sd|mi|smp|mts|sma|ma|man|smk|kampus|kuliah|universitas|perguruan)\b",
+            "class_semester": r"\b(?:kelas|semester|[ivxlcdm]{1,7}|\d{1,2})\b",
+            "subject": r"\b(?:mapel|mata\s+pelajaran|mata\s+kuliah|pelajaran|kuliah)\b",
+            "topic_title": r"\b(?:makalah|judul|topik|tentang|tentan|tenteng)\b",
+            "teacher_instructions": r"\b(?:arahan|instruksi|ketentuan|guru|dosen)\b",
+            "target_length": r"\b(?:halaman|page|pages|kata|jumlah|target|panjang)\b",
+        }
+        return any(re.search(cues.get(field, r"$^"), lowered, re.IGNORECASE) for field in missing_fields)
 
     @staticmethod
     def _extract_json(text: str) -> dict[str, object]:

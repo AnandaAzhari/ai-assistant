@@ -52,6 +52,9 @@ Default hierarki Makalah:
 - Heading BAB ditampilkan terpisah, misalnya `BAB I` pada satu baris dan `PENDAHULUAN` pada baris berikutnya, rata tengah dan tebal.
 - Heading `A.`, `1.`, dan `a.` memakai satu spasi normal antara penanda dan judul; jangan menambahkan TAB acak.
 - Paragraf isi setelah heading secara default memakai first-line indent sekitar **1,25 cm**.
+- **Semua paragraf isi utama wajib memakai perataan Justify/rata kiri-kanan**, bukan rata kiri biasa, kecuali pedoman resmi instansi menentukan lain.
+- Justify diterapkan sebagai properti paragraf Word, bukan dengan menambahkan spasi manual.
+- First-line indent diterapkan sebagai properti paragraf Word, bukan dengan karakter TAB manual.
 - Bullet `•` tidak boleh menggantikan heading terstruktur.
 - Bullet atau numbered list hanya dipakai di dalam isi jika memang berupa daftar, bukan sebagai pengganti hierarki heading.
 - Pada tampilan kerangka untuk pelanggan, tampilkan struktur heading saja tanpa ringkasan paragraf di bawah setiap heading.

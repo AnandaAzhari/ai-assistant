@@ -1,4 +1,4 @@
-"""Document Engine v0.1 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.2 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 PDF bersifat best-effort melalui Microsoft Word COM di Windows jika Word tersedia.
@@ -32,8 +32,11 @@ class MakalahSpec:
     class_semester: str
     subject: str
     author: str = ""
+    group_name: str = ""
+    group_members: tuple[str, ...] = field(default_factory=tuple)
     teacher: str = ""
-    year: str = ""
+    academic_year: str = ""
+    preface: tuple[str, ...] = field(default_factory=tuple)
     sections: tuple[DocumentSection, ...] = field(default_factory=tuple)
 
 
@@ -91,6 +94,23 @@ class DocumentEngine:
             ppr.append(f'<w:jc w:val="{align}"/>')
         ppr.append(f'<w:spacing w:before="{before}" w:after="{after}" w:line="{line}" w:lineRule="auto"/>')
         return f'<w:p><w:pPr>{"".join(ppr)}</w:pPr>{cls._run(text, bold=bold, size=size)}</w:p>'
+
+    @classmethod
+    def _chapter_heading(cls, title: str) -> str:
+        """Render `BAB I PENDAHULUAN` menjadi dua baris seperti referensi pelanggan."""
+        match = re.match(r"^\s*(BAB\s+[IVXLCDM0-9]+)\s+(.+?)\s*$", title, flags=re.IGNORECASE)
+        if not match:
+            return cls._paragraph(title, style="Heading1", align="center", bold=True, size=14)
+        first = match.group(1).upper()
+        second = match.group(2).upper()
+        return (
+            '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/>'
+            '<w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>'
+            f'{cls._run(first, bold=True, size=14)}'
+            '<w:r><w:br/></w:r>'
+            f'{cls._run(second, bold=True, size=14)}'
+            '</w:p>'
+        )
 
     @staticmethod
     def _page_break() -> str:
@@ -173,25 +193,47 @@ class DocumentEngine:
 
     def _document_xml(self, spec: MakalahSpec) -> str:
         body: list[str] = []
+
+        # COVER — mengikuti gaya referensi pelanggan: judul, tugas, pembimbing, kelompok/penulis, kelas, sekolah, tahun ajaran.
         body.append(self._paragraph("MAKALAH", align="center", bold=True, size=16, after=220))
-        body.append(self._paragraph(spec.title.upper(), align="center", bold=True, size=16, after=360))
-        body.append(self._paragraph(f"Mata Pelajaran/Mata Kuliah: {spec.subject}", align="center", after=80))
-        body.append(self._paragraph(f"Kelas/Semester: {spec.class_semester}", align="center", after=80))
+        body.append(self._paragraph(spec.title.upper(), align="center", bold=True, size=16, after=260))
+        body.append(self._paragraph(f"Disusun untuk Memenuhi Tugas Mata Pelajaran/Mata Kuliah {spec.subject}", align="center", after=100))
         if spec.teacher:
-            body.append(self._paragraph(f"Guru/Dosen: {spec.teacher}", align="center", after=80))
-        if spec.author:
-            body.append(self._paragraph(f"Disusun oleh: {spec.author}", align="center", after=80))
+            body.append(self._paragraph(f"Guru/Dosen Pembimbing: {spec.teacher}", align="center", after=180))
+        body.append(self._paragraph("Disusun Oleh:", align="center", bold=True, after=80))
+        if spec.group_name:
+            body.append(self._paragraph(spec.group_name, align="center", bold=True, after=50))
+        if spec.group_members:
+            for member in spec.group_members:
+                if member.strip():
+                    body.append(self._paragraph(member.strip(), align="center", after=30))
+        elif spec.author:
+            body.append(self._paragraph(spec.author, align="center", after=80))
+        body.append(self._paragraph(f"KELAS: {spec.class_semester}", align="center", bold=True, after=160))
         body.append(self._paragraph(spec.institution.upper(), align="center", bold=True, after=80))
-        body.append(self._paragraph(spec.year or str(datetime.now().year), align="center", after=80))
+        if spec.academic_year:
+            body.append(self._paragraph(f"TAHUN AJARAN {spec.academic_year}", align="center", bold=True, after=80))
         body.append(self._page_break())
+
+        # Bagian awal seperti referensi: Kata Pengantar lalu Daftar Isi.
+        if spec.preface:
+            body.append(self._paragraph("KATA PENGANTAR", style="Heading1", align="center", bold=True, size=14))
+            for paragraph in spec.preface:
+                if paragraph.strip():
+                    body.append(self._paragraph(paragraph.strip(), align="both"))
+            body.append(self._page_break())
 
         body.append(self._paragraph("DAFTAR ISI", style="Heading1", align="center", bold=True, size=14))
         body.append(self._toc())
         body.append(self._page_break())
 
+        # Isi: BAB ditampilkan dua baris (BAB I / PENDAHULUAN), subbab tetap 1.1, 1.2, dst.
         for section in spec.sections:
             level = max(1, min(int(section.level or 1), 3))
-            body.append(self._paragraph(section.title, style=f"Heading{level}", align="left", bold=True, size=14 if level == 1 else 12))
+            if level == 1 and re.match(r"^\s*BAB\s+[IVXLCDM0-9]+\b", section.title, flags=re.IGNORECASE):
+                body.append(self._chapter_heading(section.title))
+            else:
+                body.append(self._paragraph(section.title, style=f"Heading{level}", align="left", bold=True, size=14 if level == 1 else 12))
             for paragraph in section.paragraphs:
                 if paragraph.strip():
                     body.append(self._paragraph(paragraph.strip(), align="both"))
@@ -312,24 +354,36 @@ def demo_spec() -> MakalahSpec:
     return MakalahSpec(
         order_id="DEMO-MAKALAH",
         title="Pencemaran Lingkungan",
-        institution="Taqi DocuTech - Dokumen Uji",
-        class_semester="XI",
+        institution="MAN Contoh Padangsidimpuan",
+        class_semester="XI MIPA 3",
         subject="Biologi",
-        author="Contoh Pelanggan",
-        year=str(datetime.now().year),
+        group_name="Kelompok 4",
+        group_members=("Anggota Satu", "Anggota Dua", "Anggota Tiga"),
+        teacher="Nama Guru, S.Pd.",
+        academic_year="2026/2027",
+        preface=(
+            "Puji syukur kehadirat Tuhan Yang Maha Esa atas rahmat-Nya sehingga makalah ini dapat diselesaikan.",
+            "Makalah ini disusun untuk memenuhi tugas mata pelajaran Biologi dan membahas pencemaran lingkungan secara ringkas.",
+            "Kami menyadari makalah ini masih memiliki kekurangan. Kritik dan saran sangat diharapkan untuk perbaikan.",
+        ),
         sections=(
-            DocumentSection("BAB I PENDAHULUAN", (
+            DocumentSection("BAB I PENDAHULUAN", (), 1),
+            DocumentSection("1.1 Latar Belakang", (
                 "Pencemaran lingkungan merupakan perubahan kondisi lingkungan akibat masuknya zat, energi, atau komponen lain yang dapat menurunkan kualitas lingkungan.",
                 "Dokumen ini hanya contoh untuk menguji format Document Engine Taqi AI.",
-            ), 1),
-            DocumentSection("1.1 Latar Belakang", (
-                "Lingkungan yang sehat diperlukan untuk mendukung kehidupan manusia, hewan, dan tumbuhan.",
+            ), 2),
+            DocumentSection("1.2 Rumusan Masalah", (
+                "Bagaimana dampak pencemaran lingkungan terhadap kehidupan manusia dan ekosistem?",
             ), 2),
             DocumentSection("BAB II PEMBAHASAN", (
                 "Pencemaran dapat terjadi pada air, udara, dan tanah. Setiap jenis pencemaran memerlukan penanganan yang berbeda.",
             ), 1),
-            DocumentSection("BAB III PENUTUP", (
+            DocumentSection("BAB III PENUTUP", (), 1),
+            DocumentSection("3.1 Kesimpulan", (
                 "Upaya pencegahan pencemaran membutuhkan kesadaran bersama dan pengelolaan lingkungan yang bertanggung jawab.",
-            ), 1),
+            ), 2),
+            DocumentSection("3.2 Saran", (
+                "Masyarakat perlu menjaga lingkungan dan mengurangi sumber pencemaran dalam kehidupan sehari-hari.",
+            ), 2),
         ),
     )

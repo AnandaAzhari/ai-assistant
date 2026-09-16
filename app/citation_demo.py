@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.citation_engine import CitationEngine
+from app.citation_engine import CitationBuildResult, CitationEngine
 from app.document_engine import DocumentEngine, DocumentSection, MakalahSpec
 from app.source_registry import RegisteredSource
 
@@ -45,10 +45,8 @@ def demo_sources() -> list[RegisteredSource]:
     ]
 
 
-def main() -> None:
-    engine = DocumentEngine.from_env()
-    citations = CitationEngine(engine)
-    spec = MakalahSpec(
+def demo_spec() -> MakalahSpec:
+    return MakalahSpec(
         order_id="DEMO-FOOTNOTE",
         title="Pencemaran Lingkungan",
         institution="Taqi DocuTech - Dokumen Uji",
@@ -79,7 +77,16 @@ def main() -> None:
             DocumentSection("3.1 Kesimpulan", ("Pencegahan pencemaran memerlukan keterlibatan berbagai pihak.",), 2),
         ),
     )
-    result = citations.build(spec, demo_sources(), create_pdf=True)
+
+
+def build_demo(engine: DocumentEngine | None = None) -> CitationBuildResult:
+    document_engine = engine or DocumentEngine.from_env()
+    citations = CitationEngine(document_engine)
+    return citations.build(demo_spec(), demo_sources(), create_pdf=True)
+
+
+def main() -> None:
+    result = build_demo()
     print("Status:", result.status)
     print("DOCX:", result.docx_path or "-")
     print("PDF:", result.pdf_path or "-")

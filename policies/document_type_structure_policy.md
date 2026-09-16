@@ -7,7 +7,8 @@ Dokumen ini menetapkan struktur default berdasarkan **jenis dokumen**. Aturan in
 1. Pedoman/template/rubrik resmi guru, dosen, sekolah, program studi, fakultas, atau kampus.
 2. Instruksi khusus pelanggan yang jelas.
 3. Struktur default berdasarkan jenis dokumen di file ini.
-4. Preferensi model AI.
+4. Referensi fallback aktif pada `skills/document_academic/SKILL.md`.
+5. Preferensi model AI.
 
 AI tidak boleh mengganti struktur hanya karena model lebih menyukai format lain.
 
@@ -15,6 +16,9 @@ AI tidak boleh mengganti struktur hanya karena model lebih menyukai format lain.
 
 Default **Makalah** Taqi AI menggunakan BAB untuk bagian utama dan huruf/angka untuk turunannya:
 
+- Cover
+- Kata Pengantar
+- Daftar Isi
 - BAB I — PENDAHULUAN
   - A. Latar Belakang
   - B. Rumusan Masalah
@@ -49,6 +53,37 @@ Huruf `C`, `D`, `M`, dan huruf lain yang kebetulan juga merupakan simbol angka R
 Level `1.` dan `a.` tidak wajib muncul. Gunakan hanya jika subbagian memang perlu dipecah lagi. Jangan mengubah Makalah menjadi pola `BAB I → 1.1 → 1.1.1` atau `I → A → 1 → a` tanpa instruksi resmi.
 
 Setiap Heading 1 Makalah dimulai pada halaman baru. `BAB II` tidak boleh menyambung langsung setelah subbagian terakhir `BAB I`, dan `DAFTAR PUSTAKA` tidak boleh menempel di bawah isi `BAB III`. Page break antar-Heading 1 tidak mereset nomor halaman.
+
+### 1.1 Makalah Kuliah
+
+Jika pelanggan adalah mahasiswa dan meminta **makalah kuliah**, sementara dosen/kampus tidak memberikan struktur khusus, gunakan struktur awal berikut:
+
+1. **Halaman Sampul**
+   - judul makalah;
+   - nama penulis/anggota kelompok;
+   - NIM bila tersedia;
+   - nama mata kuliah;
+   - nama dosen pengampu;
+   - program studi/fakultas dan universitas bila tersedia;
+   - tahun penulisan.
+2. **Kata Pengantar** — singkat dan formal.
+3. **Daftar Isi** — sesuai bagian dan nomor halaman final.
+4. **BAB I — PENDAHULUAN**
+   - A. Latar Belakang
+   - B. Rumusan Masalah
+   - C. Tujuan Penulisan
+   - D. Manfaat Penulisan bila diperlukan
+5. **BAB II — PEMBAHASAN**
+   - membahas jawaban atas rumusan masalah;
+   - memakai subbab yang jelas;
+   - didukung teori, data, pendapat ahli, dan referensi yang relevan;
+   - opini pribadi tanpa dasar tidak boleh menjadi isi utama.
+6. **BAB III — PENUTUP**
+   - A. Kesimpulan — merangkum hasil pembahasan dan menjawab rumusan masalah tanpa menambah informasi baru;
+   - B. Saran — rekomendasi yang relevan bila diperlukan.
+7. **DAFTAR PUSTAKA** — hanya sumber yang benar-benar dipakai dan ditulis konsisten sesuai gaya sitasi yang diminta.
+
+Struktur Makalah Kuliah ini sejalan dengan referensi 2026 yang tercantum pada `skills/document_academic/SKILL.md`. Referensi web bukan pengganti pedoman resmi dosen/kampus.
 
 ## 2. Karya Tulis Ilmiah (KTI)
 

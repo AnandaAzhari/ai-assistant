@@ -19,7 +19,6 @@ from app.source_registry import RegisteredSource
 
 
 _REF_PATTERN = re.compile(r"\[\[(R\d+)\]\]", re.IGNORECASE)
-_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
 
 
 @dataclass(frozen=True)
@@ -171,35 +170,6 @@ class CitationEngine:
             text += f" {locator}."
         return re.sub(r"\s+", " ", text).strip()
 
-    @staticmethod
-    def _roman_to_int(value: str) -> int:
-        roman = (value or "").upper()
-        total = 0
-        prev = 0
-        for char in reversed(roman):
-            current = _ROMAN_VALUES.get(char, 0)
-            if current < prev:
-                total -= current
-            else:
-                total += current
-                prev = current
-        return total
-
-    @staticmethod
-    def _int_to_roman(value: int) -> str:
-        number = max(1, int(value))
-        pairs = (
-            (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-            (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-            (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
-        )
-        parts: list[str] = []
-        for amount, symbol in pairs:
-            while number >= amount:
-                parts.append(symbol)
-                number -= amount
-        return "".join(parts)
-
     @classmethod
     def _is_bibliography_title(cls, title: str) -> bool:
         clean = cls._clean(title).casefold()
@@ -208,15 +178,8 @@ class CitationEngine:
 
     @classmethod
     def _bibliography_title(cls, spec: MakalahSpec) -> str:
-        """Makalah default memakai bagian utama Romawi; lanjutkan nomor terbesar."""
-        highest = 0
-        for section in spec.sections:
-            match = re.match(r"^([IVXLCDM]+)\.\s+", cls._clean(section.title), re.IGNORECASE)
-            if match:
-                highest = max(highest, cls._roman_to_int(match.group(1)))
-        if highest:
-            return f"{cls._int_to_roman(highest + 1)}. Daftar Pustaka"
-        return "Daftar Pustaka"
+        """Makalah default selalu memakai judul DAFTAR PUSTAKA tanpa nomor BAB/Romawi."""
+        return "DAFTAR PUSTAKA"
 
     @staticmethod
     def used_ref_ids(spec: MakalahSpec) -> tuple[str, ...]:
@@ -327,12 +290,19 @@ try {
     }
   }
 
-  # Cari heading Daftar Pustaka, termasuk bentuk "VI. Daftar Pustaka".
+  # Rapikan heading dan isi Daftar Pustaka.
   $bibliographyStart = -1
   foreach ($p in $doc.Paragraphs) {
     $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
     if ($text -match '^(?:[IVXLCDM]+\.\s*)?DAFTAR PUSTAKA$') {
       $bibliographyStart = $p.Range.End
+      try { $p.Range.ParagraphFormat.Alignment = 1 } catch {}
+      try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceAfter = 12 } catch {}
+      try { $p.Range.Font.Bold = 1 } catch {}
+      try { $p.Range.Font.Italic = 0 } catch {}
       break
     }
   }
@@ -379,6 +349,31 @@ try {
     }
   }
   try { $doc.Fields.Update() | Out-Null } catch {}
+  foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
+  try { $doc.Repaginate() } catch {}
+
+  # Rapikan daftar isi: BAB dan DAFTAR PUSTAKA setingkat; A/1/a bertingkat konsisten.
+  foreach ($toc in $doc.TablesOfContents) {
+    foreach ($p in $toc.Range.Paragraphs) {
+      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
+      if ([string]::IsNullOrWhiteSpace($text)) { continue }
+      try { $p.Range.ParagraphFormat.Alignment = 0 } catch {}
+      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceAfter = 0 } catch {}
+      if (($text -match '^BAB\s+[IVXLCDM]+\b') -or ($text -match '^DAFTAR PUSTAKA\b')) {
+        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+      } elseif ($text -match '^[A-Z]\.\s+\S') {
+        try { $p.Range.ParagraphFormat.LeftIndent = 18 } catch {}
+      } elseif ($text -match '^\d+\.\s+\S') {
+        try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
+      } elseif ($text -match '^[a-z]\.\s+\S') {
+        try { $p.Range.ParagraphFormat.LeftIndent = 54 } catch {}
+      }
+    }
+  }
+
+  try { $doc.Repaginate() } catch {}
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
   try { $doc.Repaginate() } catch {}
   $doc.Save()

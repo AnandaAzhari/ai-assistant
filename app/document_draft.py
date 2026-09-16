@@ -1,8 +1,9 @@
-"""Generator draft makalah terstruktur untuk Document Agent.
+"""Generator isi makalah terstruktur untuk Document Agent.
 
-Model hanya mendapat requirement, outline yang sudah disetujui, dan Source Registry.
-Sumber direferensikan dengan marker [[R1]], [[R2]], dst.; formatting footnote dan
-daftar pustaka tetap dilakukan CitationEngine secara deterministik.
+Model hanya mendapat data makalah, kerangka yang sudah disetujui, policy format,
+dan Source Registry. Sumber direferensikan dengan marker [[R1]], [[R2]], dst.;
+format catatan kaki dan daftar pustaka tetap dilakukan CitationEngine secara
+deterministik.
 """
 
 from __future__ import annotations
@@ -13,12 +14,13 @@ import re
 from dataclasses import dataclass
 
 from app.document_engine import DocumentSection
+from app.document_policy import load_document_format_policy
 from app.providers.base import ModelProvider
 from app.source_registry import RegisteredSource
 
 
-DRAFT_PROMPT = """Kamu adalah penulis draft akademik Taqi DocuTech.
-Buat draft makalah berdasarkan requirement dan outline yang SUDAH DISETUJUI.
+DRAFT_PROMPT = """Kamu adalah penulis makalah Taqi DocuTech.
+Buat isi makalah berdasarkan data dan kerangka yang SUDAH DISETUJUI.
 
 ATURAN SUMBER WAJIB:
 - Hanya gunakan sumber dari SOURCE REGISTRY yang diberikan.
@@ -31,8 +33,12 @@ ATURAN SUMBER WAJIB:
 
 ATURAN DOKUMEN:
 - Bahasa Indonesia formal dan mudah dipahami sesuai jenjang.
-- Ikuti instruksi guru/dosen bila ada.
-- Pertahankan struktur BAB/subbab dari outline yang disetujui.
+- Instruksi guru/dosen/sekolah/kampus lebih tinggi prioritasnya daripada format default.
+- WAJIB mengikuti DOCUMENT FORMAT POLICY yang diberikan.
+- Pertahankan struktur BAB/subbab dari kerangka yang disetujui.
+- Heading tingkat 3 harus berbentuk 1.1.1, 1.1.2, dst., bukan bullet.
+- Bullet hanya boleh berada di dalam isi bila memang berupa daftar, bukan sebagai pengganti heading.
+- Hormati target jumlah halaman. Jika target adalah 8 halaman total, jangan menulis seolah-olah 8 halaman itu hanya untuk isi utama.
 - Sertakan Kata Pengantar singkat.
 - Jangan membuat Cover, Daftar Isi, atau Daftar Pustaka di JSON; engine lokal membuatnya.
 - Jangan menulis Markdown.
@@ -42,7 +48,8 @@ KELUARKAN JSON VALID SAJA dengan bentuk persis:
   "preface": ["paragraf 1", "paragraf 2"],
   "sections": [
     {"title": "BAB I PENDAHULUAN", "level": 1, "paragraphs": []},
-    {"title": "1.1 Latar Belakang", "level": 2, "paragraphs": ["..."]}
+    {"title": "1.1 Latar Belakang", "level": 2, "paragraphs": ["..."]},
+    {"title": "2.1.1 Contoh Subbagian", "level": 3, "paragraphs": ["..."]}
   ]
 }
 """
@@ -87,6 +94,31 @@ class DraftGenerator:
             metadata.append("Abstrak: TIDAK TERSEDIA — jangan mengarang isi/temuan spesifik sumber ini.")
         return "\n".join(metadata)
 
+    @staticmethod
+    def _length_guidance(requirements_text: str) -> str:
+        """Beri panduan panjang tanpa menganggap target halaman sebagai halaman isi saja."""
+        text = requirements_text or ""
+        word_match = re.search(r"Jumlah halaman/kata:\s*(\d+)\s*kata", text, re.IGNORECASE)
+        if word_match:
+            return f"Target panjang eksplisit: sekitar {word_match.group(1)} kata."
+
+        page_match = re.search(r"Jumlah halaman/kata:\s*(\d+)\s*halaman", text, re.IGNORECASE)
+        if not page_match:
+            return "Ikuti target panjang pada data makalah secara proporsional."
+
+        pages = max(1, int(page_match.group(1)))
+        if pages <= 8:
+            return (
+                f"Target dokumen final sekitar {pages} halaman TOTAL. Halaman awal dan daftar pustaka ikut dihitung. "
+                "Jaga BAB II ringkas, umumnya 3–4 subbab utama, dan jangan memperpanjang isi hanya untuk memenuhi token."
+            )
+        if pages <= 12:
+            return (
+                f"Target dokumen final sekitar {pages} halaman TOTAL. Halaman awal dan daftar pustaka ikut dihitung. "
+                "BAB II umumnya cukup 4–6 subbab utama."
+            )
+        return f"Target dokumen final sekitar {pages} halaman TOTAL; jaga pembagian panjang antar-BAB tetap proporsional."
+
     @classmethod
     def _messages(
         cls,
@@ -97,12 +129,14 @@ class DraftGenerator:
     ) -> list[dict[str, str]]:
         source_text = "\n\n---\n\n".join(cls._source_block(source) for source in sources)
         user = (
-            "REQUIREMENT:\n" + requirements_text +
+            "DATA MAKALAH:\n" + requirements_text +
+            "\n\nPANDUAN PANJANG:\n" + cls._length_guidance(requirements_text) +
             "\n\nDATA COVER (untuk konteks saja):\n" + cover_text +
-            "\n\nOUTLINE DISETUJUI:\n" + outline_text[:12000] +
+            "\n\nKERANGKA DISETUJUI:\n" + outline_text[:12000] +
             "\n\nSOURCE REGISTRY:\n" + source_text[:30000]
         )
-        return [{"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": user}]
+        system = DRAFT_PROMPT + "\n\nDOCUMENT FORMAT POLICY WAJIB:\n" + load_document_format_policy()
+        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -112,10 +146,10 @@ class DraftGenerator:
         start = clean.find("{")
         end = clean.rfind("}")
         if start < 0 or end <= start:
-            raise ValueError("Model tidak mengembalikan JSON draft yang valid.")
+            raise ValueError("Model tidak mengembalikan JSON isi makalah yang valid.")
         payload = json.loads(clean[start:end + 1])
         if not isinstance(payload, dict):
-            raise ValueError("JSON draft harus berupa object.")
+            raise ValueError("JSON isi makalah harus berupa object.")
         return payload
 
     @staticmethod
@@ -123,7 +157,7 @@ class DraftGenerator:
         preface_raw = payload.get("preface") or []
         sections_raw = payload.get("sections") or []
         if not isinstance(preface_raw, list) or not isinstance(sections_raw, list):
-            raise ValueError("Struktur JSON draft tidak sesuai.")
+            raise ValueError("Struktur JSON isi makalah tidak sesuai.")
         preface = tuple(str(item).strip() for item in preface_raw if str(item).strip())[:5]
         sections: list[DocumentSection] = []
         used_markers: set[str] = set()
@@ -152,9 +186,9 @@ class DraftGenerator:
             sections.append(DocumentSection(title, tuple(paragraphs), level))
         unknown = sorted(used_markers - allowed_refs)
         if unknown:
-            raise ValueError("Draft memakai marker sumber yang tidak terdaftar: " + ", ".join(unknown))
+            raise ValueError("Isi makalah memakai marker sumber yang tidak terdaftar: " + ", ".join(unknown))
         if not sections:
-            raise ValueError("Model tidak menghasilkan section makalah.")
+            raise ValueError("Model tidak menghasilkan bagian makalah.")
         return preface, tuple(sections)
 
     def generate(
@@ -165,7 +199,7 @@ class DraftGenerator:
         sources: list[RegisteredSource],
     ) -> DraftGenerationResult:
         if not self.provider or not self.provider.configured:
-            return DraftGenerationResult("belum_dikonfigurasi", warning="Provider AI untuk draft belum dikonfigurasi.")
+            return DraftGenerationResult("belum_dikonfigurasi", warning="Provider AI untuk isi makalah belum dikonfigurasi.")
         if not sources:
             return DraftGenerationResult("membutuhkan_sumber", warning="Source Registry masih kosong.")
         max_tokens = int(os.environ.get("DOCUMENT_DRAFT_MAX_TOKENS", "6000") or 6000)

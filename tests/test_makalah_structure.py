@@ -24,12 +24,22 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertEqual(DocumentEngine._heading_left(3), 360)
         self.assertEqual(DocumentEngine._heading_left(4), 720)
 
-    def test_body_paragraph_is_justify_with_127cm_first_line(self):
-        paragraph = DocumentEngine._paragraph(
+    def test_body_paragraph_indent_depends_on_heading_level(self):
+        self.assertEqual(DocumentEngine._body_paragraph_indent(2), (0, 720))
+        self.assertEqual(DocumentEngine._body_paragraph_indent(3), (0, 720))
+        self.assertEqual(DocumentEngine._body_paragraph_indent(4), (360, 360))
+
+    def test_body_paragraph_is_justify_with_word_indentation(self):
+        standard = DocumentEngine._paragraph(
             "Isi paragraf uji.", align="both", left=0, first_line=720
         )
-        self.assertIn('w:jc w:val="both"', paragraph)
-        self.assertIn('w:left="0" w:firstLine="720"', paragraph)
+        level4 = DocumentEngine._paragraph(
+            "Isi level empat.", align="both", left=360, first_line=360
+        )
+        self.assertIn('w:jc w:val="both"', standard)
+        self.assertIn('w:left="0" w:firstLine="720"', standard)
+        self.assertIn('w:jc w:val="both"', level4)
+        self.assertIn('w:left="360" w:firstLine="360"', level4)
 
     def test_policy_and_skill_use_same_default(self):
         policy = load_document_format_policy()
@@ -39,7 +49,8 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertIn("a.", policy)
         self.assertIn("DAFTAR PUSTAKA", policy)
         self.assertIn("Document Academic Skill", policy)
-        self.assertIn("first-line indent 1,27 cm", policy)
+        self.assertIn("Heading 4", policy)
+        self.assertIn("0,63 cm", policy)
         self.assertIn("Justify", policy)
         self.assertIn("BAB I -> A. -> 1. -> a.", DRAFT_PROMPT)
 
@@ -82,6 +93,25 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertIn("BAB I", xml)
         self.assertIn("PENDAHULUAN", xml)
         self.assertIn("DAFTAR PUSTAKA", xml)
+
+    def test_level4_paragraph_uses_selected_visual_indent(self):
+        spec = MakalahSpec(
+            order_id="TEST",
+            title="Uji",
+            institution="Sekolah",
+            class_semester="XII",
+            subject="Informatika",
+            sections=(
+                DocumentSection("BAB I PENDAHULUAN", (), 1),
+                DocumentSection("A. Pembahasan", (), 2),
+                DocumentSection("1. Rincian", (), 3),
+                DocumentSection("a. Pencegahan", ("Isi level empat.",), 4),
+            ),
+        )
+        xml = DocumentEngine()._document_xml(spec)
+        self.assertIn('w:left="720"', xml)
+        self.assertIn('w:left="360" w:firstLine="360"', xml)
+        self.assertIn("Isi level empat.", xml)
 
     def test_each_heading1_after_first_starts_on_new_page(self):
         spec = MakalahSpec(

@@ -34,6 +34,7 @@ class CitationEngine:
     STYLE_NAME = "Chicago Notes & Bibliography"
     FOOTNOTE_FONT = "Times New Roman"
     FOOTNOTE_SIZE = 10
+    IBID_TEXT = "Ibid."
 
     def __init__(self, document_engine: DocumentEngine):
         self.document_engine = document_engine
@@ -42,7 +43,7 @@ class CitationEngine:
     def status_text(self) -> str:
         return (
             f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. "
-            "Catatan kaki pertama lengkap, pengulangan memakai short note."
+            "Catatan pertama lengkap; pengulangan berurutan memakai Ibid., pengulangan lain short note."
         )
 
     @staticmethod
@@ -97,12 +98,7 @@ class CitationEngine:
 
     @staticmethod
     def _short_title(title: str, max_words: int = 6) -> str:
-        """Judul singkat untuk repeat note tanpa elipsis/titik-titik buatan.
-
-        Short note memang boleh memendekkan judul, tetapi potongan visual seperti
-        `...`/`…` sengaja tidak dipakai agar catatan kaki final tidak terlihat seperti
-        teks yang terpotong oleh engine.
-        """
+        """Judul singkat untuk repeat note tanpa elipsis/titik-titik buatan."""
         words = re.sub(r"\s+", " ", (title or "").strip()).split()
         if not words:
             return "Tanpa judul"
@@ -140,10 +136,35 @@ class CitationEngine:
 
     @classmethod
     def footnote_short(cls, source: RegisteredSource) -> str:
-        """Short note untuk pemakaian berikutnya dari sumber yang sama."""
+        """Short note untuk pengulangan yang tidak berurutan dari sumber yang sama."""
         author = cls._note_authors(source, short=True)
         title = cls._short_title(source.title)
         return f'{author}, “{title}.”'
+
+    @classmethod
+    def note_plan(cls, ref_ids: tuple[str, ...] | list[str]) -> tuple[tuple[str, str], ...]:
+        """Rencana full/ibid/short berdasarkan urutan catatan kaki.
+
+        Ibid. hanya aman bila catatan yang tepat sebelumnya merujuk sumber yang sama.
+        Bila sumber sudah pernah dipakai tetapi diselingi sumber lain, gunakan short note.
+        """
+        seen: set[str] = set()
+        previous = ""
+        plan: list[tuple[str, str]] = []
+        for value in ref_ids:
+            ref_id = str(value or "").strip().upper()
+            if not ref_id:
+                continue
+            if ref_id not in seen:
+                kind = "full"
+            elif ref_id == previous:
+                kind = "ibid"
+            else:
+                kind = "short"
+            plan.append((ref_id, kind))
+            seen.add(ref_id)
+            previous = ref_id
+        return tuple(plan)
 
     @classmethod
     def bibliography_entry(cls, source: RegisteredSource) -> str:
@@ -245,6 +266,7 @@ class CitationEngine:
                 "ref_id": source.ref_id.upper(),
                 "first": CitationEngine.footnote_full(source),
                 "repeat": CitationEngine.footnote_short(source),
+                "ibid": CitationEngine.IBID_TEXT,
                 "title": CitationEngine._clean(source.title),
                 "venue": CitationEngine._clean(source.venue),
                 "is_article": is_article,
@@ -269,6 +291,8 @@ if (-not [string]::IsNullOrWhiteSpace($pdfOut)) { $pdfOut = [System.IO.Path]::Ge
 if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) { throw "Data citation tidak ditemukan: $jsonPath" }
 $items = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$itemMap = @{}
+foreach ($item in $items) { $itemMap[[string]$item.ref_id] = $item }
 $word = $null
 $doc = $null
 try {
@@ -280,11 +304,11 @@ try {
   try { $doc.Footnotes.NumberingRule = 0 } catch {}
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
 
-  # Marker [[R1]] -> footnote Word asli.
-  # Kemunculan pertama sumber = full note; berikutnya = short note.
+  # Tahap 1: marker internal -> footnote Word dengan token sumber sementara.
+  # Token diproses lagi dalam urutan footnote aktual agar Ibid. hanya dipakai
+  # ketika catatan tepat sebelumnya benar-benar berasal dari sumber yang sama.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
-    $firstUse = $true
     $searchStart = 0
     while ($true) {
       $range = $doc.Range($searchStart, $doc.Content.End)
@@ -298,22 +322,46 @@ try {
       $position = $range.Start
       $range.Text = ''
       $range.SetRange($position, $position)
-      $noteText = if ($firstUse) { [string]$item.first } else { [string]$item.repeat }
-      $doc.Footnotes.Add($range, [System.Type]::Missing, $noteText) | Out-Null
-      $firstUse = $false
+      $token = '[[TAQI_REF:' + [string]$item.ref_id + ']]'
+      $doc.Footnotes.Add($range, [System.Type]::Missing, $token) | Out-Null
       $searchStart = $position + 1
     }
   }
 
-  # Default tampilan catatan kaki: TNR 10 pt, rata kiri, spasi tunggal,
-  # 0 pt sebelum/sesudah. Nomor superscript tetap dikelola native oleh Word.
+  # Tahap 2: format full note / Ibid. / short note berdasarkan urutan aktual.
+  $seen = @{}
+  $previousRef = ''
   foreach ($fn in $doc.Footnotes) {
+    $raw = (($fn.Range.Text -replace '[\r\a]+$','').Trim())
+    if ($raw -notmatch '^\[\[TAQI_REF:(R\d+)\]\]$') { continue }
+    $refId = [string]$Matches[1]
+    if (-not $itemMap.ContainsKey($refId)) { continue }
+    $item = $itemMap[$refId]
+
+    $isFirst = -not $seen.ContainsKey($refId)
+    $isImmediateRepeat = (-not $isFirst) -and ($previousRef -eq $refId)
+    if ($isFirst) {
+      $noteText = [string]$item.first
+    } elseif ($isImmediateRepeat) {
+      $noteText = [string]$item.ibid
+    } else {
+      $noteText = [string]$item.repeat
+    }
+
+    $r = $fn.Range
+    try {
+      if ($r.End -gt $r.Start -and $r.Text.EndsWith("`r")) { $r.End = $r.End - 1 }
+      $r.Text = $noteText
+    } catch {}
+
+    # Default tampilan footnote: TNR 10 pt, rata kiri, spasi tunggal.
     $r = $fn.Range
     try { $r.Font.Name = $footnoteFont } catch {}
     try { $r.Font.NameAscii = $footnoteFont } catch {}
     try { $r.Font.NameFarEast = $footnoteFont } catch {}
     try { $r.Font.Size = $footnoteSize } catch {}
     try { $r.Font.Bold = 0 } catch {}
+    try { $r.Font.Italic = 0 } catch {}
     try { $r.ParagraphFormat.Alignment = 0 } catch {}
     try { $r.ParagraphFormat.LineSpacingRule = 0 } catch {}
     try { $r.ParagraphFormat.SpaceBefore = 0 } catch {}
@@ -321,6 +369,20 @@ try {
     try { $r.ParagraphFormat.LeftIndent = 0 } catch {}
     try { $r.ParagraphFormat.RightIndent = 0 } catch {}
     try { $r.ParagraphFormat.FirstLineIndent = 0 } catch {}
+
+    # Pada full note artikel jurnal, nama jurnal/venue dicetak miring.
+    if ($isFirst -and [bool]$item.is_article -and -not [string]::IsNullOrWhiteSpace([string]$item.venue)) {
+      $venueSearch = $fn.Range.Duplicate
+      $venueFind = $venueSearch.Find
+      $venueFind.ClearFormatting()
+      $venueFind.Text = [string]$item.venue
+      $venueFind.Forward = $true
+      $venueFind.Wrap = 0
+      if ($venueFind.Execute()) { try { $venueSearch.Font.Italic = 1 } catch {} }
+    }
+
+    $seen[$refId] = $true
+    $previousRef = $refId
   }
 
   # Rapikan heading dan isi Daftar Pustaka.

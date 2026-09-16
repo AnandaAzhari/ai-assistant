@@ -62,9 +62,18 @@ Default penomoran halaman:
 
 - **Cover tidak menampilkan nomor halaman.**
 - Bagian awal setelah cover, termasuk Kata Pengantar dan Daftar Isi, memakai angka Romawi kecil `i, ii, iii, ...` dimulai dari `i`.
-- Saat masuk `BAB I`, penomoran di-reset dan dimulai dari angka Arab `1`.
+- Saat masuk `BAB I`, penomoran di-reset dan **halaman pertama BAB I harus tampil sebagai `1`**, bukan melanjutkan hitungan fisik dokumen.
 - Penomoran Arab kemudian berlanjut terus sampai bagian akhir termasuk Daftar Pustaka; jangan di-reset lagi.
 - Nomor halaman default ditempatkan di tengah bawah/footer agar konsisten, kecuali instruksi guru/dosen/instansi menentukan posisi lain.
+- DOCX dan PDF final harus memakai penomoran yang sama.
+
+## Daftar isi
+
+- Daftar isi diperbarui setelah struktur, nomor halaman, catatan kaki, dan Daftar Pustaka final selesai.
+- Entri level utama seperti `BAB I`, `BAB II`, `BAB III`, dan `DAFTAR PUSTAKA` harus rata kiri pada tingkat yang sama.
+- `DAFTAR PUSTAKA` tidak boleh tampil terpusat atau memiliki indent yang berbeda dari BAB pada daftar isi.
+- Subbab `1.1`, `1.2`, `2.1`, dan seterusnya boleh memiliki indent konsisten sebagai level kedua.
+- Nomor halaman pada daftar isi harus mengikuti nomor final dokumen, bukan nomor fisik sebelum section numbering diterapkan.
 
 ## Bahasa dan isi
 

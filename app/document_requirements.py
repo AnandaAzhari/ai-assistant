@@ -64,8 +64,10 @@ class MakalahRequirements:
         if self.target_length == _DEFAULT_LENGTH_SENTINEL:
             if re.search(r"\b(?:setuju|boleh|oke|ok|ya|iya|sip)\b", lowered):
                 self.target_length = "8-12 halaman"
-            elif re.search(r"\b\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|kata)\b", lowered):
-                self.target_length = self._extract_length(raw)
+            else:
+                length = self._extract_length(raw)
+                if length:
+                    self.target_length = length
 
         self._parse_labeled_lines(raw)
         self._parse_natural_text(raw)
@@ -118,12 +120,59 @@ class MakalahRequirements:
             if key == "target_length" and re.search(r"tidak ada|belum ada|belum ditentukan", value_lower):
                 setattr(self, key, _DEFAULT_LENGTH_SENTINEL)
                 continue
+            if key == "target_length":
+                parsed = self._extract_length(f"jumlah halaman {value}") or self._extract_length(value)
+                if parsed:
+                    value = parsed
             setattr(self, key, value[:300])
 
     @staticmethod
     def _extract_length(raw: str) -> str:
-        match = re.search(r"\b(\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|kata))\b", raw, re.IGNORECASE)
-        return re.sub(r"\s+", " ", match.group(1)).strip() if match else ""
+        """Ambil target panjang dari bahasa natural dengan urutan yang fleksibel.
+
+        Contoh yang didukung: `8 halaman`, `sekitar 8 halaman`,
+        `jumlah halaman 8`, `halaman 8`, `target 1200 kata`.
+        """
+        text = re.sub(r"\s+", " ", (raw or "").strip())
+
+        # Bentuk paling umum: angka lalu satuan.
+        match = re.search(
+            r"\b(\d+\s*(?:[-–—]\s*\d+\s*)?(?:halaman|page|pages|kata))\b",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return re.sub(r"\s+", " ", match.group(1)).strip()
+
+        # Bahasa natural Indonesia sering membalik urutan: `jumlah halaman 8`.
+        match = re.search(
+            r"\b(?:jumlah\s+|target\s+|sekitar\s+|kira[- ]?kira\s+)?"
+            r"(halaman|page|pages|kata)\s*(?:sebanyak\s*)?(\d+)"
+            r"(?:\s*[-–—]\s*(\d+))?\b",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            unit = match.group(1).casefold()
+            start = match.group(2)
+            end = match.group(3)
+            canonical_unit = "halaman" if unit in {"halaman", "page", "pages"} else "kata"
+            return f"{start}-{end} {canonical_unit}" if end else f"{start} {canonical_unit}"
+
+        # Bentuk `jumlah halaman: 8` / `target halaman = 8`.
+        match = re.search(
+            r"\b(?:jumlah|target)\s+(halaman|page|pages|kata)\s*[:=]?\s*(\d+)"
+            r"(?:\s*[-–—]\s*(\d+))?\b",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            unit = match.group(1).casefold()
+            start = match.group(2)
+            end = match.group(3)
+            canonical_unit = "halaman" if unit in {"halaman", "page", "pages"} else "kata"
+            return f"{start}-{end} {canonical_unit}" if end else f"{start} {canonical_unit}"
+        return ""
 
     def _parse_natural_text(self, raw: str) -> None:
         lowered = raw.casefold()

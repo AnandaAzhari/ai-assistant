@@ -15,22 +15,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from app.document_agent import DocumentAgent
 from app.finance import FinanceService
 from app.google_sheets_sync import GoogleSheetsSync
 from app.lead import LeadAgent
+from app.providers.deepseek import DeepSeekProvider
 
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web_admin"
 MAX_MESSAGE_BYTES = 32 * 1024
 
 
-def system_status(sync_ready: bool = False) -> dict:
+def system_status(sync_ready: bool = False, document_ready: bool = False) -> dict:
     return {
         "ok": True,
         "name": "Taqi AI Admin",
         "components": [
             {"name": "Lead Agent", "status": "aktif"},
             {"name": "Finance Agent", "status": "aktif"},
+            {"name": "Document Agent", "status": "siap" if document_ready else "menunggu_api_key"},
             {"name": "Google Sheets", "status": "siap" if sync_ready else "belum_dikonfigurasi"},
             {"name": "TaqiDesk", "status": "belum_terhubung"},
             {"name": "Telegram", "status": "opsional"},
@@ -116,7 +119,8 @@ class WebAdminHandler(BaseHTTPRequestHandler):
             if not self._authorized():
                 return self._json({"ok": False, "error": "Akses ditolak."}, HTTPStatus.UNAUTHORIZED)
             sync_ready = bool(self.server.lead.sheets_sync and self.server.lead.sheets_sync.configured)
-            return self._json(system_status(sync_ready))
+            document_ready = bool(self.server.lead.document and self.server.lead.document.configured)
+            return self._json(system_status(sync_ready, document_ready))
         self._serve_static(path)
 
     def do_POST(self) -> None:
@@ -163,7 +167,9 @@ def create_server(host: str, port: int, *, admin_key: str = "") -> WebAdminHTTPS
     db_path = os.environ.get("DATABASE_PATH", "data/assistant.db").strip() or "data/assistant.db"
     finance = FinanceService(db_path)
     sheets_sync = GoogleSheetsSync.from_env(db_path)
-    lead = LeadAgent(finance=finance, sheets_sync=sheets_sync)
+    deepseek = DeepSeekProvider.from_env()
+    document = DocumentAgent(deepseek)
+    lead = LeadAgent(finance=finance, sheets_sync=sheets_sync, document=document)
     return WebAdminHTTPServer((host, port), WebAdminHandler, lead=lead, admin_key=admin_key)
 
 

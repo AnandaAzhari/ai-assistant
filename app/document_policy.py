@@ -31,8 +31,8 @@ def load_document_format_policy() -> str:
     parts = [text for text in (format_policy, type_policy) if text]
     if not parts:
         return (
-            "Deteksi jenis dokumen terlebih dahulu. Untuk makalah gunakan struktur BAB I, BAB II, BAB III "
-            "dengan heading 1.1 dan 1.1.1; untuk KTI gunakan 1, 1.1, 1.1.1; untuk skripsi utamakan "
+            "Deteksi jenis dokumen terlebih dahulu. Untuk Makalah gunakan struktur BAB I/BAB II/BAB III "
+            "dengan hierarki A., 1., a.; untuk KTI gunakan 1, 1.1, 1.1.1; untuk Skripsi utamakan "
             "pedoman kampus. Instruksi guru/dosen/sekolah/kampus mengalahkan aturan default."
         )
 

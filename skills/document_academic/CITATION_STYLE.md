@@ -5,8 +5,9 @@ Skill ini adalah referensi aktif untuk Document Agent ketika membuat sitasi akad
 ## Prioritas
 
 1. Pedoman resmi guru, dosen, sekolah, program studi, fakultas, atau kampus.
-2. Gaya sitasi yang diminta pelanggan secara jelas.
-3. Default Taqi AI pada skill ini.
+2. Gaya sitasi atau preferensi catatan kaki yang diminta pelanggan secara jelas.
+3. Preferensi yang tersimpan pada order.
+4. Default Taqi AI pada skill ini.
 
 Jika institusi meminta APA, IEEE, Harvard, Chicago, Vancouver, atau format kampus tertentu, ikuti pedoman tersebut. Default di bawah hanya dipakai bila tidak ada arahan lain.
 
@@ -16,13 +17,29 @@ Default sitasi Makalah memakai pola **Chicago Notes & Bibliography** secara prak
 
 - Sitasi di isi menggunakan nomor superscript Word asli.
 - Kemunculan pertama sebuah sumber menggunakan **full note / catatan kaki lengkap**.
-- Jika catatan kaki berikutnya secara langsung merujuk **sumber yang sama dengan catatan tepat sebelumnya**, gunakan **`Ibid.`**.
+- Jika mode pengulangan mengizinkan Ibid. dan catatan kaki berikutnya secara langsung merujuk **sumber yang sama dengan catatan tepat sebelumnya**, gunakan **`Ibid.`**.
 - Jika sumber yang sama dipakai lagi tetapi telah diselingi sumber lain, gunakan **short note**, bukan `Ibid.`.
 - Short note memakai nama belakang penulis pertama + judul singkat yang masih dapat mengenali sumber.
 - Short note **tidak memakai `...` atau `…` sebagai tanda potongan buatan engine**.
 - Pada full note artikel jurnal, **nama jurnal dicetak miring**; judul artikel tetap berada dalam tanda kutip dan tidak dicetak miring.
 - Jika sumber memiliki DOI, gunakan URL DOI `https://doi.org/...`; jika tidak ada DOI, gunakan URL sumber bila tersedia.
 - Jangan membuat sumber, DOI, halaman, nama jurnal, atau metadata yang tidak ada pada Source Registry.
+
+## Preferensi per order: `citation_repeat_mode`
+
+Citation Engine memiliki setting terstruktur per pembuatan/order:
+
+- `citation_repeat_mode = "auto"` — default. Kemunculan pertama memakai full note; pengulangan langsung sumber yang sama memakai `Ibid.`; pengulangan yang tidak langsung memakai short note.
+- `citation_repeat_mode = "short"` — tanpa `Ibid.`. Kemunculan pertama tetap memakai full note; **semua** pengulangan berikutnya memakai short note.
+
+Document Agent/Nara harus menerjemahkan bahasa pelanggan menjadi setting ini, bukan mengubah format Citation Engine secara bebas.
+
+Contoh bahasa pelanggan:
+
+- "pakai Ibid", "boleh Ibid", atau tidak memberi preferensi → `citation_repeat_mode = "auto"`.
+- "jangan pakai Ibid", "tanpa Ibid", "tulis nama penulis lagi kalau berulang" → `citation_repeat_mode = "short"`.
+
+Bila pelanggan mengubah preferensi sebelum dokumen final dibuat, nilai pada order boleh diubah lalu dokumen dibuat ulang. Pedoman resmi institusi tetap lebih tinggi prioritasnya daripada preferensi pelanggan.
 
 ## Tampilan footnote Word
 
@@ -39,7 +56,7 @@ Jika tidak ada pedoman resmi yang menentukan lain:
 
 ## Full note, Ibid., dan short note
 
-Contoh pola:
+Contoh pola mode `auto`:
 
 Kemunculan pertama:
 
@@ -53,7 +70,13 @@ Sumber yang sama dipakai lagi setelah diselingi sumber lain:
 
 `Fatmawati, “Judul Artikel Singkat.”`
 
-`Ibid.` tidak boleh dipakai bila catatan kaki tepat sebelumnya berasal dari sumber berbeda karena akan membuat rujukan menjadi ambigu atau salah.
+Contoh pola mode `short`:
+
+Kemunculan pertama tetap full note, lalu setiap pengulangan menjadi:
+
+`Fatmawati, “Judul Artikel Singkat.”`
+
+`Ibid.` tidak boleh dipakai bila catatan kaki tepat sebelumnya berasal dari sumber berbeda karena akan membuat rujukan menjadi ambigu atau salah. Dalam mode `short`, `Ibid.` tidak digunakan sama sekali.
 
 Jika kelak sistem memiliki locator spesifik per kutipan, seperti halaman 98, locator tersebut dapat ditambahkan pada `Ibid.` atau short note sesuai kebutuhan. Jangan memakai rentang halaman artikel sebagai locator kutipan spesifik jika sistem tidak mengetahui halaman kutipan yang sebenarnya.
 
@@ -70,4 +93,4 @@ Jika kelak sistem memiliki locator spesifik per kutipan, seperti halaman 98, loc
 
 ## Aturan stabilitas
 
-Citation Engine harus bersifat deterministik. AI boleh membantu memilih sumber dan menulis isi, tetapi format full note, `Ibid.`, short note, italic nama jurnal, footnote Word, dan Daftar Pustaka ditangani engine agar konsisten.
+Citation Engine harus bersifat deterministik. AI boleh memahami preferensi pelanggan dan memilih nilai `citation_repeat_mode`, tetapi format full note, `Ibid.`, short note, italic nama jurnal, footnote Word, dan Daftar Pustaka ditangani engine agar konsisten.

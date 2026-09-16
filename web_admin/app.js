@@ -18,6 +18,8 @@ const commands = [
   ['/antrean', 'Lihat antrean TaqiDesk']
 ];
 
+let selectedCommandIndex = -1;
+
 function bubble(role, text) {
   const item = document.createElement('article');
   item.className = `bubble ${role}`;
@@ -30,11 +32,35 @@ function bubble(role, text) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+function commandItems() {
+  return Array.from(palette.querySelectorAll('.command-item'));
+}
+
+function selectCommand(index) {
+  const items = commandItems();
+  if (!items.length) {
+    selectedCommandIndex = -1;
+    return;
+  }
+  selectedCommandIndex = ((index % items.length) + items.length) % items.length;
+  items.forEach((item, itemIndex) => {
+    const selected = itemIndex === selectedCommandIndex;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-selected', selected ? 'true' : 'false');
+  });
+  items[selectedCommandIndex].scrollIntoView({block: 'nearest'});
+}
+
+function hidePalette() {
+  selectedCommandIndex = -1;
+  palette.classList.add('hidden');
+}
+
 async function sendMessage(text = input.value) {
   text = text.trim();
   if (!text) return;
   input.value = '';
-  palette.classList.add('hidden');
+  hidePalette();
   bubble('user', text);
   try {
     const response = await fetch('/api/message', {
@@ -57,10 +83,34 @@ form.addEventListener('submit', event => {
 });
 
 input.addEventListener('keydown', event => {
-  // Enter mengirim pesan. Shift+Enter tetap membuat baris baru.
-  // Saat IME/composition aktif, jangan memaksa submit.
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+  if (event.isComposing) return;
+
+  const items = commandItems();
+  const paletteOpen = !palette.classList.contains('hidden') && items.length > 0;
+
+  if (paletteOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
     event.preventDefault();
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    selectCommand(selectedCommandIndex < 0 ? (step > 0 ? 0 : items.length - 1) : selectedCommandIndex + step);
+    return;
+  }
+
+  if (paletteOpen && event.key === 'Escape') {
+    event.preventDefault();
+    hidePalette();
+    return;
+  }
+
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    if (paletteOpen && selectedCommandIndex >= 0) {
+      const selected = commandItems()[selectedCommandIndex];
+      const command = selected?.dataset.command;
+      if (command) {
+        sendMessage(command);
+        return;
+      }
+    }
     sendMessage();
   }
 });
@@ -68,19 +118,32 @@ input.addEventListener('keydown', event => {
 input.addEventListener('input', () => {
   const value = input.value.trim().toLowerCase();
   if (!value.startsWith('/')) {
-    palette.classList.add('hidden');
+    hidePalette();
     return;
   }
+
   palette.replaceChildren();
-  for (const [cmd, description] of commands.filter(([cmd]) => cmd.startsWith(value))) {
+  const matches = commands.filter(([cmd]) => cmd.startsWith(value));
+  for (const [cmd, description] of matches) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'command-item';
+    button.dataset.command = cmd;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', 'false');
     button.textContent = `${cmd} — ${description}`;
     button.onclick = () => sendMessage(cmd);
+    button.onmouseenter = () => {
+      const items = commandItems();
+      selectCommand(items.indexOf(button));
+    };
     palette.appendChild(button);
   }
-  palette.classList.toggle('hidden', palette.children.length === 0);
+
+  const hasMatches = palette.children.length > 0;
+  palette.classList.toggle('hidden', !hasMatches);
+  if (hasMatches) selectCommand(0);
+  else selectedCommandIndex = -1;
 });
 
 async function loadStatus() {

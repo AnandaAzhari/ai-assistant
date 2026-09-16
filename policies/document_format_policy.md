@@ -41,11 +41,12 @@ Jumlah dan nama subbagian boleh menyesuaikan topik dan kebutuhan tugas. Jangan m
 
 Default hierarki Makalah:
 
-- Tingkat utama: `BAB I`, `BAB II`, `BAB III`, dst.
-- Tingkat kedua: `A.`, `B.`, `C.`, dst.
-- Tingkat ketiga bila diperlukan: `1.`, `2.`, `3.`, dst.
-- Tingkat keempat bila diperlukan: `a.`, `b.`, `c.`, dst.
+- Tingkat utama / **Heading 1**: `BAB I`, `BAB II`, `BAB III`, dst.
+- Tingkat kedua / **Heading 2**: `A.`, `B.`, `C.`, `D.`, dst.
+- Tingkat ketiga / **Heading 3** bila diperlukan: `1.`, `2.`, `3.`, dst.
+- Tingkat keempat / **Heading 4** bila diperlukan: `a.`, `b.`, `c.`, dst.
 - Jadi pola default resmi Makalah adalah: **`BAB I → A. → 1. → a.`**
+- Huruf seperti `C.`, `D.`, atau `M.` pada Makalah tetap harus dibaca sebagai **subbagian Heading 2**, bukan dianggap angka Romawi untuk Heading 1. Heading 1 hanya boleh berasal dari label `BAB ...`.
 - Jangan memakai `BAB I → 1.1 → 1.1.1` sebagai default Makalah.
 - Jangan memakai `I. → A. → 1. → a.` sebagai default Makalah.
 - Heading BAB ditampilkan terpisah, misalnya `BAB I` pada satu baris dan `PENDAHULUAN` pada baris berikutnya, rata tengah dan tebal.
@@ -54,6 +55,13 @@ Default hierarki Makalah:
 - Bullet `•` tidak boleh menggantikan heading terstruktur.
 - Bullet atau numbered list hanya dipakai di dalam isi jika memang berupa daftar, bukan sebagai pengganti hierarki heading.
 - Pada tampilan kerangka untuk pelanggan, tampilkan struktur heading saja tanpa ringkasan paragraf di bawah setiap heading.
+
+## Pergantian BAB
+
+- `BAB I` dimulai pada halaman baru setelah Daftar Isi.
+- **Setiap BAB berikutnya juga wajib dimulai pada halaman baru.** Jadi `BAB II` tidak boleh langsung menyambung di bawah bagian terakhir BAB I pada halaman yang sama, begitu juga `BAB III` dan BAB berikutnya.
+- Pergantian BAB memakai page break biasa, bukan reset nomor halaman.
+- Nomor halaman Arab tetap berlanjut antar-BAB.
 
 ## Target jumlah halaman
 

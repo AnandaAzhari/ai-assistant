@@ -36,7 +36,18 @@ Hierarki default Makalah adalah:
 
 `BAB I, BAB II, BAB III, ...` → `A, B, C, ...` → `1, 2, 3, ...` → `a, b, c, ...`
 
+Level style Word default Makalah:
+
+- `BAB ...` = Heading 1
+- `A.`, `B.`, `C.`, dst. = Heading 2
+- `1.`, `2.`, `3.`, dst. = Heading 3
+- `a.`, `b.`, `c.`, dst. = Heading 4
+
+Huruf `C`, `D`, `M`, dan huruf lain yang kebetulan juga merupakan simbol angka Romawi **tetap dianggap huruf subbagian** bila ditulis seperti `C. Tujuan Penulisan`. Heading utama Makalah hanya dikenali bila memakai label `BAB`.
+
 Level `1.` dan `a.` tidak wajib muncul. Gunakan hanya jika subbagian memang perlu dipecah lagi. Jangan mengubah Makalah menjadi pola `BAB I → 1.1 → 1.1.1` atau `I → A → 1 → a` tanpa instruksi resmi.
+
+Setiap BAB Makalah dimulai pada halaman baru. `BAB II` tidak boleh menyambung langsung setelah subbagian terakhir `BAB I` pada halaman yang sama. Page break antar-BAB tidak mereset nomor halaman.
 
 ## 2. Karya Tulis Ilmiah (KTI)
 

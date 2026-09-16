@@ -32,6 +32,8 @@ class CitationBuildResult:
 
 class CitationEngine:
     STYLE_NAME = "Chicago Notes & Bibliography"
+    FOOTNOTE_FONT = "Times New Roman"
+    FOOTNOTE_SIZE = 10
 
     def __init__(self, document_engine: DocumentEngine):
         self.document_engine = document_engine
@@ -40,7 +42,7 @@ class CitationEngine:
     def status_text(self) -> str:
         return (
             f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. "
-            "Nomor halaman mengikuti section native DOCX dari Document Engine."
+            "Catatan kaki pertama lengkap, pengulangan memakai short note."
         )
 
     @staticmethod
@@ -94,14 +96,21 @@ class CitationEngine:
         return author_key, source.year or 0, cls._clean(source.title).casefold()
 
     @staticmethod
-    def _short_title(title: str, max_words: int = 7) -> str:
+    def _short_title(title: str, max_words: int = 6) -> str:
+        """Judul singkat untuk repeat note tanpa elipsis/titik-titik buatan.
+
+        Short note memang boleh memendekkan judul, tetapi potongan visual seperti
+        `...`/`…` sengaja tidak dipakai agar catatan kaki final tidak terlihat seperti
+        teks yang terpotong oleh engine.
+        """
         words = re.sub(r"\s+", " ", (title or "").strip()).split()
-        if len(words) <= max_words:
-            return " ".join(words)
-        return " ".join(words[:max_words]) + "…"
+        if not words:
+            return "Tanpa judul"
+        return " ".join(words[:max_words])
 
     @classmethod
     def footnote_full(cls, source: RegisteredSource) -> str:
+        """Catatan kaki lengkap untuk kemunculan pertama sebuah sumber."""
         author = cls._note_authors(source)
         title = cls._clean(source.title) or "Tanpa judul"
         venue = cls._clean(source.venue)
@@ -131,6 +140,7 @@ class CitationEngine:
 
     @classmethod
     def footnote_short(cls, source: RegisteredSource) -> str:
+        """Short note untuk pemakaian berikutnya dari sumber yang sama."""
         author = cls._note_authors(source, short=True)
         title = cls._short_title(source.title)
         return f'{author}, “{title}.”'
@@ -245,12 +255,16 @@ class CitationEngine:
         env["TAQI_CITATION_DOCX"] = str(docx_path.resolve())
         env["TAQI_CITATION_JSON"] = str(citation_file.resolve())
         env["TAQI_CITATION_PDF"] = str(docx_path.with_suffix(".pdf").resolve()) if create_pdf else ""
+        env["TAQI_FOOTNOTE_FONT"] = CitationEngine.FOOTNOTE_FONT
+        env["TAQI_FOOTNOTE_SIZE"] = str(CitationEngine.FOOTNOTE_SIZE)
 
         script = r'''
 $ErrorActionPreference = 'Stop'
 $src = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_DOCX)
 $jsonPath = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_JSON)
 $pdfOut = [string]$env:TAQI_CITATION_PDF
+$footnoteFont = [string]$env:TAQI_FOOTNOTE_FONT
+$footnoteSize = [double]$env:TAQI_FOOTNOTE_SIZE
 if (-not [string]::IsNullOrWhiteSpace($pdfOut)) { $pdfOut = [System.IO.Path]::GetFullPath($pdfOut) }
 if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) { throw "Data citation tidak ditemukan: $jsonPath" }
@@ -266,7 +280,8 @@ try {
   try { $doc.Footnotes.NumberingRule = 0 } catch {}
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
 
-  # Marker [[R1]] -> footnote Word asli. Tidak menyentuh section/nomor halaman.
+  # Marker [[R1]] -> footnote Word asli.
+  # Kemunculan pertama sumber = full note; berikutnya = short note.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
     $firstUse = $true
@@ -288,6 +303,24 @@ try {
       $firstUse = $false
       $searchStart = $position + 1
     }
+  }
+
+  # Default tampilan catatan kaki: TNR 10 pt, rata kiri, spasi tunggal,
+  # 0 pt sebelum/sesudah. Nomor superscript tetap dikelola native oleh Word.
+  foreach ($fn in $doc.Footnotes) {
+    $r = $fn.Range
+    try { $r.Font.Name = $footnoteFont } catch {}
+    try { $r.Font.NameAscii = $footnoteFont } catch {}
+    try { $r.Font.NameFarEast = $footnoteFont } catch {}
+    try { $r.Font.Size = $footnoteSize } catch {}
+    try { $r.Font.Bold = 0 } catch {}
+    try { $r.ParagraphFormat.Alignment = 0 } catch {}
+    try { $r.ParagraphFormat.LineSpacingRule = 0 } catch {}
+    try { $r.ParagraphFormat.SpaceBefore = 0 } catch {}
+    try { $r.ParagraphFormat.SpaceAfter = 0 } catch {}
+    try { $r.ParagraphFormat.LeftIndent = 0 } catch {}
+    try { $r.ParagraphFormat.RightIndent = 0 } catch {}
+    try { $r.ParagraphFormat.FirstLineIndent = 0 } catch {}
   }
 
   # Rapikan heading dan isi Daftar Pustaka.
@@ -352,7 +385,7 @@ try {
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
   try { $doc.Repaginate() } catch {}
 
-  # Rapikan daftar isi: BAB dan DAFTAR PUSTAKA setingkat; A/1/a bertingkat konsisten.
+  # Rapikan daftar isi: default Makalah hanya sampai Heading 3.
   foreach ($toc in $doc.TablesOfContents) {
     foreach ($p in $toc.Range.Paragraphs) {
       $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
@@ -367,8 +400,6 @@ try {
         try { $p.Range.ParagraphFormat.LeftIndent = 18 } catch {}
       } elseif ($text -match '^\d+\.\s+\S') {
         try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
-      } elseif ($text -match '^[a-z]\.\s+\S') {
-        try { $p.Range.ParagraphFormat.LeftIndent = 54 } catch {}
       }
     }
   }

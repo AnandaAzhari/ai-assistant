@@ -1,9 +1,11 @@
-"""Document/Makalah Agent v1.3.
+"""Document/Makalah Agent v1.4.
 
 Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
 AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
 yang kemungkinan disebut tetapi belum terbaca. DeepSeek dipakai untuk kerangka dan
-isi makalah. Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki,
+isi makalah. Struktur default dikunci oleh policies/document_format_policy.md;
+instruksi guru/dosen/sekolah/kampus dapat mengoverride bagian yang relevan.
+Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki,
 daftar pustaka, DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
 """
 
@@ -18,6 +20,7 @@ from app.document_cover import MakalahCoverData
 from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
 from app.document_intake import IntakeInterpreter
+from app.document_policy import load_document_format_policy
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
@@ -33,13 +36,14 @@ Aturan:
 - jangan gunakan istilah teknis bila ada kata yang lebih mudah;
 - jangan gunakan tabel Markdown;
 - ringkasan data cukup berupa bullet singkat;
-- jika ada arahan guru/dosen, arahan itu lebih penting daripada template standar;
+- jika ada arahan guru/dosen/sekolah/kampus, arahan itu lebih penting daripada template standar;
 - jangan mengarang sumber atau daftar pustaka;
-- struktur default: Halaman Awal, BAB I PENDAHULUAN, BAB II PEMBAHASAN, BAB III PENUTUP, dan Daftar Pustaka bila sumber tersedia;
-- buat subbab bernomor yang relevan, tetapi jangan terlalu banyak;
+- WAJIB mengikuti policy format dokumen yang dikirim pada system message berikutnya;
+- heading harus mengikuti hierarki BAB -> 1.1 -> 1.1.1 bila ada subbagian; jangan memakai bullet sebagai pengganti heading;
+- hormati target jumlah halaman dan jangan membuat terlalu banyak subbab untuk dokumen pendek;
 - JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah kerangka disetujui;
 - JANGAN membuat isi makalah lengkap pada tahap ini;
-- akhiri dengan kalimat: `Jika kerangka ini sudah sesuai, balas: setuju.`
+- akhiri dengan: `Apakah kerangka makalah ini sudah sesuai? Jika sudah, balas setuju atau lanjut. Jika ada yang ingin diubah, tuliskan bagian yang ingin diperbaiki.`
 """
 
 
@@ -109,16 +113,17 @@ class DocumentAgent:
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
         intake_note = "Pemahaman pesan pelanggan: hybrid lokal + AI fallback" if self.configured else "Pemahaman pesan pelanggan: lokal"
+        policy_note = "Format makalah: policy Markdown aktif"
         final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
-                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + final_note,
+                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + policy_note + "\n" + final_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{final_note}.\n"
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{policy_note}.\n{final_note}.\n"
             "Parser lokal dipakai lebih dulu; AI fallback hanya membantu memahami pesan pelanggan yang ambigu.",
         )
 
@@ -245,7 +250,10 @@ class DocumentAgent:
             self.requirements.apply_ai_values(result.values)
 
     def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
-        messages = [{"role": "system", "content": OUTLINE_PROMPT}]
+        messages = [
+            {"role": "system", "content": OUTLINE_PROMPT},
+            {"role": "system", "content": "POLICY FORMAT DOKUMEN WAJIB:\n" + load_document_format_policy()},
+        ]
         messages.append({"role": "system", "content": "DATA MAKALAH YANG SUDAH LENGKAP:\n" + self.requirements.structured_text()})
         if revision:
             messages.extend(self._history[-self.history_limit:])
@@ -259,8 +267,6 @@ class DocumentAgent:
             return self.status()
         messages = self._outline_messages(raw, revision=revision)
         reply = self.provider.generate(messages, max_tokens=850, temperature=0.3, timeout=45)
-        # Respons kosong kadang bersifat sementara. Coba sekali lagi, lalu tampilkan
-        # pesan yang mudah dipahami pelanggan tanpa membocorkan error teknis API.
         if reply.status != "berhasil" and "kosong" in (reply.text or "").casefold():
             reply = self.provider.generate(messages, max_tokens=850, temperature=0.2, timeout=45)
         if reply.status != "berhasil":

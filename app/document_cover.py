@@ -35,6 +35,29 @@ class MakalahCoverData:
             return bool(self.group_members)
         return False
 
+    @staticmethod
+    def _looks_like_plain_name(value: str) -> bool:
+        """Deteksi jawaban nama sederhana saat sistem memang sedang menunggu nama.
+
+        Contoh: `Ananda Azhari Batubara` atau `Siti Nurhaliza`.
+        Sengaja konservatif supaya kalimat seperti `lanjut buat file` tidak dianggap nama.
+        """
+        clean = re.sub(r"\s+", " ", (value or "").strip())
+        if not clean or ":" in clean or "," in clean or len(clean) > 90:
+            return False
+        words = clean.split()
+        if not 1 <= len(words) <= 7:
+            return False
+        blocked = {
+            "lanjut", "setuju", "oke", "ok", "iya", "ya", "boleh", "skip",
+            "individu", "kelompok", "sekolah", "kampus", "guru", "dosen",
+            "tahun", "ajaran", "tidak", "ada", "buat", "file", "word", "pdf",
+        }
+        lowered_words = {word.casefold().strip(".,") for word in words}
+        if lowered_words & blocked:
+            return False
+        return all(re.fullmatch(r"[\w.'’-]+", word, flags=re.UNICODE) for word in words)
+
     def update(self, message: str) -> None:
         raw = (message or "").strip()
         if not raw:
@@ -96,6 +119,23 @@ class MakalahCoverData:
                 self.assignment_type = "kelompok"
             elif re.search(r"\b(?:individu|sendiri)\b", lowered):
                 self.assignment_type = "individu"
+
+        # Bahasa natural untuk nama, mis. `nama saya Ananda Azhari Batubara`.
+        if self.assignment_type == "individu" and not self.author_name:
+            match = re.search(r"\b(?:nama\s+saya|saya\s+bernama|atas\s+nama)\s+(.+)$", raw, re.IGNORECASE)
+            if match:
+                candidate = match.group(1).strip(" .")
+                if self._looks_like_plain_name(candidate):
+                    self.author_name = candidate[:500]
+            elif self._looks_like_plain_name(raw):
+                # Jika satu-satunya data yang sedang ditunggu adalah nama penyusun,
+                # jawaban nama polos harus diterima tanpa wajib menulis `Nama:`.
+                self.author_name = raw[:500]
+
+        if self.assignment_type == "kelompok" and not self.group_members:
+            match = re.search(r"\b(?:anggota(?:\s+kelompok)?|nama\s+anggota)\s*[:=]?\s*(.+)$", raw, re.IGNORECASE)
+            if match:
+                self.group_members = match.group(1).strip()[:500]
 
     def question_text(self) -> str:
         missing: list[str] = []

@@ -3,6 +3,11 @@
 Default style memakai Chicago Notes & Bibliography karena dokumen Taqi AI memakai
 footnote bernomor di bawah halaman sekaligus daftar pustaka. Engine ini tidak memakai
 model AI. Draft cukup memakai marker [[R1]], [[R2]], dst.
+
+Tata letak daftar pustaka mengikuti format makalah yang dipilih untuk Taqi AI:
+judul DAFTAR PUSTAKA di tengah, entri rata kiri, hanging indent 1,27 cm,
+spasi tunggal, dan jarak antar-entri ringan. Dengan begitu Word tidak merenggangkan
+spasi seperti paragraf justify biasa.
 """
 
 from __future__ import annotations
@@ -77,7 +82,6 @@ class CitationEngine:
             return first
         if len(authors) == 2:
             return f"{first}, dan {authors[1]}"
-        # Untuk daftar pustaka tampilkan sampai 10 penulis; bila sangat banyak ringkas sisanya.
         if len(authors) <= 10:
             return f"{first}, " + ", ".join(authors[1:-1]) + f", dan {authors[-1]}"
         return f"{first}, " + ", ".join(authors[1:7]) + ", dkk."
@@ -135,7 +139,7 @@ class CitationEngine:
 
     @classmethod
     def bibliography_entry(cls, source: RegisteredSource) -> str:
-        """Format default Chicago Notes & Bibliography berbasis metadata yang tersedia."""
+        """Format isi bibliografi; layout paragraf diterapkan oleh Microsoft Word COM."""
         author = cls._bibliography_authors(source)
         title = cls._clean(source.title) or "Tanpa judul"
         venue = cls._clean(source.venue)
@@ -209,10 +213,18 @@ class CitationEngine:
         if not sources:
             return ""
         citation_file = docx_path.with_suffix(".citations.json")
-        payload = [
-            {"ref_id": source.ref_id.upper(), "first": CitationEngine.footnote_full(source), "repeat": CitationEngine.footnote_short(source)}
-            for source in sources
-        ]
+        payload = []
+        for source in sources:
+            work_type = CitationEngine._clean(source.work_type).casefold()
+            is_article = bool(CitationEngine._clean(source.venue)) or "article" in work_type or "journal" in work_type
+            payload.append({
+                "ref_id": source.ref_id.upper(),
+                "first": CitationEngine.footnote_full(source),
+                "repeat": CitationEngine.footnote_short(source),
+                "title": CitationEngine._clean(source.title),
+                "venue": CitationEngine._clean(source.venue),
+                "is_article": is_article,
+            })
         citation_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         env = os.environ.copy()
         env["TAQI_CITATION_DOCX"] = str(docx_path.resolve())
@@ -234,6 +246,8 @@ try {
   try { $doc.Footnotes.Location = 0 } catch {}
   try { $doc.Footnotes.NumberingRule = 0 } catch {}
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
+
+  # Ubah marker [[R1]] menjadi footnote Word asli.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
     $firstUse = $true
@@ -256,6 +270,65 @@ try {
       $searchStart = $position + 1
     }
   }
+
+  # Format DAFTAR PUSTAKA seperti format makalah manual:
+  # heading di tengah; entri rata kiri, hanging indent 1,27 cm, spasi tunggal.
+  $bibliographyStart = -1
+  foreach ($p in $doc.Paragraphs) {
+    $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
+    if ($text -eq 'DAFTAR PUSTAKA') {
+      $bibliographyStart = $p.Range.End
+      try { $p.Alignment = 1 } catch {}
+      try { $p.Range.Font.Bold = 1 } catch {}
+      try { $p.Range.Font.Italic = 0 } catch {}
+      try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.LineSpacingRule = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceAfter = 12 } catch {}
+      break
+    }
+  }
+
+  if ($bibliographyStart -ge 0) {
+    $biblioRange = $doc.Range($bibliographyStart, $doc.Content.End)
+    foreach ($p in $biblioRange.Paragraphs) {
+      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
+      if ([string]::IsNullOrWhiteSpace($text)) { continue }
+      try { $p.Alignment = 0 } catch {}
+      try { $p.Range.ParagraphFormat.Alignment = 0 } catch {}
+      try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
+      try { $p.Range.ParagraphFormat.FirstLineIndent = -36 } catch {}
+      try { $p.Range.ParagraphFormat.RightIndent = 0 } catch {}
+      try { $p.Range.ParagraphFormat.LineSpacingRule = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
+      try { $p.Range.ParagraphFormat.SpaceAfter = 6 } catch {}
+      try { $p.Range.ParagraphFormat.KeepTogether = -1 } catch {}
+      try { $p.Range.Font.Bold = 0 } catch {}
+      try { $p.Range.Font.Italic = 0 } catch {}
+    }
+
+    # Tipografi sumber: nama jurnal dicetak miring untuk artikel;
+    # judul dicetak miring untuk sumber non-artikel seperti buku.
+    foreach ($item in $items) {
+      $needle = if ([bool]$item.is_article -and -not [string]::IsNullOrWhiteSpace([string]$item.venue)) {
+        [string]$item.venue
+      } else {
+        [string]$item.title
+      }
+      if ([string]::IsNullOrWhiteSpace($needle)) { continue }
+      $search = $doc.Range($bibliographyStart, $doc.Content.End)
+      $find = $search.Find
+      $find.ClearFormatting()
+      $find.Text = $needle
+      $find.Forward = $true
+      $find.Wrap = 0
+      if ($find.Execute()) {
+        try { $search.Font.Italic = 1 } catch {}
+      }
+    }
+  }
+
   $doc.Save()
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
@@ -268,15 +341,15 @@ try {
                 capture_output=True, text=True, timeout=timeout, check=False, env=env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"Footnote Word belum berhasil diterapkan: {exc}"
+            return f"Footnote/format daftar pustaka belum berhasil diterapkan: {exc}"
         finally:
             try:
                 citation_file.unlink(missing_ok=True)
             except OSError:
                 pass
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote.").strip()
-            return f"Footnote Word belum berhasil diterapkan: {detail[:420]}"
+            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote/format daftar pustaka.").strip()
+            return f"Footnote/format daftar pustaka belum berhasil diterapkan: {detail[:420]}"
         return ""
 
     def build(self, spec: MakalahSpec, sources: list[RegisteredSource], *, create_pdf: bool = True) -> CitationBuildResult:

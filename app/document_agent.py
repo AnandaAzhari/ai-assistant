@@ -1,10 +1,10 @@
-"""Document/Makalah Agent v1.2.
+"""Document/Makalah Agent v1.3.
 
-Data awal dan data cover dikumpulkan lokal tanpa token AI.
-DeepSeek dipakai untuk kerangka makalah dan, hanya setelah perintah admin eksplisit
-/draft, membuat isi makalah terstruktur dengan sumber R1/R2/... dari Source Registry.
-Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki, daftar pustaka,
-DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
+Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
+AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
+yang kemungkinan disebut tetapi belum terbaca. DeepSeek dipakai untuk kerangka dan
+isi makalah. Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki,
+daftar pustaka, DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from app.citation_engine import CitationEngine
 from app.document_cover import MakalahCoverData
 from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
+from app.document_intake import IntakeInterpreter
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
@@ -63,6 +64,7 @@ class DocumentAgent:
         self.research = research or ResearchManager.from_env()
         self.registry = registry or SourceRegistry.from_env()
         self.draft_generator = DraftGenerator(provider)
+        self.intake_interpreter = IntakeInterpreter(provider)
         self.citation_engine = CitationEngine(engine) if engine is not None else None
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
@@ -106,17 +108,18 @@ class DocumentAgent:
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
+        intake_note = "Pemahaman pesan pelanggan: hybrid lokal + AI fallback" if self.configured else "Pemahaman pesan pelanggan: lokal"
         final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
-                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + final_note,
+                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + final_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{final_note}.\n"
-            "Data awal + data cover diproses lokal tanpa token AI; model dipakai untuk kerangka dan isi makalah saja.",
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{final_note}.\n"
+            "Parser lokal dipakai lebih dulu; AI fallback hanya membantu memahami pesan pelanggan yang ambigu.",
         )
 
     def engine_status(self) -> DocumentResult:
@@ -233,6 +236,14 @@ class DocumentAgent:
     def _usage_note(cls, reply) -> str:
         return cls._usage_note_values(reply.model, reply.input_tokens, reply.output_tokens)
 
+    def _apply_intake_fallback(self, raw: str) -> None:
+        missing = self.requirements.missing_fields()
+        if not self.configured or not self.intake_interpreter.should_use(raw, missing):
+            return
+        result = self.intake_interpreter.interpret(raw, self.requirements.structured_text())
+        if result.status == "berhasil":
+            self.requirements.apply_ai_values(result.values)
+
     def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
         messages = [{"role": "system", "content": OUTLINE_PROMPT}]
         messages.append({"role": "system", "content": "DATA MAKALAH YANG SUDAH LENGKAP:\n" + self.requirements.structured_text()})
@@ -246,9 +257,17 @@ class DocumentAgent:
     def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
         if not self.configured:
             return self.status()
-        reply = self.provider.generate(self._outline_messages(raw, revision=revision), max_tokens=850, temperature=0.3, timeout=45)
+        messages = self._outline_messages(raw, revision=revision)
+        reply = self.provider.generate(messages, max_tokens=850, temperature=0.3, timeout=45)
+        # Respons kosong kadang bersifat sementara. Coba sekali lagi, lalu tampilkan
+        # pesan yang mudah dipahami pelanggan tanpa membocorkan error teknis API.
+        if reply.status != "berhasil" and "kosong" in (reply.text or "").casefold():
+            reply = self.provider.generate(messages, max_tokens=850, temperature=0.2, timeout=45)
         if reply.status != "berhasil":
-            return DocumentResult(reply.status, reply.text)
+            return DocumentResult(
+                "sementara_gagal",
+                "Kerangka makalah belum berhasil dibuat. Data yang Anda kirim tetap tersimpan. Cukup kirim `lanjut` untuk mencoba lagi.",
+            )
         if revision:
             self._history.append({"role": "user", "content": raw[:4000]})
         self._outline_text = reply.text[:12000]
@@ -328,10 +347,6 @@ class DocumentAgent:
         return DocumentResult("draft_ready", text + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
 
     def build_final(self) -> DocumentResult:
-        """No. 5: isi makalah -> catatan kaki -> daftar pustaka -> DOCX + PDF.
-
-        Tahap ini sepenuhnya lokal dan tidak memanggil provider AI.
-        """
         if self.phase == "final_ready" and self._final_docx_path:
             lines = ["File makalah sudah tersedia.", f"Word: `{self._final_docx_path}`"]
             lines.append(f"PDF: `{self._final_pdf_path}`" if self._final_pdf_path else "PDF: belum berhasil dibuat.")
@@ -414,6 +429,8 @@ class DocumentAgent:
 
         if self.phase == "requirements":
             self.requirements.update(raw)
+            if not self.requirements.complete:
+                self._apply_intake_fallback(raw)
             if not self.requirements.complete:
                 return DocumentResult("needs_requirements", self.requirements.question_text())
             return self._generate_outline(raw)

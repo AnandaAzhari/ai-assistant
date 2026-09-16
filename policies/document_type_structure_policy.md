@@ -13,26 +13,47 @@ AI tidak boleh mengganti struktur hanya karena model lebih menyukai format lain.
 
 ## 1. Makalah
 
-Default makalah sekolah/kuliah umum:
+Untuk **makalah**, gunakan pola penomoran seperti contoh referensi pelanggan:
 
-- Cover
-- Kata Pengantar
-- Daftar Isi
-- BAB I PENDAHULUAN
-  - 1.1 Latar Belakang
-  - 1.2 Rumusan Masalah
-  - 1.3 Tujuan Penulisan
-  - 1.4 Manfaat Penulisan
-  - 1.5 Batasan Masalah hanya bila diperlukan
-- BAB II PEMBAHASAN
-  - 2.1, 2.2, 2.3, dst. sesuai topik
-  - anak subbab bila perlu: 2.1.1, 2.1.2, dst.
-- BAB III PENUTUP
-  - 3.1 Kesimpulan
-  - 3.2 Saran
-- Daftar Pustaka
+- I. Pendahuluan
+  - A. Latar Belakang
+  - B. Rumusan Masalah
+  - C. Tujuan Penulisan
+- II. Tinjauan Pustaka
+  - A. Pengertian Konsep
+  - B. Teori yang Terkait
+    - 1. Teori A
+    - 2. Teori B
+  - C. Kajian Literatur
+- III. Metodologi Penelitian
+  - A. Jenis Penelitian
+  - B. Lokasi dan Waktu Penelitian
+  - C. Teknik Pengumpulan Data
+    - 1. Wawancara
+    - 2. Observasi
+    - 3. Studi Dokumen
+  - D. Analisis Data
+- IV. Hasil Penelitian dan Pembahasan
+  - A. Deskripsi Hasil Penelitian
+  - B. Analisis Data
+    - 1. Analisis Statistik
+      - a. Analisis Regresi
+      - b. Analisis Korelasi
+    - 2. Analisis Deskriptif
+      - a. Analisis Frekuensi
+      - b. Analisis Persentase
+  - C. Pembahasan
+- V. Kesimpulan dan Saran
+  - A. Kesimpulan
+  - B. Saran
+  - C. Implikasi Penelitian bila diperlukan
+- VI. Daftar Pustaka
 
-Hierarki default: `BAB I` → `1.1` → `1.1.1`.
+Nama bagian boleh menyesuaikan topik dan kebutuhan tugas, tetapi **pola penomoran default makalah harus tetap**:
+
+`I, II, III, ...` → `A, B, C, ...` → `1, 2, 3, ...` → `a, b, c, ...`
+
+Jangan mengubah makalah menjadi pola `BAB I → 1.1 → 1.1.1` kecuali guru/dosen/sekolah/kampus memang meminta format tersebut.
 
 ## 2. Karya Tulis Ilmiah (KTI)
 
@@ -55,7 +76,7 @@ Jika pelanggan secara jelas meminta KTI dan tidak ada pedoman instansi, gunakan 
   - 5.2 Saran
 - Daftar Pustaka
 
-Hierarki default: `1` → `1.1` → `1.1.1`.
+Hierarki default KTI: `1` → `1.1` → `1.1.1`.
 
 Nama bagian dapat menyesuaikan jenis KTI dan kebutuhan penelitian, tetapi pola penomorannya jangan diubah tanpa alasan.
 
@@ -113,19 +134,19 @@ Jika pelanggan belum memiliki pedoman, struktur kerja awal yang boleh dipakai ad
 - Daftar Pustaka
 - Lampiran, bila ada
 
+Hierarki kerja awal Skripsi: `BAB I/BAB 1` → `1.1` → `1.1.1`.
+
 Untuk skripsi, format `BAB I` versus `Bab 1`, letak nomor halaman, margin, gaya sitasi, susunan bab, dan bagian awal **harus mengikuti pedoman kampus bila tersedia**.
 
-## 4. Format alternatif bertingkat
+## 4. Tiga jenis dokumen tidak boleh dicampur
 
-Format seperti berikut dianggap format alternatif yang sah bila diminta oleh guru/dosen/instansi:
+Default harus dibedakan dengan tegas:
 
-- I. Pendahuluan
-  - A. Latar Belakang
-  - B. Rumusan Masalah
-    - 1. Poin
-      - a. Subpoin
+- **Makalah:** `I → A → 1 → a`
+- **KTI:** `1 → 1.1 → 1.1.1`
+- **Skripsi:** `BAB I/BAB 1 → 1.1 → 1.1.1`
 
-Jangan memakai pola `I → A → 1 → a` sebagai default makalah atau KTI Taqi AI kecuali ada instruksi yang mendukungnya.
+Document Agent wajib mengenali jenis dokumen sebelum membuat kerangka. Jangan memakai struktur Makalah untuk KTI, struktur KTI untuk Skripsi, atau sebaliknya.
 
 ## 5. Penomoran halaman terpisah dari penomoran heading
 

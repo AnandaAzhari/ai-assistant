@@ -1,13 +1,14 @@
 """Lead Agent routing minimum.
 
 Desktop commands tetap dipertahankan. Pesan dari channel admin memakai router aturan
-sederhana dulu; model AI belum dihubungkan pada tahap ini.
+sederhana dulu; model Lead Agent belum dihubungkan pada tahap ini.
 """
 
 import re
 from dataclasses import dataclass
 
 from app.desktop import DesktopAgent, Result
+from app.document_agent import DocumentAgent
 from app.finance import FinanceService
 from app.finance_corrections import correct_latest_account
 from app.google_sheets_sync import GoogleSheetsSync
@@ -26,10 +27,12 @@ class LeadAgent:
         desktop: DesktopAgent | None = None,
         finance: FinanceService | None = None,
         sheets_sync: GoogleSheetsSync | None = None,
+        document: DocumentAgent | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
         self.sheets_sync = sheets_sync
+        self.document = document
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         """Kompatibilitas command desktop v0.1."""
@@ -94,6 +97,12 @@ class LeadAgent:
         if command in {"/start", "/bantuan", "/help"} or text in {"bantuan", "help"}:
             finance_note = "aktif" if self.finance is not None else "belum diaktifkan"
             sync_note = "siap + auto-sync" if self.sheets_sync and self.sheets_sync.configured else "belum dikonfigurasi"
+            if self.document is None:
+                document_note = "belum tersedia"
+            elif self.document.configured:
+                document_note = f"siap ({self.document.model_label})"
+            else:
+                document_note = "menunggu DeepSeek API key"
             return LeadReply(
                 "lead",
                 "berhasil",
@@ -107,21 +116,57 @@ class LeadAgent:
                 "/bulan_ini - ringkasan bulan ini\n"
                 "/sync_status - status Google Sheets Sync\n"
                 "/sync - sinkronkan ledger ke Google Sheets secara manual\n"
+                "/dokumen_status - cek Document Agent\n"
+                "/makalah <permintaan> - bicara dengan Document Agent\n"
+                "/dokumen_baru - reset konteks percakapan dokumen\n"
                 "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n"
-                "Kamu juga boleh menulis bahasa biasa, misalnya: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n\n"
-                f"Finance runtime: {finance_note}.\nGoogle Sheets Sync: {sync_note}."
+                "Kamu juga boleh menulis bahasa biasa, misalnya: Saya mau membuat makalah tentang pencemaran lingkungan untuk kelas 8.\n\n"
+                f"Finance runtime: {finance_note}.\n"
+                f"Google Sheets Sync: {sync_note}.\n"
+                f"Document Agent: {document_note}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
             finance_status = "aktif" if self.finance is not None else "belum diaktifkan"
             sync_status = "siap + auto-sync" if self.sheets_sync and self.sheets_sync.configured else "belum dikonfigurasi"
+            if self.document is None:
+                document_status = "belum tersedia"
+            elif self.document.configured:
+                document_status = f"siap ({self.document.model_label})"
+            else:
+                document_status = "tersedia, menunggu API key"
             return LeadReply(
                 "lead",
                 "berhasil",
                 "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\n"
-                "Router: aturan minimum\nAI model: belum dihubungkan\n"
+                "Router Lead: aturan minimum\nLead AI model: belum dihubungkan\n"
+                f"Document Agent: {document_status}\n"
                 f"Finance runtime: {finance_status}\nGoogle Sheets Sync: {sync_status}"
             )
+
+        if command == "/dokumen_status":
+            if self.document is None:
+                return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
+            result = self.document.status()
+            return LeadReply("document", result.status, result.text)
+
+        if command in {"/dokumen_baru", "/makalah_baru"}:
+            if self.document is None:
+                return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
+            result = self.document.reset()
+            return LeadReply("document", result.status, result.text)
+
+        document_commands = {"/makalah", "/dokumen", "/paper", "/laporan"}
+        document_words = (
+            "makalah", "karya tulis", "paper sekolah", "paper kuliah", "laporan sekolah",
+            "laporan kuliah", "bab i", "bab 1", "bab ii", "bab 2", "daftar pustaka",
+            "susun dokumen", "buat dokumen"
+        )
+        if command in document_commands or any(word in text for word in document_words):
+            if self.document is None:
+                return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
+            result = self.document.handle(raw)
+            return LeadReply("document", result.status, result.text)
 
         if command == "/sync_status":
             if self.sheets_sync is None:
@@ -188,5 +233,5 @@ class LeadAgent:
             "lead",
             "membutuhkan_bantuan",
             "Pesan sudah diterima Lead Agent, tetapi router minimum belum yakin agent tujuan. "
-            "Tahap berikutnya akan menambahkan model/intent router."
+            "Nanti Claude Lead Agent akan menggantikan routing aturan ini."
         )

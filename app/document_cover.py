@@ -27,12 +27,12 @@ class MakalahCoverData:
 
     @property
     def complete(self) -> bool:
-        if not self.institution_name or not self.assignment_type:
+        if not self.assignment_type:
             return False
         if self.assignment_type == "individu":
             return bool(self.author_name)
         if self.assignment_type == "kelompok":
-            return bool(self.group_name and self.group_members)
+            return bool(self.group_members)
         return False
 
     def update(self, message: str) -> None:
@@ -83,8 +83,8 @@ class MakalahCoverData:
                 elif "individu" in value_lower or "sendiri" in value_lower:
                     self.assignment_type = "individu"
                 continue
-            if key in {"academic_year", "teacher_name"} and value_lower in {
-                "tidak ada", "tidak perlu", "opsional", "-", "skip"
+            if key in {"institution_name", "group_name", "academic_year", "teacher_name"} and value_lower in {
+                "tidak ada", "tidak perlu", "opsional", "-", "skip", "tidak dicantumkan"
             }:
                 setattr(self, key, "Tidak dicantumkan")
                 continue
@@ -99,38 +99,38 @@ class MakalahCoverData:
 
     def question_text(self) -> str:
         missing: list[str] = []
-        if not self.institution_name:
-            missing.append("Nama sekolah/kampus")
         if not self.assignment_type:
-            missing.append("Jenis tugas: individu atau kelompok")
+            missing.append("Tugas individu atau kelompok")
         elif self.assignment_type == "individu":
             if not self.author_name:
                 missing.append("Nama penyusun")
         elif self.assignment_type == "kelompok":
-            if not self.group_name:
-                missing.append("Nama/nomor kelompok")
             if not self.group_members:
-                missing.append("Nama seluruh anggota kelompok")
+                missing.append("Nama anggota kelompok")
 
         if not missing:
             return (
-                "Data cover utama sudah lengkap. Tahun ajaran dan nama guru/dosen bersifat opsional. "
-                "Jika ingin dicantumkan, kirim sekarang; jika tidak, lanjutkan ke draft."
+                "Data utama untuk cover sudah cukup.\n\n"
+                "Opsional kalau ingin dicantumkan: nama sekolah/kampus, nama/nomor kelompok, "
+                "tahun ajaran, dan nama guru/dosen."
             )
 
-        lines = ["Sebelum membuat draft, saya masih perlu data cover:"]
+        lines = ["Sebelum saya buat isi makalah, saya masih perlu data untuk cover:"]
         for index, item in enumerate(missing, start=1):
             lines.append(f"{index}. **{item}**")
-        lines.append("\nOpsional: tahun ajaran dan nama guru/dosen.")
-        lines.append("Tahap ini diproses lokal tanpa token AI.")
+        lines.append(
+            "\nOpsional: nama sekolah/kampus, nama/nomor kelompok, tahun ajaran, dan nama guru/dosen."
+        )
         return "\n".join(lines)
 
     def structured_text(self) -> str:
+        institution = self.institution_name or "Tidak dicantumkan"
+        group_name = self.group_name or "Tidak dicantumkan"
         return (
-            f"Sekolah/kampus: {self.institution_name}\n"
+            f"Sekolah/kampus: {institution}\n"
             f"Jenis tugas: {self.assignment_type}\n"
             f"Nama penyusun: {self.author_name}\n"
-            f"Kelompok: {self.group_name}\n"
+            f"Kelompok: {group_name}\n"
             f"Anggota: {self.group_members}\n"
             f"Tahun ajaran: {self.academic_year or 'Tidak dicantumkan'}\n"
             f"Guru/dosen: {self.teacher_name or 'Tidak dicantumkan'}"

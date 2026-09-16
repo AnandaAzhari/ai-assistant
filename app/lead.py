@@ -68,13 +68,11 @@ class LeadAgent:
         return re.search(source_marker, lowered) is None
 
     def _document_session_active(self) -> bool:
-        """True jika Document Agent sudah mengumpulkan sebagian requirement.
-
-        Follow-up seperti `Kelas: XI` tidak selalu mengandung kata 'makalah'. Tanpa
-        affinity sederhana ini, router aturan minimum akan mengembalikannya ke Lead.
-        """
         if self.document is None:
             return False
+        session_active = getattr(self.document, "session_active", None)
+        if isinstance(session_active, bool):
+            return session_active
         requirements = getattr(self.document, "requirements", None)
         if requirements is None:
             return False
@@ -128,6 +126,8 @@ class LeadAgent:
                 "/dokumen_status - cek Document Agent\n"
                 "/dokumen_engine_status - cek mesin DOCX/PDF lokal\n"
                 "/dokumen_demo - buat DOCX/PDF demo tanpa token AI\n"
+                "/research <topik> - cari sumber akademik tanpa token AI\n"
+                "/research_status - cek Research Manager\n"
                 "/makalah <permintaan> - bicara dengan Document Agent\n"
                 "/dokumen_baru - reset konteks percakapan dokumen\n"
                 "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n\n"
@@ -163,7 +163,7 @@ class LeadAgent:
             result = self.document.status()
             return LeadReply("document", result.status, result.text)
 
-        if command in {"/dokumen_engine_status", "/dokumen_demo"}:
+        if command in {"/dokumen_engine_status", "/dokumen_demo", "/research_status", "/riset_status", "/research", "/riset"}:
             if self.document is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.handle(raw)
@@ -241,10 +241,6 @@ class LeadAgent:
                 "Saya mengenali ini sebagai tugas TaqiDesk/DocuTech. Integrasi TaqiDesk belum diaktifkan pada tahap runtime minimum."
             )
 
-        # Jika percakapan makalah sudah dimulai, pertahankan affinity ke Document Agent.
-        # Ini menangani follow-up seperti `Jenjang: SMA`, `Kelas: XI`, atau `Target: 10 halaman`
-        # yang memang tidak mengandung kata kunci 'makalah'. Perintah eksplisit Finance/TaqiDesk
-        # tetap diprioritaskan di atas affinity ini.
         if self._document_session_active():
             result = self.document.handle(raw)
             return LeadReply("document", result.status, result.text)

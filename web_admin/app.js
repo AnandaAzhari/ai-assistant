@@ -13,6 +13,8 @@ const commands = [
   ['/kategori', 'Lihat kategori yang sudah dipelajari'],
   ['/hari_ini', 'Laporan hari ini'],
   ['/bulan_ini', 'Laporan bulan ini'],
+  ['/sync_status', 'Cek status Google Sheets Sync'],
+  ['/sync', 'Sinkronkan ledger ke Google Sheets'],
   ['/antrean', 'Lihat antrean TaqiDesk']
 ];
 

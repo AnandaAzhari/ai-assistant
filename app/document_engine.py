@@ -1,4 +1,4 @@
-"""Document Engine v0.7 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.8 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
@@ -225,6 +225,18 @@ class DocumentEngine:
         return {1: 0, 2: 0, 3: 360, 4: 720}.get(level, 0)
 
     @staticmethod
+    def _body_paragraph_indent(level: int) -> tuple[int, int]:
+        """Return (left, first_line) twips untuk isi di bawah heading Makalah.
+
+        H2/H3 tetap memakai blok teks utama dengan first-line 1,27 cm.
+        Khusus H4 (`a.`), baris lanjutan masuk ±0,63 cm dan baris pertama
+        masuk lagi ±0,63 cm sehingga awal baris pertama tetap sekitar 1,27 cm.
+        """
+        if int(level or 0) == 4:
+            return 360, 360
+        return 0, 720
+
+    @staticmethod
     def _styles_xml() -> str:
         return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -357,11 +369,17 @@ class DocumentEngine:
                     left=0 if (is_chapter or is_bibliography) else self._heading_left(level),
                 )
             )
+            body_left, body_first_line = self._body_paragraph_indent(level)
             for paragraph in section.paragraphs:
                 if paragraph.strip():
-                    # Isi paragraf selalu kembali ke margin utama, justify, dan
-                    # first-line indent 1,27 cm; tidak mewarisi indent heading.
-                    body.append(self._paragraph(paragraph.strip(), align="both", left=0, first_line=720))
+                    body.append(
+                        self._paragraph(
+                            paragraph.strip(),
+                            align="both",
+                            left=body_left,
+                            first_line=body_first_line,
+                        )
+                    )
 
         body.append(
             self._section_properties(

@@ -36,7 +36,9 @@ ATURAN DOKUMEN:
 - Instruksi guru/dosen/sekolah/kampus lebih tinggi prioritasnya daripada format default.
 - WAJIB mengikuti DOCUMENT FORMAT POLICY yang diberikan.
 - Pertahankan struktur heading dari kerangka yang disetujui.
-- Default Makalah Taqi AI adalah I. -> A. -> 1. -> a.; jangan menggantinya dengan BAB I -> 1.1 kecuali kerangka/pedoman resmi memang meminta begitu.
+- Default Makalah Taqi AI adalah BAB I -> A. -> 1. -> a.
+- Jangan mengganti default Makalah menjadi BAB I -> 1.1 -> 1.1.1 atau I. -> A. -> 1. -> a. kecuali kerangka/pedoman resmi memang meminta begitu.
+- Tingkat 1. dan a. hanya digunakan jika benar-benar diperlukan; jangan dipaksakan untuk dokumen pendek.
 - Bullet hanya boleh berada di dalam isi bila memang berupa daftar, bukan sebagai pengganti heading.
 - Hormati target jumlah halaman setelah cover. Cover tidak dihitung kecuali pelanggan secara khusus berkata lain.
 - Sertakan Kata Pengantar singkat.
@@ -47,7 +49,7 @@ KELUARKAN JSON VALID SAJA dengan bentuk persis:
 {
   "preface": ["paragraf 1", "paragraf 2"],
   "sections": [
-    {"title": "I. Pendahuluan", "level": 1, "paragraphs": []},
+    {"title": "BAB I PENDAHULUAN", "level": 1, "paragraphs": []},
     {"title": "A. Latar Belakang", "level": 2, "paragraphs": ["..."]},
     {"title": "1. Pokok Bahasan", "level": 3, "paragraphs": ["..."]},
     {"title": "a. Rincian", "level": 4, "paragraphs": ["..."]}

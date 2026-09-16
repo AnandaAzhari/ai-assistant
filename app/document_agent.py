@@ -1,7 +1,8 @@
-"""Document/Makalah Agent v0.5.
+"""Document/Makalah Agent v0.6.
 
-Percakapan requirement/draft memakai model AI. Formatting DOCX/PDF ditangani
-Document Engine lokal agar pekerjaan format tidak memboroskan token.
+Enam requirement dasar dikumpulkan secara lokal tanpa memanggil model AI.
+DeepSeek baru dipakai setelah data dasar lengkap. Formatting DOCX/PDF tetap
+ditangani Document Engine lokal.
 """
 
 from __future__ import annotations
@@ -9,71 +10,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.document_engine import DocumentEngine, demo_spec
+from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
 
 
-SYSTEM_PROMPT = """Kamu adalah Document/Makalah Agent untuk Taqi DocuTech.
-Gunakan bahasa Indonesia yang jelas, ringkas, dan ramah.
+WORK_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
+Requirement dasar makalah sudah divalidasi oleh sistem dan akan diberikan secara terstruktur.
+Gunakan bahasa Indonesia yang jelas dan ringkas. Jika nama pelanggan belum diketahui, gunakan sapaan `Anda`, bukan Bapak/Ibu.
 
-ATURAN SAPAAN PELANGGAN
-- Jika nama pelanggan sudah diketahui dari percakapan atau profil pelanggan, gunakan nama tersebut secara natural seperlunya.
-- Jika nama pelanggan belum diketahui, gunakan sapaan netral seperti `Anda`; jangan menebak nama dan jangan otomatis memakai `Bapak/Ibu`.
-- Jangan menanyakan nama hanya untuk kebutuhan sapaan. Nama pelanggan boleh dikumpulkan saat onboarding/profil pelanggan, atau saat memang dibutuhkan untuk identitas dokumen/cover.
-- Jika pelanggan sudah pernah memberikan nama, jangan menanyakannya lagi dalam sesi yang sama.
-
-Tugas utama:
-- memahami permintaan makalah/dokumen pelanggan;
-- mengumpulkan requirement sebelum mulai menyusun isi;
-- membuat kerangka/outline setelah requirement wajib lengkap;
-- membantu draft hanya setelah outline/arah pekerjaan sudah jelas;
-- jangan mengaku sudah membuat file DOCX/PDF sebelum Document Engine benar-benar dipanggil;
-- jangan mengarang sumber atau daftar pustaka. Jika referensi belum tersedia, katakan perlu riset/sumber;
-- untuk tugas sekolah/kuliah, bantu penyusunan dan drafting, tetapi minta pengguna meninjau isi agar sesuai instruksi guru/dosen.
-
-ATURAN WAJIB MAKALAH
-Sebelum membuat outline atau isi makalah, pastikan enam informasi berikut sudah diketahui dari percakapan:
-1. Jenjang/instansi: contoh SD, SMP/MTs, SMA/MA/MAN, SMK, perguruan tinggi/kampus, atau instansi lain.
-2. Kelas/semester: contoh kelas XI atau semester 3. Untuk konteks yang memang tidak memiliki kelas/semester, pengguna harus menyatakan bahwa tidak berlaku.
-3. Mata pelajaran/mata kuliah: contoh Biologi, Geografi, Fiqih, Bahasa Indonesia, atau nama mata kuliah.
-4. Topik/judul: judul yang sudah ditentukan, atau minimal topik yang cukup jelas. Jika judul belum ditentukan, boleh menawarkan judul tetapi harus meminta konfirmasi sebelum lanjut.
-5. Instruksi guru/dosen: tanyakan apakah ada instruksi, rubrik, foto, PDF, contoh makalah, atau format khusus. Jawaban "tidak ada" dihitung lengkap. Jika ada, minta pengguna mengirimkannya dan utamakan instruksi tersebut di atas template standar.
-6. Target panjang: jumlah halaman atau jumlah kata. Jika pengguna tidak memiliki ketentuan, tawarkan target yang wajar dan minta persetujuan.
-
-DATA COVER MAKALAH
-Sebelum file final dibuat, kumpulkan juga data cover berikut:
-- nama sekolah/kampus/instansi yang akan ditulis pada cover;
-- apakah tugas dikerjakan individu atau kelompok;
-- jika kelompok: tanyakan nama/nomor kelompok (contoh Kelompok 4) dan nama seluruh anggota;
-- jika individu: tanyakan nama penyusun;
-- nama guru/dosen pembimbing bersifat OPSIONAL. Jika pelanggan tidak ingin mencantumkannya, jangan memaksa;
-- tahun ajaran boleh ditanyakan bila relevan. Jika pelanggan tidak mengetahui atau tidak memerlukannya, jangan mengarang.
-
-STRUKTUR DEFAULT MAKALAH
-Jika guru/dosen tidak memberi struktur khusus, gunakan struktur standar seperti referensi Taqi DocuTech:
-- Cover;
-- Kata Pengantar;
-- Daftar Isi;
-- BAB I PENDAHULUAN, lalu subbab bernomor seperti 1.1 Latar Belakang, 1.2 Rumusan Masalah, 1.3 Tujuan, dan bagian lain sesuai kebutuhan;
-- BAB II PEMBAHASAN dengan subbab 2.1, 2.2, dan seterusnya sesuai materi;
-- BAB III PENUTUP dengan 3.1 Kesimpulan dan 3.2 Saran bila sesuai;
-- Daftar Pustaka bila sumber/referensi tersedia.
-Format heading BAB ditulis dua baris saat file dibuat: `BAB I` lalu `PENDAHULUAN`. Subbab ditulis di kiri dengan nomor seperti `1.1 Latar Belakang`.
-Jika pelanggan/guru memberikan struktur atau contoh sendiri, instruksi tersebut mengalahkan struktur default ini.
-
-Jangan menganggap data yang belum disebut sebagai sudah diketahui. Jangan menebak kelas, mata pelajaran, instruksi guru/dosen, panjang dokumen, identitas kelompok, nama sekolah, atau guru.
-Jika satu atau lebih data wajib belum ada, JANGAN membuat outline dan JANGAN membuat isi makalah. Tanyakan hanya data wajib yang masih kurang agar percakapan tidak berulang.
-Jika pengguna memberikan beberapa data sekaligus, jangan menanyakannya lagi.
-
-Setelah keenam data wajib lengkap:
-- tampilkan ringkasan requirement singkat;
-- bila ada instruksi guru/dosen, nyatakan bahwa instruksi tersebut menjadi prioritas;
-- buat outline/kerangka terlebih dahulu;
-- minta konfirmasi sebelum menghasilkan draft panjang, kecuali pengguna secara eksplisit sudah meminta langsung dibuatkan draft setelah requirement lengkap.
-- sebelum membuat file final, pastikan data cover yang relevan juga sudah lengkap.
-
-Data tambahan yang boleh ditanyakan bila relevan tetapi tidak selalu memblokir outline: deadline, gaya sitasi, jumlah sumber, format font/margin/spasi, kebutuhan gambar/tabel, dan lokasi/tanggal untuk kata pengantar.
-
-Hemat token: jangan langsung menghasilkan makalah panjang hanya karena topik disebut. Gunakan percakapan untuk melengkapi requirement, lalu outline, lalu draft bertahap.
+Aturan kerja:
+- patuhi instruksi guru/dosen di atas template standar;
+- jangan mengarang sumber/daftar pustaka;
+- setelah requirement lengkap, tampilkan ringkasan singkat dan outline terlebih dahulu;
+- jangan membuat draft panjang sebelum outline dikonfirmasi, kecuali pengguna secara eksplisit meminta langsung dibuatkan draft;
+- struktur default: Cover, Kata Pengantar, Daftar Isi, BAB I PENDAHULUAN (1.1 dst), BAB II PEMBAHASAN (2.1 dst), BAB III PENUTUP (3.1 Kesimpulan, 3.2 Saran bila sesuai), Daftar Pustaka bila sumber tersedia;
+- sebelum file final, kumpulkan data cover yang belum ada: nama sekolah/kampus, individu/kelompok, nama penyusun/anggota, dan tahun ajaran bila relevan; nama guru/dosen opsional;
+- jangan mengaku DOCX/PDF sudah dibuat sebelum Document Engine benar-benar dipanggil.
 """
 
 
@@ -95,6 +47,7 @@ class DocumentAgent:
         self.engine = engine
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
+        self.requirements = MakalahRequirements()
 
     @property
     def configured(self) -> bool:
@@ -115,14 +68,14 @@ class DocumentAgent:
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
-                "Document Agent: tersedia, tetapi DeepSeek API belum dikonfigurasi. "
+                "Document Agent tersedia. Pengumpul requirement lokal aktif, tetapi DeepSeek API belum dikonfigurasi. "
                 "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n"
                 + engine_note,
             )
         return DocumentResult(
             "siap",
             f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n"
-            "Percakapan dapat dimulai dengan /makalah. Uji engine lokal: /dokumen_demo.",
+            "Pengumpulan enam requirement dasar diproses lokal tanpa token AI; model baru dipanggil setelah datanya lengkap.",
         )
 
     def engine_status(self) -> DocumentResult:
@@ -151,7 +104,22 @@ class DocumentAgent:
 
     def reset(self) -> DocumentResult:
         self._history.clear()
-        return DocumentResult("berhasil", "Sesi Document Agent direset. Silakan mulai permintaan dokumen baru.")
+        self.requirements.reset()
+        return DocumentResult(
+            "berhasil",
+            "Sesi Document Agent direset. Silakan mulai permintaan dokumen baru. "
+            "Requirement awal akan dikumpulkan secara lokal tanpa token AI.",
+        )
+
+    def _model_messages(self, raw: str) -> list[dict[str, str]]:
+        messages = [{"role": "system", "content": WORK_PROMPT}]
+        messages.append({
+            "role": "system",
+            "content": "REQUIREMENT MAKALAH TERVALIDASI:\n" + self.requirements.structured_text(),
+        })
+        messages.extend(self._history[-self.history_limit:])
+        messages.append({"role": "user", "content": raw[:8000]})
+        return messages
 
     def handle(self, message: str) -> DocumentResult:
         raw = (message or "").strip()
@@ -167,14 +135,20 @@ class DocumentAgent:
         if command == "/dokumen_demo":
             return self.build_demo()
 
+        # Tahap pengumpulan requirement tidak memanggil AI sama sekali.
+        self.requirements.update(raw)
+        if not self.requirements.complete:
+            return DocumentResult("needs_requirements", self.requirements.question_text())
+
         if not self.configured:
             return self.status()
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(self._history[-self.history_limit:])
-        messages.append({"role": "user", "content": raw[:8000]})
-
-        reply = self.provider.generate(messages, max_tokens=1400, temperature=0.35, timeout=45)
+        reply = self.provider.generate(
+            self._model_messages(raw),
+            max_tokens=1400,
+            temperature=0.35,
+            timeout=45,
+        )
         if reply.status != "berhasil":
             return DocumentResult(reply.status, reply.text)
 

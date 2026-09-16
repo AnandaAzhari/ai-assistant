@@ -15,6 +15,9 @@ const commands = [
   ['/bulan_ini', 'Laporan bulan ini'],
   ['/sync_status', 'Cek status Google Sheets Sync'],
   ['/sync', 'Sinkronkan ledger ke Google Sheets'],
+  ['/dokumen_status', 'Cek Document Agent dan DeepSeek'],
+  ['/makalah', 'Mulai chat dengan Document Agent'],
+  ['/dokumen_baru', 'Reset konteks Document Agent'],
   ['/antrean', 'Lihat antrean TaqiDesk']
 ];
 

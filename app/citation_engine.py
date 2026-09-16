@@ -264,7 +264,6 @@ try {
   try { $doc.Footnotes.NumberingRule = 0 } catch {}
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
 
-  # Ubah marker [[R1]] menjadi footnote Word asli.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
     $firstUse = $true
@@ -288,8 +287,6 @@ try {
     }
   }
 
-  # Format DAFTAR PUSTAKA seperti format makalah manual:
-  # heading di tengah; entri rata kiri, hanging indent 1,27 cm, spasi tunggal.
   $bibliographyStart = -1
   foreach ($p in $doc.Paragraphs) {
     $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
@@ -325,8 +322,6 @@ try {
       try { $p.Range.Font.Italic = 0 } catch {}
     }
 
-    # Tipografi sumber: nama jurnal dicetak miring untuk artikel;
-    # judul dicetak miring untuk sumber non-artikel seperti buku.
     foreach ($item in $items) {
       $needle = if ([bool]$item.is_article -and -not [string]::IsNullOrWhiteSpace([string]$item.venue)) {
         [string]$item.venue
@@ -357,9 +352,6 @@ try {
     return -1
   }
 
-  # Ganti manual page break sebelum heading batas section dengan Section Break (Next Page).
-  # Cara ini menghindari section continuous ikut menghitung halaman sebelumnya sehingga
-  # BAB I benar-benar dimulai dari nomor 1, bukan 2.
   function Make-NextPageSectionBefore([string]$needle) {
     $start = Find-TextStart $needle
     if ($start -lt 0) { return }
@@ -391,7 +383,6 @@ try {
     $prelimSection = $doc.Sections.Item(2)
     $mainSection = $doc.Sections.Item(3)
 
-    # Cover tanpa nomor halaman.
     try {
       $coverFooter = $coverSection.Footers.Item(1)
       $coverFooter.LinkToPrevious = $false
@@ -399,40 +390,44 @@ try {
       $coverFooter.Range.Text = ''
     } catch {}
 
-    # Kata Pengantar + Daftar Isi memakai Romawi kecil mulai i.
+    # Microsoft Word membutuhkan properti PageNumbers ditetapkan SEBELUM Add.
+    # Ini mengikuti pola resmi Word VBA; jika Add dipanggil lebih dulu, Word dapat
+    # mempertahankan format Arab dan numbering continue dari section sebelumnya.
     try {
       $prelimFooter = $prelimSection.Footers.Item(1)
       $prelimFooter.LinkToPrevious = $false
       while ($prelimFooter.PageNumbers.Count -gt 0) { $prelimFooter.PageNumbers.Item(1).Delete() }
       $prelimFooter.Range.Text = ''
       $prelimFooter.Range.ParagraphFormat.Alignment = 1
-      $prelimFooter.PageNumbers.Add(1, $true) | Out-Null
-      $prelimFooter.PageNumbers.ShowFirstPageNumber = $true
-      $prelimFooter.PageNumbers.RestartNumberingAtSection = $true
-      $prelimFooter.PageNumbers.StartingNumber = 1
-      $prelimFooter.PageNumbers.NumberStyle = 2
+      $prelimNumbers = $prelimFooter.PageNumbers
+      $prelimNumbers.NumberStyle = 2
+      $prelimNumbers.IncludeChapterNumber = $false
+      $prelimNumbers.RestartNumberingAtSection = $true
+      $prelimNumbers.StartingNumber = 1
+      $prelimNumbers.ShowFirstPageNumber = $true
+      $prelimNumbers.Add(1, $true) | Out-Null
       try { $prelimFooter.Range.Font.Name = 'Times New Roman' } catch {}
       try { $prelimFooter.Range.Font.Size = 12 } catch {}
     } catch {}
 
-    # BAB I dimulai dari angka Arab 1 dan berlanjut sampai Daftar Pustaka.
     try {
       $mainFooter = $mainSection.Footers.Item(1)
       $mainFooter.LinkToPrevious = $false
       while ($mainFooter.PageNumbers.Count -gt 0) { $mainFooter.PageNumbers.Item(1).Delete() }
       $mainFooter.Range.Text = ''
       $mainFooter.Range.ParagraphFormat.Alignment = 1
-      $mainFooter.PageNumbers.Add(1, $true) | Out-Null
-      $mainFooter.PageNumbers.ShowFirstPageNumber = $true
-      $mainFooter.PageNumbers.RestartNumberingAtSection = $true
-      $mainFooter.PageNumbers.StartingNumber = 1
-      $mainFooter.PageNumbers.NumberStyle = 0
+      $mainNumbers = $mainFooter.PageNumbers
+      $mainNumbers.NumberStyle = 0
+      $mainNumbers.IncludeChapterNumber = $false
+      $mainNumbers.RestartNumberingAtSection = $true
+      $mainNumbers.StartingNumber = 1
+      $mainNumbers.ShowFirstPageNumber = $true
+      $mainNumbers.Add(1, $true) | Out-Null
       try { $mainFooter.Range.Font.Name = 'Times New Roman' } catch {}
       try { $mainFooter.Range.Font.Size = 12 } catch {}
     } catch {}
   }
 
-  # Heading subbab tetap rata kiri tanpa TAB. Paragraf isi memakai first-line indent 1,25 cm.
   $mainBodyStart = Find-TextStart 'BAB I'
   $biblioHeadingStart = Find-TextStart 'DAFTAR PUSTAKA'
   if ($mainBodyStart -ge 0) {
@@ -452,15 +447,12 @@ try {
     }
   }
 
-  # Repaginasi lalu perbarui TOC setelah section dan nomor halaman final diterapkan.
   try { $doc.Repaginate() } catch {}
   foreach ($toc in $doc.TablesOfContents) {
     try { $toc.Update() | Out-Null } catch {}
   }
   try { $doc.Repaginate() } catch {}
 
-  # Rapikan tampilan daftar isi. DAFTAR PUSTAKA adalah level utama seperti BAB,
-  # sehingga tidak boleh terlihat menggantung/terpusat di tengah.
   foreach ($toc in $doc.TablesOfContents) {
     foreach ($p in $toc.Range.Paragraphs) {
       $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
@@ -479,8 +471,6 @@ try {
     }
   }
 
-  # Update field footer dan TOC sekali lagi agar nomor yang terlihat sama dengan nomor
-  # yang akan dicetak/masuk PDF.
   foreach ($section in $doc.Sections) {
     foreach ($footer in $section.Footers) {
       try { $footer.Range.Fields.Update() | Out-Null } catch {}
@@ -491,8 +481,6 @@ try {
   try { $doc.Repaginate() } catch {}
   $doc.Save()
 
-  # Ekspor PDF dari sesi Word yang sama supaya format Romawi/Arab, TOC, dan pagination
-  # identik dengan DOCX final. Jika gagal, Python akan mencoba fallback converter.
   if (-not [string]::IsNullOrWhiteSpace($pdfOut)) {
     try {
       if (Test-Path -LiteralPath $pdfOut) { Remove-Item -LiteralPath $pdfOut -Force }

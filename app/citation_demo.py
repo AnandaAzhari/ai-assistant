@@ -2,10 +2,14 @@
 
 Jalankan dari root repo:
     python -m app.citation_demo
+
+Untuk menguji tanpa Ibid. dari Git Bash:
+    CITATION_REPEAT_MODE=short python -m app.citation_demo
 """
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from app.citation_engine import CitationBuildResult, CitationEngine
@@ -90,16 +94,28 @@ def demo_spec() -> MakalahSpec:
     )
 
 
-def build_demo(engine: DocumentEngine | None = None) -> CitationBuildResult:
+def build_demo(
+    engine: DocumentEngine | None = None,
+    *,
+    citation_repeat_mode: str | None = None,
+) -> CitationBuildResult:
     document_engine = engine or DocumentEngine.from_env()
     citations = CitationEngine(document_engine)
-    return citations.build(demo_spec(), demo_sources(), create_pdf=True)
+    mode = citation_repeat_mode or os.environ.get("CITATION_REPEAT_MODE", "auto")
+    return citations.build(
+        demo_spec(),
+        demo_sources(),
+        create_pdf=True,
+        citation_repeat_mode=mode,
+    )
 
 
 def main() -> None:
-    result = build_demo()
+    mode = CitationEngine.normalize_repeat_mode(os.environ.get("CITATION_REPEAT_MODE", "auto"))
+    result = build_demo(citation_repeat_mode=mode)
     print("Status:", result.status)
     print("Gaya sitasi: Chicago Notes & Bibliography")
+    print("citation_repeat_mode:", mode)
     print("DOCX:", result.docx_path or "-")
     print("PDF:", result.pdf_path or "-")
     print("Sumber dipakai:", ", ".join(result.used_refs) or "-")

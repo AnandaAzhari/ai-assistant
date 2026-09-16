@@ -1,7 +1,7 @@
 # Document Format Policy — Makalah
 
 Dokumen ini adalah **aturan format default resmi** untuk Document Agent Taqi AI.
-AI tidak boleh mengubah struktur, hierarki penomoran, atau cara menghitung target halaman hanya karena preferensi model.
+AI tidak boleh mengubah struktur, hierarki penomoran, cara menghitung target halaman, format nomor halaman, atau tata letak daftar pustaka hanya karena preferensi model.
 
 ## Urutan prioritas aturan
 
@@ -45,13 +45,25 @@ Jangan menambah BAB atau bagian lain kecuali memang dibutuhkan topik atau diperi
 
 ## Target jumlah halaman
 
-- Jika pelanggan hanya mengatakan `8 halaman`, artikan sebagai target **total dokumen final**, bukan 8 halaman isi ditambah halaman awal.
-- Jika pelanggan secara jelas mengatakan `8 halaman isi`, barulah target berlaku khusus isi utama.
+- Jika pelanggan hanya mengatakan `8 halaman`, artikan sebagai target **8 halaman setelah cover**. Cover tidak dihitung ke target.
+- Secara default halaman setelah cover mencakup halaman awal bernomor Romawi, isi BAB I–BAB III, dan Daftar Pustaka.
+- Jika pelanggan secara jelas mengatakan `8 halaman isi`, target 8 halaman hanya berlaku pada isi utama BAB I–BAB III; halaman awal dan Daftar Pustaka berada di luar target itu.
 - Target adalah kisaran praktis, bukan alasan untuk menambah subbab yang tidak perlu.
-- Untuk target sampai 8 halaman total, buat kerangka ringkas: BAB II umumnya cukup 3–4 subbab utama. Tambahkan `x.x.x` hanya bila benar-benar membantu struktur.
-- Untuk target 9–12 halaman total, BAB II umumnya 4–6 subbab utama.
-- Hindari outline terlalu rinci yang membuat dokumen melewati target halaman.
-- Setelah render Word/PDF tersedia, jumlah halaman final harus menjadi acuan pemeriksaan panjang dokumen.
+- Untuk target sampai 8 halaman setelah cover, buat kerangka ringkas: BAB II umumnya cukup 3–4 subbab utama. Tambahkan `x.x.x` hanya bila benar-benar membantu struktur.
+- Untuk target 9–12 halaman setelah cover, BAB II umumnya 4–6 subbab utama.
+- Hindari kerangka terlalu rinci yang membuat dokumen melewati target halaman.
+- Setelah render Word/PDF tersedia, jumlah halaman final setelah cover harus menjadi acuan pemeriksaan panjang dokumen.
+
+## Nomor halaman
+
+Default penomoran halaman makalah:
+
+- Cover: **tidak menampilkan nomor halaman** dan tidak dihitung ke target halaman.
+- Bagian awal setelah cover, seperti Kata Pengantar dan Daftar Isi: gunakan angka Romawi kecil `i`, `ii`, `iii`, dan seterusnya, dimulai dari `i`.
+- Ketika masuk `BAB I PENDAHULUAN`, nomor halaman di-reset dan dimulai lagi dari angka Arab `1`.
+- Nomor Arab kemudian berlanjut terus melalui BAB II, BAB III, sampai Daftar Pustaka. Jangan reset lagi pada Daftar Pustaka.
+- Nomor halaman diletakkan konsisten di footer tengah, kecuali instruksi resmi menentukan posisi lain.
+- Jika guru/dosen/sekolah/kampus memberi aturan nomor halaman yang berbeda, ikuti aturan resmi tersebut.
 
 ## Bahasa dan isi
 
@@ -64,8 +76,13 @@ Jangan menambah BAB atau bagian lain kecuali memang dibutuhkan topik atau diperi
 
 - Marker sumber internal `[[R1]]`, `[[R2]]`, dst. hanya untuk mesin dan tidak boleh terlihat pada dokumen final.
 - Citation Engine mengubah marker menjadi catatan kaki Word asli.
-- Daftar pustaka hanya memuat sumber yang benar-benar digunakan.
-- Tata letak daftar pustaka mengikuti format engine yang telah ditetapkan; jangan diubah model AI.
+- Daftar pustaka hanya memuat sumber yang benar-benar digunakan dan diurutkan alfabetis.
+- Judul `DAFTAR PUSTAKA` berada di tengah dan tebal.
+- Setiap entri daftar pustaka rata kiri dengan **hanging indent 1,27 cm**.
+- Gunakan spasi tunggal di dalam satu entri dan jarak ringan antar-entri agar rapi dan mudah dibaca.
+- Jangan memakai justify pada entri daftar pustaka karena dapat membuat jarak antarkata melebar.
+- Nama jurnal dicetak miring untuk artikel jurnal; judul buku/sumber non-jurnal dicetak miring sesuai tipe sumber.
+- Tata letak daftar pustaka ditangani Citation Engine secara deterministik dan tidak boleh diubah model AI secara sepihak.
 
 ## Prinsip stabilitas
 

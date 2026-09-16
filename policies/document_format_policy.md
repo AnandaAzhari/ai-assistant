@@ -1,7 +1,7 @@
 # Document Format Policy — Makalah
 
 Dokumen ini adalah **aturan format default resmi** untuk Document Agent Taqi AI.
-AI tidak boleh mengubah struktur, hierarki penomoran, cara menghitung target halaman, format nomor halaman, atau tata letak daftar pustaka hanya karena preferensi model.
+AI tidak boleh mengubah struktur, hierarki penomoran, tata letak daftar pustaka, atau cara menghitung target halaman hanya karena preferensi model.
 
 ## Urutan prioritas aturan
 
@@ -33,11 +33,13 @@ Urutan default:
 
 Jangan menambah BAB atau bagian lain kecuali memang dibutuhkan topik atau diperintahkan guru/dosen/instansi.
 
-## Hierarki penomoran
+## Hierarki penomoran dan indentasi
 
 - BAB: `BAB I`, `BAB II`, `BAB III`.
 - Subbab tingkat 2: `1.1`, `1.2`, `2.1`, `2.2`, dst.
 - Jika subbab memiliki subbagian sebagai heading, gunakan tingkat 3: `1.1.1`, `1.1.2`, `2.1.1`, dst.
+- Judul subbab dan anak subbab dimulai dari margin kiri. **Jangan memakai TAB atau indent tambahan sebelum/di antara nomor heading dan judul.** Gunakan satu spasi normal, misalnya `1.1 Latar Belakang`.
+- Paragraf isi setelah heading secara default memakai first-line indent sekitar **1,25 cm**. Ini berbeda dari heading: heading tetap rata kiri tanpa tab.
 - Jangan memakai bullet `•` sebagai pengganti judul subbagian.
 - Bullet/numbered list boleh dipakai **hanya di dalam isi** untuk daftar contoh, langkah, manfaat, jenis, atau poin lain; bukan untuk mengganti hierarki heading.
 - Default maksimum sampai tingkat `x.x.x`. Jangan membuat tingkat lebih dalam kecuali instruksi resmi memintanya.
@@ -45,25 +47,24 @@ Jangan menambah BAB atau bagian lain kecuali memang dibutuhkan topik atau diperi
 
 ## Target jumlah halaman
 
-- Jika pelanggan hanya mengatakan `8 halaman`, artikan sebagai target **8 halaman setelah cover**. Cover tidak dihitung ke target.
-- Secara default halaman setelah cover mencakup halaman awal bernomor Romawi, isi BAB I–BAB III, dan Daftar Pustaka.
-- Jika pelanggan secara jelas mengatakan `8 halaman isi`, target 8 halaman hanya berlaku pada isi utama BAB I–BAB III; halaman awal dan Daftar Pustaka berada di luar target itu.
+- Jika pelanggan hanya mengatakan `8 halaman`, artikan sebagai target sekitar **8 halaman setelah cover**. Cover tidak dihitung.
+- Halaman setelah cover seperti Kata Pengantar, Daftar Isi, BAB I–III, dan Daftar Pustaka ikut dalam target tersebut kecuali pelanggan/guru/dosen menjelaskan aturan lain.
+- Jika pelanggan secara jelas mengatakan `8 halaman isi`, target berlaku khusus isi utama BAB I–III dan halaman awal/daftar pustaka tidak dihitung.
 - Target adalah kisaran praktis, bukan alasan untuk menambah subbab yang tidak perlu.
 - Untuk target sampai 8 halaman setelah cover, buat kerangka ringkas: BAB II umumnya cukup 3–4 subbab utama. Tambahkan `x.x.x` hanya bila benar-benar membantu struktur.
 - Untuk target 9–12 halaman setelah cover, BAB II umumnya 4–6 subbab utama.
-- Hindari kerangka terlalu rinci yang membuat dokumen melewati target halaman.
-- Setelah render Word/PDF tersedia, jumlah halaman final setelah cover harus menjadi acuan pemeriksaan panjang dokumen.
+- Hindari outline terlalu rinci yang membuat dokumen melewati target halaman.
+- Setelah render Word/PDF tersedia, jumlah halaman final harus menjadi acuan pemeriksaan panjang dokumen.
 
-## Nomor halaman
+## Penomoran halaman
 
-Default penomoran halaman makalah:
+Default penomoran halaman:
 
-- Cover: **tidak menampilkan nomor halaman** dan tidak dihitung ke target halaman.
-- Bagian awal setelah cover, seperti Kata Pengantar dan Daftar Isi: gunakan angka Romawi kecil `i`, `ii`, `iii`, dan seterusnya, dimulai dari `i`.
-- Ketika masuk `BAB I PENDAHULUAN`, nomor halaman di-reset dan dimulai lagi dari angka Arab `1`.
-- Nomor Arab kemudian berlanjut terus melalui BAB II, BAB III, sampai Daftar Pustaka. Jangan reset lagi pada Daftar Pustaka.
-- Nomor halaman diletakkan konsisten di footer tengah, kecuali instruksi resmi menentukan posisi lain.
-- Jika guru/dosen/sekolah/kampus memberi aturan nomor halaman yang berbeda, ikuti aturan resmi tersebut.
+- **Cover tidak menampilkan nomor halaman.**
+- Bagian awal setelah cover, termasuk Kata Pengantar dan Daftar Isi, memakai angka Romawi kecil `i, ii, iii, ...` dimulai dari `i`.
+- Saat masuk `BAB I`, penomoran di-reset dan dimulai dari angka Arab `1`.
+- Penomoran Arab kemudian berlanjut terus sampai bagian akhir termasuk Daftar Pustaka; jangan di-reset lagi.
+- Nomor halaman default ditempatkan di tengah bawah/footer agar konsisten, kecuali instruksi guru/dosen/instansi menentukan posisi lain.
 
 ## Bahasa dan isi
 
@@ -76,13 +77,11 @@ Default penomoran halaman makalah:
 
 - Marker sumber internal `[[R1]]`, `[[R2]]`, dst. hanya untuk mesin dan tidak boleh terlihat pada dokumen final.
 - Citation Engine mengubah marker menjadi catatan kaki Word asli.
-- Daftar pustaka hanya memuat sumber yang benar-benar digunakan dan diurutkan alfabetis.
-- Judul `DAFTAR PUSTAKA` berada di tengah dan tebal.
-- Setiap entri daftar pustaka rata kiri dengan **hanging indent 1,27 cm**.
-- Gunakan spasi tunggal di dalam satu entri dan jarak ringan antar-entri agar rapi dan mudah dibaca.
-- Jangan memakai justify pada entri daftar pustaka karena dapat membuat jarak antarkata melebar.
-- Nama jurnal dicetak miring untuk artikel jurnal; judul buku/sumber non-jurnal dicetak miring sesuai tipe sumber.
-- Tata letak daftar pustaka ditangani Citation Engine secara deterministik dan tidak boleh diubah model AI secara sepihak.
+- Daftar pustaka hanya memuat sumber yang benar-benar digunakan.
+- Judul `DAFTAR PUSTAKA` ditulis di tengah dan tebal.
+- Entri daftar pustaka disusun alfabetis, rata kiri, memakai hanging indent sekitar **1,27 cm**, spasi tunggal, dan jarak antar-entri yang rapi.
+- Nama jurnal untuk artikel atau judul buku/sumber non-jurnal dicetak miring sesuai format engine.
+- Tata letak daftar pustaka mengikuti format engine yang telah ditetapkan; jangan diubah model AI.
 
 ## Prinsip stabilitas
 

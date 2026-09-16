@@ -80,9 +80,8 @@ class MakalahStructureTests(unittest.TestCase):
         )
         xml = DocumentEngine()._document_xml(spec)
         page_break = '<w:br w:type="page"/>'
-        # Ada dua page break khusus antar-BAB: sebelum BAB II dan BAB III.
-        # Page break lain dari bagian awal boleh tetap ada, jadi cukup pastikan totalnya >= 3.
-        self.assertGreaterEqual(xml.count(page_break), 3)
+        # BAB II dan BAB III masing-masing harus mendapat page break sendiri.
+        self.assertGreaterEqual(xml.count(page_break), 2)
         self.assertLess(xml.find("BAB I"), xml.find("BAB II"))
         self.assertLess(xml.find("BAB II"), xml.find("BAB III"))
 

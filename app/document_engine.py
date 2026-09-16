@@ -1,4 +1,4 @@
-"""Document Engine v0.4 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.5 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
@@ -199,7 +199,10 @@ class DocumentEngine:
     @staticmethod
     def _infer_heading_level(title: str, fallback: int) -> int:
         clean = re.sub(r"\s+", " ", (title or "").strip())
-        if re.match(r"^[IVXLCDM]+\.\s+\S", clean, re.IGNORECASE):
+        # Penting: level utama Makalah hanya dikenali melalui label BAB.
+        # Huruf C, D, M, dst. bisa merupakan angka Romawi, tetapi dalam pola
+        # Makalah "C. Tujuan" tetap subbab (Heading 2), bukan Heading 1.
+        if re.match(r"^BAB\s+[IVXLCDM]+\b", clean, re.IGNORECASE):
             return 1
         if re.match(r"^[A-Z]\.\s+\S", clean):
             return 2
@@ -207,8 +210,6 @@ class DocumentEngine:
             return 3
         if re.match(r"^[a-z]\.\s+\S", clean):
             return 4
-        if re.match(r"^BAB\s+[IVXLCDM]+\b", clean, re.IGNORECASE):
-            return 1
         if re.match(r"^\d+\.\d+\.\d+\s+\S", clean):
             return 3
         if re.match(r"^\d+\.\d+\s+\S", clean):
@@ -325,11 +326,20 @@ class DocumentEngine:
         body.append(self._section_break(footer_rid="rId3", number_format="lowerRoman", start=1))
 
         # SECTION 3 — ISI UTAMA: footer PAGE + decimal mulai 1.
+        chapter_seen = False
         for section in spec.sections:
             level = self._infer_heading_level(section.title, section.level)
             clean_title = re.sub(r"\s+", " ", section.title.strip())
             is_chapter = bool(re.match(r"^BAB\s+", clean_title, re.IGNORECASE))
             is_bibliography = clean_title.casefold() == "daftar pustaka"
+
+            # BAB I sudah dimulai oleh section break dari Daftar Isi. BAB berikutnya
+            # wajib dimulai pada halaman baru agar konsisten dengan format makalah.
+            if is_chapter:
+                if chapter_seen:
+                    body.append(self._page_break())
+                chapter_seen = True
+
             title = self._legacy_chapter_title(section.title) if is_chapter else section.title
             align = "center" if (is_chapter or is_bibliography) else "left"
             body.append(

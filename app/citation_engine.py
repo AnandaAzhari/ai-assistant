@@ -1,19 +1,8 @@
-"""Footnote + Daftar Pustaka Engine untuk dokumen makalah.
+"""Footnote + Daftar Pustaka Engine untuk dokumen akademik Taqi AI.
 
-Default style memakai Chicago Notes & Bibliography karena dokumen Taqi AI memakai
-footnote bernomor di bawah halaman sekaligus daftar pustaka. Engine ini tidak memakai
-model AI. Draft cukup memakai marker [[R1]], [[R2]], dst.
-
-Tata letak daftar pustaka mengikuti format makalah yang dipilih untuk Taqi AI:
-judul DAFTAR PUSTAKA di tengah, entri rata kiri, hanging indent 1,27 cm,
-spasi tunggal, dan jarak antar-entri ringan. Dengan begitu Word tidak merenggangkan
-spasi seperti paragraf justify biasa.
-
-Nomor halaman final juga diterapkan deterministik melalui Microsoft Word:
-cover tanpa nomor, bagian awal memakai Romawi kecil mulai i, lalu BAB I memakai
-angka Arab mulai 1 dan berlanjut sampai Daftar Pustaka. PDF diekspor dari sesi Word
-yang sama setelah semua nomor halaman dan daftar isi selesai diperbarui agar DOCX dan
-PDF konsisten.
+Citation Engine mengurus marker sumber, footnote Word asli, daftar pustaka, update
+Daftar Isi, dan ekspor PDF. Struktur section serta nomor halaman dibuat langsung oleh
+DocumentEngine di OOXML agar tidak berubah-ubah saat Word melakukan repagination.
 """
 
 from __future__ import annotations
@@ -30,6 +19,7 @@ from app.source_registry import RegisteredSource
 
 
 _REF_PATTERN = re.compile(r"\[\[(R\d+)\]\]", re.IGNORECASE)
+_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
 
 
 @dataclass(frozen=True)
@@ -51,7 +41,7 @@ class CitationEngine:
     def status_text(self) -> str:
         return (
             f"Footnote + Daftar Pustaka Engine siap. Default: {self.STYLE_NAME}. "
-            "Marker: [[R1]], [[R2]], dst. Nomor halaman: cover tanpa nomor, Romawi pada halaman awal, Arab mulai BAB I."
+            "Nomor halaman mengikuti section native DOCX dari Document Engine."
         )
 
     @staticmethod
@@ -148,14 +138,13 @@ class CitationEngine:
 
     @classmethod
     def bibliography_entry(cls, source: RegisteredSource) -> str:
-        """Format isi bibliografi; layout paragraf diterapkan oleh Microsoft Word COM."""
         author = cls._bibliography_authors(source)
         title = cls._clean(source.title) or "Tanpa judul"
         venue = cls._clean(source.venue)
         work_type = cls._clean(source.work_type).casefold()
         locator = f"https://doi.org/{source.doi}" if source.doi else cls._clean(source.url)
-
         is_article = bool(venue) or "article" in work_type or "journal" in work_type
+
         if is_article:
             text = f'{author}. “{title}.”'
             if venue:
@@ -183,6 +172,53 @@ class CitationEngine:
         return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
+    def _roman_to_int(value: str) -> int:
+        roman = (value or "").upper()
+        total = 0
+        prev = 0
+        for char in reversed(roman):
+            current = _ROMAN_VALUES.get(char, 0)
+            if current < prev:
+                total -= current
+            else:
+                total += current
+                prev = current
+        return total
+
+    @staticmethod
+    def _int_to_roman(value: int) -> str:
+        number = max(1, int(value))
+        pairs = (
+            (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+            (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+            (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+        )
+        parts: list[str] = []
+        for amount, symbol in pairs:
+            while number >= amount:
+                parts.append(symbol)
+                number -= amount
+        return "".join(parts)
+
+    @classmethod
+    def _is_bibliography_title(cls, title: str) -> bool:
+        clean = cls._clean(title).casefold()
+        clean = re.sub(r"^[ivxlcdm]+\.\s*", "", clean, flags=re.IGNORECASE)
+        return clean == "daftar pustaka"
+
+    @classmethod
+    def _bibliography_title(cls, spec: MakalahSpec) -> str:
+        """Makalah default memakai bagian utama Romawi; lanjutkan nomor terbesar."""
+        highest = 0
+        for section in spec.sections:
+            match = re.match(r"^([IVXLCDM]+)\.\s+", cls._clean(section.title), re.IGNORECASE)
+            if match:
+                highest = max(highest, cls._roman_to_int(match.group(1)))
+        if highest:
+            return f"{cls._int_to_roman(highest + 1)}. Daftar Pustaka"
+        return "Daftar Pustaka"
+
+    @staticmethod
     def used_ref_ids(spec: MakalahSpec) -> tuple[str, ...]:
         seen: set[str] = set()
         ordered: list[str] = []
@@ -198,21 +234,22 @@ class CitationEngine:
         return tuple(ordered)
 
     @classmethod
-    def _with_bibliography(cls, spec: MakalahSpec, sources: list[RegisteredSource]) -> tuple[MakalahSpec, tuple[str, ...], list[RegisteredSource]]:
+    def _with_bibliography(
+        cls,
+        spec: MakalahSpec,
+        sources: list[RegisteredSource],
+    ) -> tuple[MakalahSpec, tuple[str, ...], list[RegisteredSource]]:
         source_map = {source.ref_id.upper(): source for source in sources}
         used_refs = cls.used_ref_ids(spec)
         used_sources = [source_map[ref] for ref in used_refs if ref in source_map]
         if not used_sources:
             return spec, used_refs, []
-        has_bibliography = any(
-            re.sub(r"\s+", " ", section.title.strip().casefold()) == "daftar pustaka"
-            for section in spec.sections
-        )
-        if has_bibliography:
+        if any(cls._is_bibliography_title(section.title) for section in spec.sections):
             return spec, used_refs, used_sources
+
         sorted_sources = sorted(used_sources, key=cls._sort_key)
         entries = tuple(cls.bibliography_entry(source) for source in sorted_sources)
-        bibliography = DocumentSection("DAFTAR PUSTAKA", entries, 1)
+        bibliography = DocumentSection(cls._bibliography_title(spec), entries, 1)
         return replace(spec, sections=spec.sections + (bibliography,)), used_refs, used_sources
 
     @staticmethod
@@ -240,10 +277,12 @@ class CitationEngine:
                 "is_article": is_article,
             })
         citation_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
         env = os.environ.copy()
         env["TAQI_CITATION_DOCX"] = str(docx_path.resolve())
         env["TAQI_CITATION_JSON"] = str(citation_file.resolve())
         env["TAQI_CITATION_PDF"] = str(docx_path.with_suffix(".pdf").resolve()) if create_pdf else ""
+
         script = r'''
 $ErrorActionPreference = 'Stop'
 $src = [System.IO.Path]::GetFullPath([string]$env:TAQI_CITATION_DOCX)
@@ -264,6 +303,7 @@ try {
   try { $doc.Footnotes.NumberingRule = 0 } catch {}
   try { $doc.Footnotes.StartingNumber = 1 } catch {}
 
+  # Marker [[R1]] -> footnote Word asli. Tidak menyentuh section/nomor halaman.
   foreach ($item in $items) {
     $marker = '[[' + [string]$item.ref_id + ']]'
     $firstUse = $true
@@ -287,19 +327,12 @@ try {
     }
   }
 
+  # Cari heading Daftar Pustaka, termasuk bentuk "VI. Daftar Pustaka".
   $bibliographyStart = -1
   foreach ($p in $doc.Paragraphs) {
     $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
-    if ($text -eq 'DAFTAR PUSTAKA') {
+    if ($text -match '^(?:[IVXLCDM]+\.\s*)?DAFTAR PUSTAKA$') {
       $bibliographyStart = $p.Range.End
-      try { $p.Alignment = 1 } catch {}
-      try { $p.Range.Font.Bold = 1 } catch {}
-      try { $p.Range.Font.Italic = 0 } catch {}
-      try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
-      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
-      try { $p.Range.ParagraphFormat.LineSpacingRule = 0 } catch {}
-      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
-      try { $p.Range.ParagraphFormat.SpaceAfter = 12 } catch {}
       break
     }
   }
@@ -309,7 +342,6 @@ try {
     foreach ($p in $biblioRange.Paragraphs) {
       $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
       if ([string]::IsNullOrWhiteSpace($text)) { continue }
-      try { $p.Alignment = 0 } catch {}
       try { $p.Range.ParagraphFormat.Alignment = 0 } catch {}
       try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
       try { $p.Range.ParagraphFormat.FirstLineIndent = -36 } catch {}
@@ -335,157 +367,25 @@ try {
       $find.Text = $needle
       $find.Forward = $true
       $find.Wrap = 0
-      if ($find.Execute()) {
-        try { $search.Font.Italic = 1 } catch {}
-      }
+      if ($find.Execute()) { try { $search.Font.Italic = 1 } catch {} }
     }
   }
 
-  function Find-TextStart([string]$needle) {
-    $search = $doc.Content.Duplicate
-    $find = $search.Find
-    $find.ClearFormatting()
-    $find.Text = $needle
-    $find.Forward = $true
-    $find.Wrap = 0
-    if ($find.Execute()) { return [int]$search.Start }
-    return -1
-  }
-
-  function Make-NextPageSectionBefore([string]$needle) {
-    $start = Find-TextStart $needle
-    if ($start -lt 0) { return }
-    $scanStart = [Math]::Max(0, $start - 8)
-    $scan = $doc.Range($scanStart, $start)
-    $findBreak = $scan.Find
-    $findBreak.ClearFormatting()
-    $findBreak.Text = '^m'
-    $findBreak.Forward = $false
-    $findBreak.Wrap = 0
-    if ($findBreak.Execute()) {
-      $scan.Text = ''
-    }
-    $start = Find-TextStart $needle
-    if ($start -ge 0) {
-      $r = $doc.Range($start, $start)
-      $r.InsertBreak(2)
-    }
-  }
-
-  Make-NextPageSectionBefore 'KATA PENGANTAR'
-  if ((Find-TextStart 'KATA PENGANTAR') -lt 0) {
-    Make-NextPageSectionBefore 'DAFTAR ISI'
-  }
-  Make-NextPageSectionBefore 'BAB I'
-
-  if ($doc.Sections.Count -ge 3) {
-    $coverSection = $doc.Sections.Item(1)
-    $prelimSection = $doc.Sections.Item(2)
-    $mainSection = $doc.Sections.Item(3)
-
-    try {
-      $coverFooter = $coverSection.Footers.Item(1)
-      $coverFooter.LinkToPrevious = $false
-      while ($coverFooter.PageNumbers.Count -gt 0) { $coverFooter.PageNumbers.Item(1).Delete() }
-      $coverFooter.Range.Text = ''
-    } catch {}
-
-    # Microsoft Word membutuhkan properti PageNumbers ditetapkan SEBELUM Add.
-    # Ini mengikuti pola resmi Word VBA; jika Add dipanggil lebih dulu, Word dapat
-    # mempertahankan format Arab dan numbering continue dari section sebelumnya.
-    try {
-      $prelimFooter = $prelimSection.Footers.Item(1)
-      $prelimFooter.LinkToPrevious = $false
-      while ($prelimFooter.PageNumbers.Count -gt 0) { $prelimFooter.PageNumbers.Item(1).Delete() }
-      $prelimFooter.Range.Text = ''
-      $prelimFooter.Range.ParagraphFormat.Alignment = 1
-      $prelimNumbers = $prelimFooter.PageNumbers
-      $prelimNumbers.NumberStyle = 2
-      $prelimNumbers.IncludeChapterNumber = $false
-      $prelimNumbers.RestartNumberingAtSection = $true
-      $prelimNumbers.StartingNumber = 1
-      $prelimNumbers.ShowFirstPageNumber = $true
-      $prelimNumbers.Add(1, $true) | Out-Null
-      try { $prelimFooter.Range.Font.Name = 'Times New Roman' } catch {}
-      try { $prelimFooter.Range.Font.Size = 12 } catch {}
-    } catch {}
-
-    try {
-      $mainFooter = $mainSection.Footers.Item(1)
-      $mainFooter.LinkToPrevious = $false
-      while ($mainFooter.PageNumbers.Count -gt 0) { $mainFooter.PageNumbers.Item(1).Delete() }
-      $mainFooter.Range.Text = ''
-      $mainFooter.Range.ParagraphFormat.Alignment = 1
-      $mainNumbers = $mainFooter.PageNumbers
-      $mainNumbers.NumberStyle = 0
-      $mainNumbers.IncludeChapterNumber = $false
-      $mainNumbers.RestartNumberingAtSection = $true
-      $mainNumbers.StartingNumber = 1
-      $mainNumbers.ShowFirstPageNumber = $true
-      $mainNumbers.Add(1, $true) | Out-Null
-      try { $mainFooter.Range.Font.Name = 'Times New Roman' } catch {}
-      try { $mainFooter.Range.Font.Size = 12 } catch {}
-    } catch {}
-  }
-
-  $mainBodyStart = Find-TextStart 'BAB I'
-  $biblioHeadingStart = Find-TextStart 'DAFTAR PUSTAKA'
-  if ($mainBodyStart -ge 0) {
-    $mainBodyEnd = if ($biblioHeadingStart -gt $mainBodyStart) { $biblioHeadingStart } else { $doc.Content.End }
-    $mainBodyRange = $doc.Range($mainBodyStart, $mainBodyEnd)
-    foreach ($p in $mainBodyRange.Paragraphs) {
-      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
-      if ([string]::IsNullOrWhiteSpace($text)) { continue }
-      $isHeading = ($text -match '^BAB\s+[IVXLCDM]+\b') -or ($text -match '^\d+(?:\.\d+){1,2}\s+\S')
-      if ($isHeading) {
-        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
-        try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
-      } else {
-        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
-        try { $p.Range.ParagraphFormat.FirstLineIndent = 35.43 } catch {}
-      }
-    }
-  }
-
+  # Nomor halaman sudah native OOXML. Word hanya diminta menghitung ulang field dan TOC.
   try { $doc.Repaginate() } catch {}
-  foreach ($toc in $doc.TablesOfContents) {
-    try { $toc.Update() | Out-Null } catch {}
-  }
-  try { $doc.Repaginate() } catch {}
-
-  foreach ($toc in $doc.TablesOfContents) {
-    foreach ($p in $toc.Range.Paragraphs) {
-      $text = (($p.Range.Text -replace '[\r\a]+$','').Trim())
-      if ([string]::IsNullOrWhiteSpace($text)) { continue }
-      try { $p.Range.ParagraphFormat.Alignment = 0 } catch {}
-      try { $p.Range.ParagraphFormat.FirstLineIndent = 0 } catch {}
-      try { $p.Range.ParagraphFormat.SpaceBefore = 0 } catch {}
-      try { $p.Range.ParagraphFormat.SpaceAfter = 0 } catch {}
-      if (($text -match '^BAB\s+[IVXLCDM]+\b') -or ($text -match '^DAFTAR PUSTAKA\b')) {
-        try { $p.Range.ParagraphFormat.LeftIndent = 0 } catch {}
-      } elseif ($text -match '^\d+\.\d+\.\d+\b') {
-        try { $p.Range.ParagraphFormat.LeftIndent = 36 } catch {}
-      } elseif ($text -match '^\d+\.\d+\b') {
-        try { $p.Range.ParagraphFormat.LeftIndent = 18 } catch {}
-      }
-    }
-  }
-
   foreach ($section in $doc.Sections) {
     foreach ($footer in $section.Footers) {
       try { $footer.Range.Fields.Update() | Out-Null } catch {}
     }
   }
-  try { $doc.Repaginate() } catch {}
+  try { $doc.Fields.Update() | Out-Null } catch {}
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
   try { $doc.Repaginate() } catch {}
   $doc.Save()
 
   if (-not [string]::IsNullOrWhiteSpace($pdfOut)) {
-    try {
-      if (Test-Path -LiteralPath $pdfOut) { Remove-Item -LiteralPath $pdfOut -Force }
-      $doc.ExportAsFixedFormat([string]$pdfOut, 17)
-    } catch {}
+    if (Test-Path -LiteralPath $pdfOut) { Remove-Item -LiteralPath $pdfOut -Force }
+    $doc.ExportAsFixedFormat([string]$pdfOut, 17)
   }
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
@@ -495,18 +395,22 @@ try {
         try:
             completed = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-                capture_output=True, text=True, timeout=timeout, check=False, env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"Footnote/format daftar pustaka/nomor halaman belum berhasil diterapkan: {exc}"
+            return f"Footnote/daftar pustaka/PDF belum berhasil diterapkan: {exc}"
         finally:
             try:
                 citation_file.unlink(missing_ok=True)
             except OSError:
                 pass
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal menerapkan footnote/format daftar pustaka/nomor halaman.").strip()
-            return f"Footnote/format daftar pustaka/nomor halaman belum berhasil diterapkan: {detail[:420]}"
+            detail = (completed.stderr or completed.stdout or "Microsoft Word gagal memproses dokumen.").strip()
+            return f"Footnote/daftar pustaka/PDF belum berhasil diterapkan: {detail[:420]}"
         return ""
 
     def build(self, spec: MakalahSpec, sources: list[RegisteredSource], *, create_pdf: bool = True) -> CitationBuildResult:
@@ -514,14 +418,19 @@ try {
         source_ids = {source.ref_id.upper() for source in sources}
         unknown = tuple(ref for ref in used_refs if ref not in source_ids)
         if unknown:
-            return CitationBuildResult("gagal", used_refs=used_refs, warning="Marker sumber tidak ditemukan di Source Registry: " + ", ".join(unknown))
+            return CitationBuildResult(
+                "gagal",
+                used_refs=used_refs,
+                warning="Marker sumber tidak ditemukan di Source Registry: " + ", ".join(unknown),
+            )
         try:
             docx_path = self.document_engine.build_docx(cited_spec)
         except (OSError, ValueError) as exc:
             return CitationBuildResult("gagal", used_refs=used_refs, warning=f"Gagal membuat DOCX: {exc}")
-        footnote_warning = self._apply_word_footnotes(docx_path, used_sources, create_pdf=create_pdf)
-        if footnote_warning:
-            return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=footnote_warning)
+
+        warning = self._apply_word_footnotes(docx_path, used_sources, create_pdf=create_pdf)
+        if warning:
+            return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=warning)
 
         pdf_path: Path | None = None
         pdf_warning = ""
@@ -531,7 +440,11 @@ try {
                 pdf_path = same_session_pdf
             else:
                 pdf_path, pdf_warning = self.document_engine.convert_to_pdf(docx_path)
+
         return CitationBuildResult(
-            "berhasil", docx_path=str(docx_path), pdf_path=str(pdf_path) if pdf_path else "",
-            used_refs=used_refs, warning=pdf_warning,
+            "berhasil",
+            docx_path=str(docx_path),
+            pdf_path=str(pdf_path) if pdf_path else "",
+            used_refs=used_refs,
+            warning=pdf_warning,
         )

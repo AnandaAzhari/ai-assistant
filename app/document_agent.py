@@ -39,8 +39,10 @@ Aturan:
 - jika ada arahan guru/dosen/sekolah/kampus, arahan itu lebih penting daripada template standar;
 - jangan mengarang sumber atau daftar pustaka;
 - WAJIB mengikuti policy format dokumen yang dikirim pada system message berikutnya;
-- heading harus mengikuti hierarki BAB -> 1.1 -> 1.1.1 bila ada subbagian; jangan memakai bullet sebagai pengganti heading;
-- hormati target jumlah halaman dan jangan membuat terlalu banyak subbab untuk dokumen pendek;
+- default Makalah memakai hierarki BAB I -> A. -> 1. -> a.; tingkat 1. dan a. hanya dipakai bila benar-benar diperlukan;
+- jangan mengganti default Makalah menjadi BAB I -> 1.1 -> 1.1.1 atau I. -> A. -> 1. -> a. tanpa instruksi resmi;
+- jangan memakai bullet sebagai pengganti heading;
+- hormati target jumlah halaman dan jangan membuat terlalu banyak subbagian untuk dokumen pendek;
 - JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah kerangka disetujui;
 - JANGAN membuat isi makalah lengkap pada tahap ini;
 - akhiri dengan: `Apakah kerangka makalah ini sudah sesuai? Jika sudah, balas setuju atau lanjut. Jika ada yang ingin diubah, tuliskan bagian yang ingin diperbaiki.`

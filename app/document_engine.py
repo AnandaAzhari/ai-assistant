@@ -1,8 +1,10 @@
-"""Document Engine v0.2 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.3 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
-PDF bersifat best-effort melalui Microsoft Word COM di Windows jika Word tersedia.
-Output runtime disimpan di workspace/documents/ (sudah di-ignore Git).
+Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
+dan isi utama dibuat langsung di struktur DOCX agar Word/PDF stabil.
+
+Default Makalah mengikuti policy Taqi AI: I. -> A. -> 1. -> a.
 """
 
 from __future__ import annotations
@@ -59,7 +61,10 @@ class DocumentEngine:
 
     @property
     def status_text(self) -> str:
-        return f"Document Engine siap. Workspace: {self.root}"
+        return (
+            f"Document Engine siap. Workspace: {self.root}. "
+            "Nomor halaman native DOCX: cover tanpa nomor, bagian awal Romawi, isi Arab mulai 1."
+        )
 
     @staticmethod
     def _safe_name(value: str, fallback: str = "dokumen") -> str:
@@ -94,10 +99,14 @@ class DocumentEngine:
         before: int = 0,
         after: int = 120,
         line: int = 360,
+        left: int = 0,
+        first_line: int = 0,
     ) -> str:
         ppr = [f'<w:pStyle w:val="{style}"/>'] if style else []
         if align:
             ppr.append(f'<w:jc w:val="{align}"/>')
+        if left or first_line:
+            ppr.append(f'<w:ind w:left="{int(left)}" w:firstLine="{int(first_line)}"/>')
         ppr.append(f'<w:spacing w:before="{before}" w:after="{after}" w:line="{line}" w:lineRule="auto"/>')
         return f'<w:p><w:pPr>{"".join(ppr)}</w:pPr>{cls._run(text, bold=bold, size=size)}</w:p>'
 
@@ -110,19 +119,105 @@ class DocumentEngine:
         return (
             '<w:p><w:pPr><w:jc w:val="left"/></w:pPr>'
             '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
-            '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>'
+            '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-4" \\h \\z \\u </w:instrText></w:r>'
             '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
             '<w:r><w:t>Daftar isi akan diperbarui saat dokumen dibuka di Microsoft Word.</w:t></w:r>'
             '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
         )
 
     @staticmethod
-    def _chapter_title(title: str) -> str:
+    def _page_geometry() -> str:
+        return (
+            '<w:pgSz w:w="11906" w:h="16838"/>'
+            '<w:pgMar w:top="1701" w:right="1701" w:bottom="1701" w:left="2268" '
+            'w:header="720" w:footer="720" w:gutter="0"/>'
+        )
+
+    @classmethod
+    def _section_properties(
+        cls,
+        *,
+        footer_rid: str | None = None,
+        number_format: str | None = None,
+        start: int | None = None,
+        next_page: bool = False,
+    ) -> str:
+        parts: list[str] = ["<w:sectPr>"]
+        if footer_rid:
+            parts.append(f'<w:footerReference w:type="default" r:id="{footer_rid}"/>')
+        if next_page:
+            parts.append('<w:type w:val="nextPage"/>')
+        parts.append(cls._page_geometry())
+        if number_format or start is not None:
+            attrs: list[str] = []
+            if number_format:
+                attrs.append(f'w:fmt="{number_format}"')
+            if start is not None:
+                attrs.append(f'w:start="{int(start)}"')
+            parts.append(f'<w:pgNumType {" ".join(attrs)}/>')
+        parts.append("</w:sectPr>")
+        return "".join(parts)
+
+    @classmethod
+    def _section_break(
+        cls,
+        *,
+        footer_rid: str | None = None,
+        number_format: str | None = None,
+        start: int | None = None,
+    ) -> str:
+        sect = cls._section_properties(
+            footer_rid=footer_rid,
+            number_format=number_format,
+            start=start,
+            next_page=True,
+        )
+        return f"<w:p><w:pPr>{sect}</w:pPr></w:p>"
+
+    @staticmethod
+    def _footer_xml() -> str:
+        return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:pPr><w:jc w:val="center"/></w:pPr>
+    <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+    <w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>
+    <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+    <w:r><w:t>1</w:t></w:r>
+    <w:r><w:fldChar w:fldCharType="end"/></w:r>
+  </w:p>
+</w:ftr>'''
+
+    @staticmethod
+    def _legacy_chapter_title(title: str) -> str:
         cleaned = re.sub(r"\s+", " ", (title or "").strip())
         match = re.match(r"^(BAB\s+[IVXLCDM]+)\s+(.+)$", cleaned, flags=re.IGNORECASE)
         if not match:
             return title
         return f"{match.group(1).upper()}\n{match.group(2).upper()}"
+
+    @staticmethod
+    def _infer_heading_level(title: str, fallback: int) -> int:
+        clean = re.sub(r"\s+", " ", (title or "").strip())
+        if re.match(r"^[IVXLCDM]+\.\s+\S", clean, re.IGNORECASE):
+            return 1
+        if re.match(r"^[A-Z]\.\s+\S", clean):
+            return 2
+        if re.match(r"^\d+\.\s+\S", clean):
+            return 3
+        if re.match(r"^[a-z]\.\s+\S", clean):
+            return 4
+        if re.match(r"^BAB\s+[IVXLCDM]+\b", clean, re.IGNORECASE):
+            return 1
+        if re.match(r"^\d+\.\d+\.\d+\s+\S", clean):
+            return 3
+        if re.match(r"^\d+\.\d+\s+\S", clean):
+            return 2
+        return max(1, min(int(fallback or 1), 4))
+
+    @staticmethod
+    def _heading_left(level: int) -> int:
+        return {1: 0, 2: 360, 3: 720, 4: 1080}.get(level, 0)
 
     @staticmethod
     def _styles_xml() -> str:
@@ -137,6 +232,7 @@ class DocumentEngine:
   <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="180" w:after="80"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="120" w:after="60"/><w:outlineLvl w:val="2"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="100" w:after="40"/><w:outlineLvl w:val="3"/></w:pPr><w:rPr><w:b/></w:rPr></w:style>
 </w:styles>'''
 
     @staticmethod
@@ -153,6 +249,8 @@ class DocumentEngine:
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+  <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
+  <Override PartName="/word/footer2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
 </Types>'''
@@ -172,6 +270,8 @@ class DocumentEngine:
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer2.xml"/>
 </Relationships>'''
 
     @staticmethod
@@ -190,12 +290,13 @@ class DocumentEngine:
 
     def _document_xml(self, spec: MakalahSpec) -> str:
         body: list[str] = []
+
+        # SECTION 1 — COVER: sengaja tanpa footer/nomor halaman.
         body.append(self._paragraph("MAKALAH", align="center", bold=True, size=16, after=220))
         body.append(self._paragraph(spec.title.upper(), align="center", bold=True, size=16, after=260))
         body.append(self._paragraph(f"Disusun untuk Memenuhi Tugas Mata Pelajaran/Mata Kuliah {spec.subject}", align="center", after=120))
         if spec.teacher:
             body.append(self._paragraph(f"Guru/Dosen Pembimbing: {spec.teacher}", align="center", after=160))
-
         if spec.group_name or spec.members or spec.author:
             body.append(self._paragraph("Disusun Oleh:", align="center", bold=True, after=80))
         if spec.group_name:
@@ -206,40 +307,53 @@ class DocumentEngine:
                     body.append(self._paragraph(member.strip(), align="center", after=30, line=240))
         elif spec.author:
             body.append(self._paragraph(spec.author, align="center", after=80))
-
         body.append(self._paragraph(f"KELAS/SEMESTER: {spec.class_semester}", align="center", bold=True, after=90))
         body.append(self._paragraph(spec.institution.upper(), align="center", bold=True, after=80))
         body.append(self._paragraph(spec.year or str(datetime.now().year), align="center", bold=True, after=80))
-        body.append(self._page_break())
+        body.append(self._section_break())
 
+        # SECTION 2 — BAGIAN AWAL: footer PAGE + lowerRoman mulai i.
         if spec.preface:
             body.append(self._paragraph("KATA PENGANTAR", align="center", bold=True, size=14, after=220))
             for paragraph in spec.preface:
                 if paragraph.strip():
-                    body.append(self._paragraph(paragraph.strip(), align="both"))
+                    body.append(self._paragraph(paragraph.strip(), align="both", first_line=709))
             body.append(self._page_break())
-
         body.append(self._paragraph("DAFTAR ISI", align="center", bold=True, size=14))
         body.append(self._toc())
-        body.append(self._page_break())
+        body.append(self._section_break(footer_rid="rId3", number_format="lowerRoman", start=1))
 
+        # SECTION 3 — ISI UTAMA: footer PAGE + decimal mulai 1.
         for section in spec.sections:
-            level = max(1, min(int(section.level or 1), 3))
-            title = self._chapter_title(section.title) if level == 1 else section.title
-            align = "center" if level == 1 and title != section.title else "left"
-            body.append(self._paragraph(title, style=f"Heading{level}", align=align, bold=True, size=14 if level == 1 else 12))
+            level = self._infer_heading_level(section.title, section.level)
+            title = self._legacy_chapter_title(section.title) if re.match(r"^BAB\s+", section.title.strip(), re.IGNORECASE) else section.title
+            align = "center" if re.match(r"^BAB\s+", section.title.strip(), re.IGNORECASE) else "left"
+            body.append(
+                self._paragraph(
+                    title,
+                    style=f"Heading{level}",
+                    align=align,
+                    bold=True,
+                    size=14 if level == 1 else 12,
+                    left=self._heading_left(level),
+                )
+            )
             for paragraph in section.paragraphs:
                 if paragraph.strip():
-                    body.append(self._paragraph(paragraph.strip(), align="both"))
+                    body.append(self._paragraph(paragraph.strip(), align="both", first_line=709))
 
         body.append(
-            '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
-            '<w:pgMar w:top="1701" w:right="1701" w:bottom="1701" w:left="2268" w:header="720" w:footer="720" w:gutter="0"/>'
-            '</w:sectPr>'
+            self._section_properties(
+                footer_rid="rId4",
+                number_format="decimal",
+                start=1,
+                next_page=False,
+            )
         )
         return (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             f'<w:body>{"".join(body)}</w:body></w:document>'
         )
 
@@ -257,6 +371,8 @@ class DocumentEngine:
             package.writestr("word/styles.xml", self._styles_xml())
             package.writestr("word/settings.xml", self._settings_xml())
             package.writestr("word/_rels/document.xml.rels", self._document_rels_xml())
+            package.writestr("word/footer1.xml", self._footer_xml())
+            package.writestr("word/footer2.xml", self._footer_xml())
             package.writestr("docProps/core.xml", self._core_xml(spec.title))
             package.writestr("docProps/app.xml", self._app_xml())
         return output
@@ -266,7 +382,6 @@ class DocumentEngine:
         """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia."""
         if os.name != "nt":
             return None, "PDF belum dibuat: konversi Word COM hanya tersedia di Windows pada tahap ini."
-
         try:
             src_path = docx_path.resolve(strict=True)
         except (OSError, FileNotFoundError) as exc:
@@ -276,13 +391,10 @@ class DocumentEngine:
         ps_env = os.environ.copy()
         ps_env["TAQI_DOCX_SOURCE"] = str(src_path)
         ps_env["TAQI_PDF_DEST"] = str(pdf_path)
-
         script = r'''
 $ErrorActionPreference = 'Stop'
 $src = [System.IO.Path]::GetFullPath([string]$env:TAQI_DOCX_SOURCE)
 $dst = [System.IO.Path]::GetFullPath([string]$env:TAQI_PDF_DEST)
-if ([string]::IsNullOrWhiteSpace($src)) { throw 'Path DOCX kosong.' }
-if ([string]::IsNullOrWhiteSpace($dst)) { throw 'Path PDF kosong.' }
 if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 $word = $null
 $doc = $null
@@ -292,8 +404,11 @@ try {
   $word.Visible = $false
   $word.DisplayAlerts = 0
   $doc = $word.Documents.Open([string]$src)
+  try { $doc.Repaginate() } catch {}
   try { $doc.Fields.Update() | Out-Null } catch {}
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
+  try { $doc.Repaginate() } catch {}
+  $doc.Save()
   $doc.ExportAsFixedFormat([string]$dst, 17)
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
@@ -302,10 +417,7 @@ try {
 '''
         try:
             completed = subprocess.run(
-                [
-                    "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-Command", script,
-                ],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -340,7 +452,7 @@ try {
 
 
 def demo_spec() -> MakalahSpec:
-    """Data demo lokal untuk menguji engine tanpa memakai token AI."""
+    """Data demo lokal untuk menguji format Makalah tanpa memakai token AI."""
     return MakalahSpec(
         order_id="DEMO-MAKALAH",
         title="Pencemaran Lingkungan",
@@ -353,28 +465,34 @@ def demo_spec() -> MakalahSpec:
         year=str(datetime.now().year),
         preface=(
             "Puji syukur kami panjatkan ke hadirat Tuhan Yang Maha Esa karena makalah ini dapat diselesaikan dengan baik.",
-            "Makalah ini dibuat sebagai dokumen uji untuk memastikan struktur cover, kata pengantar, daftar isi, BAB, dan subbab dapat dibentuk otomatis oleh Taqi AI.",
+            "Makalah ini dibuat sebagai dokumen uji untuk memastikan struktur dan penomoran halaman Taqi AI.",
         ),
         sections=(
-            DocumentSection("BAB I PENDAHULUAN", (), 1),
-            DocumentSection("1.1 Latar Belakang", (
+            DocumentSection("I. Pendahuluan", (), 1),
+            DocumentSection("A. Latar Belakang", (
                 "Pencemaran lingkungan merupakan perubahan kondisi lingkungan akibat masuknya zat, energi, atau komponen lain yang dapat menurunkan kualitas lingkungan.",
             ), 2),
-            DocumentSection("1.2 Rumusan Masalah", (
+            DocumentSection("B. Rumusan Masalah", (
                 "Rumusan masalah disusun untuk menentukan pokok persoalan yang akan dibahas dalam makalah.",
             ), 2),
-            DocumentSection("1.3 Tujuan", (
+            DocumentSection("C. Tujuan Penulisan", (
                 "Tujuan penulisan makalah ini adalah menjelaskan penyebab, dampak, dan upaya mengurangi pencemaran lingkungan.",
             ), 2),
-            DocumentSection("BAB II PEMBAHASAN", (), 1),
-            DocumentSection("2.1 Jenis Pencemaran", (
-                "Pencemaran dapat terjadi pada air, udara, dan tanah. Setiap jenis pencemaran memerlukan penanganan yang berbeda.",
+            DocumentSection("II. Tinjauan Pustaka", (), 1),
+            DocumentSection("A. Pengertian Pencemaran", (
+                "Pencemaran dapat terjadi pada air, udara, dan tanah.",
             ), 2),
-            DocumentSection("BAB III PENUTUP", (), 1),
-            DocumentSection("3.1 Kesimpulan", (
+            DocumentSection("1. Jenis Pencemaran", (
+                "Jenis pencemaran dibedakan berdasarkan media lingkungan yang terdampak.",
+            ), 3),
+            DocumentSection("a. Pencemaran Air", (
+                "Pencemaran air terjadi ketika kualitas air menurun akibat masuknya bahan pencemar.",
+            ), 4),
+            DocumentSection("V. Kesimpulan dan Saran", (), 1),
+            DocumentSection("A. Kesimpulan", (
                 "Upaya pencegahan pencemaran membutuhkan kesadaran bersama dan pengelolaan lingkungan yang bertanggung jawab.",
             ), 2),
-            DocumentSection("3.2 Saran", (
+            DocumentSection("B. Saran", (
                 "Masyarakat perlu mengurangi sumber pencemar dan menjaga kebersihan lingkungan secara konsisten.",
             ), 2),
         ),

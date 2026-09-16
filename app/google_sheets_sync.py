@@ -1,8 +1,8 @@
 """Google Sheets mirror sync untuk Finance Agent.
 
 V0.1 memakai webhook Google Apps Script agar runtime lokal tidak membutuhkan
-credential Google Cloud di repo. SQLite tetap source of truth; sinkronisasi hanya
-mengirim snapshot ledger yang sudah confirmed ke Sheet sebagai mirror/reporting.
+credential Google Cloud di repo. SQLite tetap source of truth; sinkronisasi
+mengirim transaksi confirmed dan reversed supaya jejak koreksi terlihat di Sheet.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class GoogleSheetsSync:
             )
         return SheetsSyncResult(
             "siap",
-            "Google Sheets Sync: siap. Gunakan /sync untuk mengirim snapshot ledger confirmed ke dashboard."
+            "Google Sheets Sync: siap. Gunakan /sync untuk mengirim snapshot ledger ke dashboard."
         )
 
     def _connect(self):
@@ -65,7 +65,9 @@ class GoogleSheetsSync:
             ).fetchall()
             tx_rows = db.execute(
                 """SELECT id,created,kind,amount,account,business,category,description,source,status
-                   FROM finance_transactions WHERE status='confirmed' ORDER BY created,id"""
+                   FROM finance_transactions
+                   WHERE status IN ('confirmed','reversed')
+                   ORDER BY created,id"""
             ).fetchall()
             category_rows = db.execute(
                 "SELECT name,kind,created FROM finance_categories ORDER BY kind,name"

@@ -1,4 +1,4 @@
-"""Document Engine v0.5 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
+"""Document Engine v0.6 untuk membuat DOCX/PDF lokal tanpa memboroskan token AI.
 
 DOCX dibuat langsung dengan Open XML menggunakan Python standard library.
 Penomoran halaman tidak lagi ditambal oleh Word COM: section cover, bagian awal,
@@ -204,6 +204,8 @@ class DocumentEngine:
         # Makalah "C. Tujuan" tetap subbab (Heading 2), bukan Heading 1.
         if re.match(r"^BAB\s+[IVXLCDM]+\b", clean, re.IGNORECASE):
             return 1
+        if clean.casefold() == "daftar pustaka":
+            return 1
         if re.match(r"^[A-Z]\.\s+\S", clean):
             return 2
         if re.match(r"^\d+\.\s+\S", clean):
@@ -326,19 +328,20 @@ class DocumentEngine:
         body.append(self._section_break(footer_rid="rId3", number_format="lowerRoman", start=1))
 
         # SECTION 3 — ISI UTAMA: footer PAGE + decimal mulai 1.
-        chapter_seen = False
+        heading1_seen = False
         for section in spec.sections:
             level = self._infer_heading_level(section.title, section.level)
             clean_title = re.sub(r"\s+", " ", section.title.strip())
             is_chapter = bool(re.match(r"^BAB\s+", clean_title, re.IGNORECASE))
             is_bibliography = clean_title.casefold() == "daftar pustaka"
 
-            # BAB I sudah dimulai oleh section break dari Daftar Isi. BAB berikutnya
-            # wajib dimulai pada halaman baru agar konsisten dengan format makalah.
-            if is_chapter:
-                if chapter_seen:
+            # Section break dari Daftar Isi sudah memulai Heading 1 pertama (BAB I)
+            # pada halaman baru. Semua Heading 1 setelah itu—BAB II, BAB III, dan
+            # DAFTAR PUSTAKA—wajib dimulai pada halaman baru tanpa reset nomor.
+            if level == 1:
+                if heading1_seen:
                     body.append(self._page_break())
-                chapter_seen = True
+                heading1_seen = True
 
             title = self._legacy_chapter_title(section.title) if is_chapter else section.title
             align = "center" if (is_chapter or is_bibliography) else "left"

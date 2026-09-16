@@ -60,12 +60,24 @@ Fallback indent Word saat **tidak ada arahan resmi**:
 - Heading 3 (`1.`, `2.`, `3.`): rata kiri, left indent sekitar **0,63 cm**.
 - Heading 4 (`a.`, `b.`, `c.`): rata kiri, left indent sekitar **1,27 cm**.
 - Isi paragraf kembali memakai margin utama dan **tidak mewarisi left indent heading**.
-- Paragraf isi memakai **first-line indent 1,27 cm (720 twips / 0,5 inci)**.
+- Paragraf isi memakai **first-line indent sekitar 1,25–1,27 cm**. Engine memakai 1,27 cm / 0,5 inci sebagai default praktis; jika pedoman institusi menetapkan 1,25 cm, ikuti pedoman tersebut.
 - **Semua paragraf isi utama wajib memakai Justify / rata kiri-kanan**, bukan rata kiri biasa, kecuali pedoman resmi instansi menentukan lain.
+- Teks utama memakai **spasi 1,5** sebagai fallback bila tidak ada arahan lain.
 - Justify dan first-line indent harus diterapkan sebagai properti paragraf Word, bukan spasi atau karakter TAB manual.
 - Bullet `•` tidak boleh menggantikan heading terstruktur.
 - Bullet atau numbered list hanya dipakai di dalam isi jika memang berupa daftar, bukan sebagai pengganti hierarki heading.
 - Pada tampilan kerangka untuk pelanggan, tampilkan struktur heading saja tanpa ringkasan paragraf di bawah setiap heading.
+
+## Kualitas paragraf
+
+Jika tidak ada pedoman resmi yang mengatur lain:
+
+- Satu paragraf sebaiknya membahas **satu gagasan pokok**.
+- Paragraf harus logis, runtut, koheren, dan mendukung argumen/pembahasan secara sistematis.
+- Sebagai panduan kualitas, paragraf umumnya sekitar **3–5 kalimat** bila isi memungkinkan. Ini bukan batas keras; paragraf boleh lebih pendek atau lebih panjang jika struktur gagasannya memang menuntut demikian.
+- Hindari paragraf satu kalimat tanpa alasan yang jelas.
+- Hindari paragraf sangat panjang yang mencampur beberapa gagasan pokok sekaligus.
+- Jangan memecah paragraf hanya untuk mengejar jumlah halaman.
 
 ## Pergantian Heading 1 / bagian utama
 
@@ -118,7 +130,7 @@ Default penomoran halaman:
 - Daftar pustaka hanya memuat sumber yang benar-benar digunakan.
 - Judul bagian ditulis **`DAFTAR PUSTAKA`** sebagai bagian akhir setingkat BAB / Heading 1, tetapi tidak diberi label `BAB IV` atau nomor Romawi/huruf tambahan kecuali instruksi resmi meminta begitu.
 - `DAFTAR PUSTAKA` wajib dimulai pada halaman baru dan nomor halaman Arab tetap melanjutkan halaman sebelumnya.
-- Entri daftar pustaka disusun alfabetis, rata kiri, memakai hanging indent sekitar **1,27 cm**, spasi tunggal, dan jarak antar-entri yang rapi.
+- Entri daftar pustaka disusun alfabetis, rata kiri, memakai hanging indent sekitar **1,25–1,27 cm**, spasi tunggal, dan jarak antar-entri yang rapi.
 - Nama jurnal untuk artikel atau judul buku/sumber non-jurnal dicetak miring sesuai format engine.
 - Tata letak daftar pustaka mengikuti format engine yang telah ditetapkan; model AI tidak boleh mengubahnya sendiri.
 

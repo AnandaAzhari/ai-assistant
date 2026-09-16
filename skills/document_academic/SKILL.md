@@ -17,11 +17,13 @@ Jika tidak ada arahan resmi, gunakan titik awal berikut:
 
 - Kertas A4.
 - Font Times New Roman 12 pt untuk naskah utama.
-- Spasi baris 1,5.
+- Spasi baris 1,5 untuk teks utama.
 - Margin awal yang aman: kiri 4 cm; atas, kanan, bawah 3 cm.
 - Semua paragraf isi utama memakai **Justify / rata kiri-kanan**.
-- Awal paragraf memakai **first-line indent 1,27 cm** (720 twips / 0,5 inci), bukan karakter TAB manual.
-- Jangan memakai spasi manual berulang untuk mengatur posisi teks.
+- Awal paragraf memakai **first-line indent sekitar 1,25–1,27 cm**. Engine Taqi AI memakai 1,27 cm / 0,5 inci sebagai default praktis; jika pedoman resmi menentukan 1,25 cm, ikuti pedoman tersebut.
+- Jangan memakai karakter TAB manual atau spasi berulang untuk membentuk indentasi.
+- Paragraf akademik idealnya fokus pada satu gagasan pokok, runtut, koheren, dan umumnya sekitar **3–5 kalimat** bila isi memungkinkan. Ini pedoman kualitas, bukan batas keras; jangan memaksa paragraf jika secara logis perlu lebih pendek atau lebih panjang.
+- Hindari paragraf satu kalimat tanpa alasan yang jelas dan hindari paragraf sangat panjang yang mencampur banyak gagasan.
 
 ## Fallback Makalah
 
@@ -36,7 +38,7 @@ Format heading:
 - Heading 2: `A.`, `B.`, `C.`, dst.; rata kiri pada margin utama (left indent 0 cm).
 - Heading 3: `1.`, `2.`, `3.`, dst.; left indent sekitar 0,63 cm.
 - Heading 4: `a.`, `b.`, `c.`, dst.; left indent sekitar 1,27 cm.
-- Isi paragraf tidak mengikuti indent heading; isi memakai margin utama dengan first-line indent 1,27 cm dan Justify.
+- Isi paragraf tidak mengikuti indent heading; isi memakai margin utama dengan first-line indent sekitar 1,25–1,27 cm dan Justify.
 - Level `1.` dan `a.` hanya dipakai jika memang dibutuhkan.
 
 Penomoran halaman default Makalah:
@@ -45,6 +47,37 @@ Penomoran halaman default Makalah:
 - Kata Pengantar dan Daftar Isi: Romawi kecil mulai `i`.
 - BAB I: reset ke angka Arab `1`.
 - Angka Arab berlanjut sampai Daftar Pustaka.
+
+### Makalah Kuliah — struktur awal bila tidak ada pedoman dosen/kampus
+
+Untuk mahasiswa/kuliah, gunakan struktur berikut sebagai referensi awal:
+
+1. **Halaman Sampul**
+   - judul makalah;
+   - nama penulis/anggota kelompok;
+   - NIM bila tersedia;
+   - mata kuliah;
+   - nama dosen pengampu;
+   - fakultas/program studi dan universitas bila tersedia;
+   - tahun penulisan.
+2. **Kata Pengantar** — singkat, formal, memuat tujuan penulisan dan ucapan terima kasih seperlunya.
+3. **Daftar Isi** — harus sesuai dengan judul bagian dan nomor halaman final.
+4. **BAB I — PENDAHULUAN**
+   - A. Latar Belakang
+   - B. Rumusan Masalah
+   - C. Tujuan Penulisan
+   - D. Manfaat Penulisan bila diperlukan
+5. **BAB II — PEMBAHASAN**
+   - uraikan materi sesuai rumusan masalah;
+   - gunakan subbab yang jelas;
+   - dukung pembahasan dengan teori, data, pendapat ahli, dan sumber ilmiah yang relevan;
+   - hindari opini pribadi tanpa dasar.
+6. **BAB III — PENUTUP**
+   - A. Kesimpulan — merangkum jawaban atas rumusan masalah tanpa menambah informasi baru;
+   - B. Saran — rekomendasi/harapan yang relevan bila diperlukan.
+7. **DAFTAR PUSTAKA** — hanya sumber yang benar-benar digunakan, dengan gaya sitasi yang konsisten sesuai arahan dosen.
+
+Struktur ini diadaptasi dari referensi makalah kuliah 2026 yang diberikan pengguna dan tetap tunduk pada pedoman resmi dosen/kampus.
 
 ## Fallback KTI
 
@@ -77,11 +110,15 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 
 Referensi ini dipakai sebagai dasar awal, bukan sebagai pengganti pedoman institusi:
 
-1. UPN Veteran Jawa Timur, *Thesis Writing Guidelines 2025*: Times New Roman 12, margin kiri 4 cm dan sisi lain 3 cm, first-line indent 1 tab = 1,27 cm.
+1. **Fakultas Ekonomi dan Bisnis Universitas Borneo Tarakan, Pedoman Penulisan Skripsi dan Tesis 2026**: teks utama 1,5 spasi; first-line indent 1,25 cm; teks Justify; paragraf ideal 3–5 kalimat dengan satu gagasan pokok; daftar pustaka 1 spasi dan hanging indent 1,25 cm.
+   https://fe.ubt.ac.id/wp-content/uploads/2026/04/Pedoman-Penulisan-Skripsi-dan-Tesis-2026-4.pdf
+2. **Sekolapedia / Teknokrat, Panduan Lengkap Cara Membuat Makalah Kuliah yang Baik untuk Mahasiswa (2026)**: struktur Halaman Sampul → Kata Pengantar → Daftar Isi → Pendahuluan → Pembahasan → Penutup → Daftar Pustaka; digunakan sebagai referensi struktur makalah kuliah, bukan pedoman institusi resmi.
+   https://daftarsekolah.spmb.teknokrat.ac.id/2026/02/panduan-lengkap-cara-membuat-makalah-kuliah-yang-baik-untuk-mahasiswa/
+3. UPN Veteran Jawa Timur, *Thesis Writing Guidelines 2025*: Times New Roman 12, margin kiri 4 cm dan sisi lain 3 cm, first-line indent 1 tab = 1,27 cm.
    https://agrotek.upnjatim.ac.id/wp-content/uploads/2025/09/Thesis-Writing-Guidelines-2025_.pdf
-2. Fakultas Ushuluddin dan Pemikiran Islam UIN Sunan Kalijaga, *Pedoman Penulisan Proposal dan Skripsi*: spasi 1,5, first-line indent 1,27 cm, seluruh naskah justify, serta contoh hierarki `BAB -> A. -> 1. -> a.`.
+4. Fakultas Ushuluddin dan Pemikiran Islam UIN Sunan Kalijaga, *Pedoman Penulisan Proposal dan Skripsi*: spasi 1,5, first-line indent 1,27 cm, seluruh naskah justify, serta contoh hierarki `BAB -> A. -> 1. -> a.`.
    https://ushuluddin.uin-suka.ac.id/media/dokumen_akademik/05_20221207_4.%20Skripsi%20Final.pdf
-3. Program Studi Kimia UIN Sunan Kalijaga, *Pedoman Penulisan Skripsi*: BAB sebagai Heading 1, `A./B./C.` sebagai Heading 2, dan penomoran bertingkat dengan pengaturan indentasi.
+5. Program Studi Kimia UIN Sunan Kalijaga, *Pedoman Penulisan Skripsi*: BAB sebagai Heading 1, `A./B./C.` sebagai Heading 2, dan penomoran bertingkat dengan pengaturan indentasi.
    https://kimia.uin-suka.ac.id/media/dokumen_akademik/63_20180806_PEDOMAN%20PENULISAN%20SKRIPSI.pdf
 
 ## Aturan stabilitas

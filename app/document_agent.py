@@ -1,13 +1,14 @@
-"""Document/Makalah Agent v0.2.
+"""Document/Makalah Agent v0.3.
 
-Tahap ini fokus pada percakapan requirement + outline/draft. Pembuatan DOCX/PDF
-akan ditangani Document Engine terpisah agar formatting tidak memboroskan token.
+Percakapan requirement/draft memakai model AI. Formatting DOCX/PDF ditangani
+Document Engine lokal agar pekerjaan format tidak memboroskan token.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.document_engine import DocumentEngine, demo_spec
 from app.providers.base import ModelProvider
 
 
@@ -19,7 +20,7 @@ Tugas utama:
 - mengumpulkan requirement sebelum mulai menyusun isi;
 - membuat kerangka/outline setelah requirement wajib lengkap;
 - membantu draft hanya setelah outline/arah pekerjaan sudah jelas;
-- jangan mengaku sudah membuat file DOCX/PDF karena Document Engine belum dipanggil;
+- jangan mengaku sudah membuat file DOCX/PDF sebelum Document Engine benar-benar dipanggil;
 - jangan mengarang sumber atau daftar pustaka. Jika referensi belum tersedia, katakan perlu riset/sumber;
 - untuk tugas sekolah/kuliah, bantu penyusunan dan drafting, tetapi minta pengguna meninjau isi agar sesuai instruksi guru/dosen.
 
@@ -55,8 +56,15 @@ class DocumentResult:
 
 
 class DocumentAgent:
-    def __init__(self, provider: ModelProvider, *, history_limit: int = 10):
+    def __init__(
+        self,
+        provider: ModelProvider,
+        *,
+        engine: DocumentEngine | None = None,
+        history_limit: int = 10,
+    ):
         self.provider = provider
+        self.engine = engine
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
 
@@ -65,22 +73,53 @@ class DocumentAgent:
         return bool(self.provider and self.provider.configured)
 
     @property
+    def engine_ready(self) -> bool:
+        return self.engine is not None
+
+    @property
     def model_label(self) -> str:
         if not self.provider:
             return "belum tersedia"
         return f"{self.provider.provider_name} / {self.provider.model_name}"
 
     def status(self) -> DocumentResult:
+        engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent: tersedia, tetapi DeepSeek API belum dikonfigurasi. "
-                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin."
+                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n"
+                + engine_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}. Percakapan uji dapat dimulai dengan /makalah."
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n"
+            "Percakapan dapat dimulai dengan /makalah. Uji engine lokal: /dokumen_demo.",
         )
+
+    def engine_status(self) -> DocumentResult:
+        if not self.engine_ready:
+            return DocumentResult("belum_dikonfigurasi", "Document Engine belum tersedia pada runtime ini.")
+        return DocumentResult("siap", self.engine.status_text)
+
+    def build_demo(self) -> DocumentResult:
+        if not self.engine_ready:
+            return DocumentResult("belum_dikonfigurasi", "Document Engine belum tersedia pada runtime ini.")
+        result = self.engine.build(demo_spec(), create_pdf=True)
+        if result.status != "berhasil":
+            return DocumentResult("gagal", result.warning or "Document Engine gagal membuat file demo.")
+
+        lines = [
+            "Document Engine berhasil membuat file demo tanpa memakai token AI.",
+            f"DOCX: `{result.docx_path}`",
+        ]
+        if result.pdf_path:
+            lines.append(f"PDF: `{result.pdf_path}`")
+        else:
+            lines.append("PDF: belum dibuat otomatis.")
+        if result.warning:
+            lines.append(f"Catatan: {result.warning}")
+        return DocumentResult("berhasil", "\n".join(lines))
 
     def reset(self) -> DocumentResult:
         self._history.clear()
@@ -90,12 +129,18 @@ class DocumentAgent:
         raw = (message or "").strip()
         if not raw:
             return DocumentResult("membutuhkan_bantuan", "Pesan dokumen kosong.")
-        if not self.configured:
-            return self.status()
 
         text = raw.casefold()
-        if text.split(maxsplit=1)[0] in {"/dokumen_baru", "/makalah_baru"}:
+        command = text.split(maxsplit=1)[0]
+        if command in {"/dokumen_baru", "/makalah_baru"}:
             return self.reset()
+        if command == "/dokumen_engine_status":
+            return self.engine_status()
+        if command == "/dokumen_demo":
+            return self.build_demo()
+
+        if not self.configured:
+            return self.status()
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.extend(self._history[-self.history_limit:])

@@ -41,6 +41,11 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertIn('w:jc w:val="both"', level4)
         self.assertIn('w:left="360" w:firstLine="360"', level4)
 
+    def test_toc_stops_at_heading3(self):
+        toc = DocumentEngine._toc()
+        self.assertIn('TOC \\o "1-3"', toc)
+        self.assertNotIn('TOC \\o "1-4"', toc)
+
     def test_policy_and_skill_use_same_default(self):
         policy = load_document_format_policy()
         self.assertIn("BAB I", policy)
@@ -52,6 +57,8 @@ class MakalahStructureTests(unittest.TestCase):
         self.assertIn("Heading 4", policy)
         self.assertIn("0,63 cm", policy)
         self.assertIn("Justify", policy)
+        self.assertIn("Heading 1 sampai Heading 3", policy)
+        self.assertIn("tidak ditampilkan di Daftar Isi", policy)
         self.assertIn("BAB I -> A. -> 1. -> a.", DRAFT_PROMPT)
 
     def test_bibliography_is_not_numbered_as_an_extra_bab(self):

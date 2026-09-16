@@ -16,9 +16,11 @@ Default sitasi Makalah memakai pola **Chicago Notes & Bibliography** secara prak
 
 - Sitasi di isi menggunakan nomor superscript Word asli.
 - Kemunculan pertama sebuah sumber menggunakan **full note / catatan kaki lengkap**.
-- Kemunculan berikutnya dari sumber yang sama menggunakan **short note / catatan kaki singkat**.
+- Jika catatan kaki berikutnya secara langsung merujuk **sumber yang sama dengan catatan tepat sebelumnya**, gunakan **`Ibid.`**.
+- Jika sumber yang sama dipakai lagi tetapi telah diselingi sumber lain, gunakan **short note**, bukan `Ibid.`.
 - Short note memakai nama belakang penulis pertama + judul singkat yang masih dapat mengenali sumber.
 - Short note **tidak memakai `...` atau `…` sebagai tanda potongan buatan engine**.
+- Pada full note artikel jurnal, **nama jurnal dicetak miring**; judul artikel tetap berada dalam tanda kutip dan tidak dicetak miring.
 - Jika sumber memiliki DOI, gunakan URL DOI `https://doi.org/...`; jika tidak ada DOI, gunakan URL sumber bila tersedia.
 - Jangan membuat sumber, DOI, halaman, nama jurnal, atau metadata yang tidak ada pada Source Registry.
 
@@ -35,19 +37,25 @@ Jika tidak ada pedoman resmi yang menentukan lain:
 - Footnote berada di bagian bawah halaman sesuai perilaku native Word.
 - Jangan mengubah nomor footnote menjadi angka yang diketik manual.
 
-## Full note dan short note
+## Full note, Ibid., dan short note
 
 Contoh pola:
 
 Kemunculan pertama:
 
-`Agustina Fatmawati, “Judul Artikel Lengkap,” Nama Jurnal 4, no. 2 (2016): 94–103, https://doi.org/... .`
+`Agustina Fatmawati, “Judul Artikel Lengkap,” *Nama Jurnal* 4, no. 2 (2016): 94–103, https://doi.org/... .`
 
-Kemunculan berikutnya:
+Catatan tepat berikutnya masih sumber yang sama:
+
+`Ibid.`
+
+Sumber yang sama dipakai lagi setelah diselingi sumber lain:
 
 `Fatmawati, “Judul Artikel Singkat.”`
 
-Jika kelak sistem memiliki locator spesifik per kutipan, seperti halaman 98, locator tersebut dapat ditambahkan pada short note. Jangan memakai rentang halaman artikel sebagai locator kutipan spesifik jika sistem tidak mengetahui halaman kutipan yang sebenarnya.
+`Ibid.` tidak boleh dipakai bila catatan kaki tepat sebelumnya berasal dari sumber berbeda karena akan membuat rujukan menjadi ambigu atau salah.
+
+Jika kelak sistem memiliki locator spesifik per kutipan, seperti halaman 98, locator tersebut dapat ditambahkan pada `Ibid.` atau short note sesuai kebutuhan. Jangan memakai rentang halaman artikel sebagai locator kutipan spesifik jika sistem tidak mengetahui halaman kutipan yang sebenarnya.
 
 ## Daftar Pustaka
 
@@ -62,4 +70,4 @@ Jika kelak sistem memiliki locator spesifik per kutipan, seperti halaman 98, loc
 
 ## Aturan stabilitas
 
-Citation Engine harus bersifat deterministik. AI boleh membantu memilih sumber dan menulis isi, tetapi format full note, short note, footnote Word, dan Daftar Pustaka ditangani engine agar konsisten.
+Citation Engine harus bersifat deterministik. AI boleh membantu memilih sumber dan menulis isi, tetapi format full note, `Ibid.`, short note, italic nama jurnal, footnote Word, dan Daftar Pustaka ditangani engine agar konsisten.

@@ -59,8 +59,9 @@ Fallback indent Word saat **tidak ada arahan resmi**:
 - Heading 2 (`A.`, `B.`, `C.`): rata kiri, left indent **0 cm**.
 - Heading 3 (`1.`, `2.`, `3.`): rata kiri, left indent sekitar **0,63 cm**.
 - Heading 4 (`a.`, `b.`, `c.`): rata kiri, left indent sekitar **1,27 cm**.
-- Isi paragraf kembali memakai margin utama dan **tidak mewarisi left indent heading**.
-- Paragraf isi memakai **first-line indent sekitar 1,25–1,27 cm**. Engine memakai 1,27 cm / 0,5 inci sebagai default praktis; jika pedoman institusi menetapkan 1,25 cm, ikuti pedoman tersebut.
+- Isi setelah Heading 2 dan Heading 3 memakai blok teks utama: left indent **0 cm** dengan first-line indent sekitar **1,25–1,27 cm**.
+- **Khusus isi setelah Heading 4 (`a.`, `b.`, `c.`)**, gunakan left indent sekitar **0,63 cm** dan first-line indent sekitar **0,63 cm**. Dengan begitu awal baris pertama tetap berada sekitar **1,27 cm** dari margin utama, sementara baris lanjutan berada sekitar **0,63 cm** dari margin utama. Ini dipilih sebagai fallback visual agar hubungan `a.` dengan paragrafnya lebih mudah dibaca tanpa membuat seluruh blok teks terlalu sempit.
+- Engine memakai 1,27 cm / 0,5 inci sebagai default praktis; jika pedoman institusi menetapkan 1,25 cm atau pola lain, ikuti pedoman tersebut.
 - **Semua paragraf isi utama wajib memakai Justify / rata kiri-kanan**, bukan rata kiri biasa, kecuali pedoman resmi instansi menentukan lain.
 - Teks utama memakai **spasi 1,5** sebagai fallback bila tidak ada arahan lain.
 - Justify dan first-line indent harus diterapkan sebagai properti paragraf Word, bukan spasi atau karakter TAB manual.

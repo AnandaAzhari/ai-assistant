@@ -42,6 +42,16 @@ Format heading:
 - **Khusus isi setelah Heading 4 (`a.`, `b.`, `c.`)**, gunakan left indent sekitar **0,63 cm** dan first-line indent sekitar **0,63 cm**. Jadi awal baris pertama tetap sekitar **1,27 cm** dari margin utama, sementara baris berikutnya dimulai sekitar **0,63 cm** dari margin utama. Ini adalah fallback visual yang dipilih agar hubungan sub-subbagian dengan paragrafnya lebih mudah dibaca tanpa membuat blok teks terlalu sempit.
 - Level `1.` dan `a.` hanya dipakai jika memang dibutuhkan.
 
+Daftar Isi default Makalah:
+
+- Tampilkan Heading 1, Heading 2, dan Heading 3.
+- Heading 1 = `BAB ...` dan `DAFTAR PUSTAKA`.
+- Heading 2 = `A.`, `B.`, `C.`, dst.
+- Heading 3 = `1.`, `2.`, `3.`, dst.
+- **Heading 4 (`a.`, `b.`, `c.`) tidak ditampilkan di Daftar Isi secara default**, tetapi tetap dipakai di isi dokumen jika diperlukan.
+- Engine memakai field Word `TOC \\o "1-3"` sebagai default Makalah.
+- Jika pedoman resmi meminta kedalaman Daftar Isi yang berbeda, ikuti pedoman resmi.
+
 Penomoran halaman default Makalah:
 
 - Cover: tanpa nomor tampil.
@@ -62,7 +72,7 @@ Untuk mahasiswa/kuliah, gunakan struktur berikut sebagai referensi awal:
    - fakultas/program studi dan universitas bila tersedia;
    - tahun penulisan.
 2. **Kata Pengantar** — singkat, formal, memuat tujuan penulisan dan ucapan terima kasih seperlunya.
-3. **Daftar Isi** — harus sesuai dengan judul bagian dan nomor halaman final.
+3. **Daftar Isi** — harus sesuai dengan judul bagian dan nomor halaman final; default hanya menampilkan Heading 1 sampai Heading 3.
 4. **BAB I — PENDAHULUAN**
    - A. Latar Belakang
    - B. Rumusan Masalah
@@ -107,6 +117,7 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - First-line indent = properti paragraph indentation.
 - Heading memakai style Heading 1/2/3/4 sesuai hierarki agar Daftar Isi otomatis stabil.
 - Fallback visual level-4 tidak dibuat dengan karakter TAB manual; engine harus menggunakan `left indent` dan `first-line indent` Word.
+- Untuk Makalah, field TOC default hanya mengambil Heading 1 sampai Heading 3; Heading 4 tetap tersedia di dokumen tetapi tidak tampil di Daftar Isi kecuali pedoman resmi meminta.
 
 ## Referensi awal fallback
 

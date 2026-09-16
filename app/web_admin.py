@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.document_agent import DocumentAgent
+from app.document_engine import DocumentEngine
 from app.finance import FinanceService
 from app.google_sheets_sync import GoogleSheetsSync
 from app.lead import LeadAgent
@@ -168,7 +169,8 @@ def create_server(host: str, port: int, *, admin_key: str = "") -> WebAdminHTTPS
     finance = FinanceService(db_path)
     sheets_sync = GoogleSheetsSync.from_env(db_path)
     deepseek = DeepSeekProvider.from_env()
-    document = DocumentAgent(deepseek)
+    document_engine = DocumentEngine.from_env()
+    document = DocumentAgent(deepseek, engine=document_engine)
     lead = LeadAgent(finance=finance, sheets_sync=sheets_sync, document=document)
     return WebAdminHTTPServer((host, port), WebAdminHandler, lead=lead, admin_key=admin_key)
 

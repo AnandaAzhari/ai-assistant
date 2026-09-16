@@ -1,8 +1,10 @@
-"""Document/Makalah Agent v1.1.
+"""Document/Makalah Agent v1.2.
 
 Data awal dan data cover dikumpulkan lokal tanpa token AI.
 DeepSeek dipakai untuk kerangka makalah dan, hanya setelah perintah admin eksplisit
 /draft, membuat isi makalah terstruktur dengan sumber R1/R2/... dari Source Registry.
+Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki, daftar pustaka,
+DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import os
 import re
 from dataclasses import dataclass
 
+from app.citation_engine import CitationEngine
 from app.document_cover import MakalahCoverData
 from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
@@ -60,11 +63,14 @@ class DocumentAgent:
         self.research = research or ResearchManager.from_env()
         self.registry = registry or SourceRegistry.from_env()
         self.draft_generator = DraftGenerator(provider)
+        self.citation_engine = CitationEngine(engine) if engine is not None else None
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
         self._last_research: ResearchResult | None = None
         self._outline_text = ""
         self._draft_spec: MakalahSpec | None = None
+        self._final_docx_path = ""
+        self._final_pdf_path = ""
         self.requirements = MakalahRequirements()
         self.cover = MakalahCoverData()
         self.phase = "requirements"
@@ -100,22 +106,24 @@ class DocumentAgent:
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
+        final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
-                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note,
+                + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + final_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n"
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{final_note}.\n"
             "Data awal + data cover diproses lokal tanpa token AI; model dipakai untuk kerangka dan isi makalah saja.",
         )
 
     def engine_status(self) -> DocumentResult:
         if not self.engine_ready:
             return DocumentResult("belum_dikonfigurasi", "Document Engine belum tersedia pada runtime ini.")
-        return DocumentResult("siap", self.engine.status_text)
+        citation_note = self.citation_engine.status_text if self.citation_engine else "Catatan kaki belum tersedia."
+        return DocumentResult("siap", self.engine.status_text + "\n" + citation_note)
 
     def research_status(self) -> DocumentResult:
         if not self.research:
@@ -201,6 +209,8 @@ class DocumentAgent:
         self._last_research = None
         self._outline_text = ""
         self._draft_spec = None
+        self._final_docx_path = ""
+        self._final_pdf_path = ""
         self.requirements.reset()
         self.cover.reset()
         self.phase = "requirements"
@@ -302,6 +312,8 @@ class DocumentAgent:
             preface=result.preface,
             sections=result.sections,
         )
+        self._final_docx_path = ""
+        self._final_pdf_path = ""
         self.phase = "draft_ready"
         section_titles = [section.title for section in result.sections if section.title]
         cited = sorted(set(re.findall(r"\[\[(R\d+)\]\]", "\n".join(
@@ -314,6 +326,66 @@ class DocumentAgent:
             "Catatan kaki dan daftar pustaka akan dibuat otomatis."
         )
         return DocumentResult("draft_ready", text + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
+
+    def build_final(self) -> DocumentResult:
+        """No. 5: isi makalah -> catatan kaki -> daftar pustaka -> DOCX + PDF.
+
+        Tahap ini sepenuhnya lokal dan tidak memanggil provider AI.
+        """
+        if self.phase == "final_ready" and self._final_docx_path:
+            lines = ["File makalah sudah tersedia.", f"Word: `{self._final_docx_path}`"]
+            lines.append(f"PDF: `{self._final_pdf_path}`" if self._final_pdf_path else "PDF: belum berhasil dibuat.")
+            return DocumentResult("final_ready", "\n".join(lines))
+
+        if self.phase != "draft_ready" or self._draft_spec is None:
+            return DocumentResult("membutuhkan_bantuan", "Isi makalah belum siap. Selesaikan pembuatan isi makalah terlebih dahulu.")
+        if not self.citation_engine or not self.engine_ready:
+            return DocumentResult("belum_dikonfigurasi", "Mesin Word/PDF dan catatan kaki belum tersedia.")
+        if not self.registry:
+            return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
+
+        sources = self.registry.list_sources(self.source_scope)
+        if not sources:
+            return DocumentResult("membutuhkan_sumber", "Daftar sumber kosong, sehingga catatan kaki dan daftar pustaka belum bisa dibuat.")
+
+        result = self.citation_engine.build(self._draft_spec, sources, create_pdf=True)
+        if result.status != "berhasil":
+            lines = ["File makalah belum berhasil dibuat."]
+            if result.docx_path:
+                lines.append(f"Word sementara: `{result.docx_path}`")
+            if result.warning:
+                lines.append(f"Catatan: {result.warning}")
+            return DocumentResult("gagal", "\n".join(lines))
+
+        self._final_docx_path = result.docx_path
+        self._final_pdf_path = result.pdf_path
+        self.phase = "final_ready"
+
+        lines = [
+            "File makalah berhasil dibuat tanpa memakai token AI tambahan.",
+            f"Word: `{result.docx_path}`",
+        ]
+        if result.pdf_path:
+            lines.append(f"PDF: `{result.pdf_path}`")
+        else:
+            lines.append("PDF: belum berhasil dibuat otomatis, tetapi file Word sudah tersedia.")
+        if result.used_refs:
+            lines.append("Sumber yang benar-benar dipakai: " + ", ".join(result.used_refs))
+        lines.append("Catatan kaki dan daftar pustaka dibuat otomatis dari sumber yang dipakai di isi makalah.")
+        if result.warning:
+            lines.append("Catatan: " + result.warning)
+        return DocumentResult("final_ready", "\n".join(lines))
+
+    @staticmethod
+    def _wants_final_file(text: str) -> bool:
+        clean = re.sub(r"\s+", " ", (text or "").strip().casefold())
+        if clean in {"ya", "iya", "boleh", "lanjut", "oke", "ok", "setuju"}:
+            return True
+        phrases = (
+            "buat file", "buatkan file", "buat word", "buatkan word", "buat pdf", "buatkan pdf",
+            "jadikan word", "jadikan pdf", "lanjut buat file", "lanjutkan jadi file", "simpan ke word",
+        )
+        return any(phrase in clean for phrase in phrases)
 
     def handle(self, message: str) -> DocumentResult:
         raw = (message or "").strip()
@@ -337,6 +409,8 @@ class DocumentAgent:
             return self.source_list()
         if command in {"/draft", "/buat_draft"}:
             return self.generate_draft()
+        if command in {"/final", "/buat_file", "/word_pdf"}:
+            return self.build_final()
 
         if self.phase == "requirements":
             self.requirements.update(raw)
@@ -371,9 +445,14 @@ class DocumentAgent:
             )
 
         if self.phase == "draft_ready":
+            if self._wants_final_file(raw):
+                return self.build_final()
             return DocumentResult(
                 "draft_ready",
-                "Isi makalah sudah tersedia. Tahap berikutnya adalah membuat file Word/PDF lengkap dengan catatan kaki dan daftar pustaka otomatis.",
+                "Isi makalah sudah tersedia. Jika ingin dibuatkan file Word dan PDF lengkap dengan catatan kaki serta daftar pustaka, cukup jawab `lanjut buat file`.",
             )
+
+        if self.phase == "final_ready":
+            return self.build_final()
 
         return DocumentResult("membutuhkan_bantuan", "Status sesi dokumen tidak dikenali. Mulai ulang sesi makalah untuk mencoba lagi.")

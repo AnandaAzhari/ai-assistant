@@ -54,6 +54,17 @@ Level `1.` dan `a.` tidak wajib muncul. Gunakan hanya jika subbagian memang perl
 
 Setiap Heading 1 Makalah dimulai pada halaman baru. `BAB II` tidak boleh menyambung langsung setelah subbagian terakhir `BAB I`, dan `DAFTAR PUSTAKA` tidak boleh menempel di bawah isi `BAB III`. Page break antar-Heading 1 tidak mereset nomor halaman.
 
+### Daftar Isi Makalah
+
+Jika tidak ada pedoman khusus:
+
+- Daftar Isi menampilkan **Heading 1 sampai Heading 3 saja**.
+- Heading 1: BAB dan `DAFTAR PUSTAKA`.
+- Heading 2: `A.`, `B.`, `C.`, dst.
+- Heading 3: `1.`, `2.`, `3.`, dst.
+- Heading 4 (`a.`, `b.`, `c.`) tetap boleh digunakan di isi, tetapi **tidak ditampilkan pada Daftar Isi default**.
+- Jika pedoman resmi menetapkan kedalaman lain, pedoman resmi mengalahkan aturan ini.
+
 ### 1.1 Makalah Kuliah
 
 Jika pelanggan adalah mahasiswa dan meminta **makalah kuliah**, sementara dosen/kampus tidak memberikan struktur khusus, gunakan struktur awal berikut:
@@ -67,7 +78,7 @@ Jika pelanggan adalah mahasiswa dan meminta **makalah kuliah**, sementara dosen/
    - program studi/fakultas dan universitas bila tersedia;
    - tahun penulisan.
 2. **Kata Pengantar** — singkat dan formal.
-3. **Daftar Isi** — sesuai bagian dan nomor halaman final.
+3. **Daftar Isi** — sesuai bagian dan nomor halaman final; default hanya sampai Heading 3.
 4. **BAB I — PENDAHULUAN**
    - A. Latar Belakang
    - B. Rumusan Masalah

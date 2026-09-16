@@ -41,6 +41,20 @@ Contoh bahasa pelanggan:
 
 Bila pelanggan mengubah preferensi sebelum dokumen final dibuat, nilai pada order boleh diubah lalu dokumen dibuat ulang. Pedoman resmi institusi tetap lebih tinggi prioritasnya daripada preferensi pelanggan.
 
+## Natural-language parser dan penyimpanan
+
+Implementasi aktif berada di `app/document_preferences.py`.
+
+- `DocumentPreferenceParser` membaca preferensi dari bahasa pelanggan secara lokal tanpa token AI.
+- Parser mengenali ungkapan seperti `jangan pakai Ibid`, `tanpa Ibid`, `pakai Ibid saja`, `gunakan short note`, dan variasi umum yang setara.
+- Hasil parser disimpan sebagai nilai terstruktur, bukan sebagai instruksi bebas untuk model.
+- `DocumentPreferenceStore` menyimpan preferensi per `scope_id`/order di SQLite pada tabel `document_preferences`.
+- Order yang tidak memiliki preferensi tersimpan memakai default `citation_repeat_mode = "auto"`.
+- Preferensi satu pelanggan/order tidak boleh mengubah default global untuk pelanggan lain.
+- Jika bahasa pelanggan belum jelas, parser tidak boleh menebak; minta pelanggan memilih pakai Ibid atau tanpa Ibid.
+
+Saat alur Nara menerima pesan gabungan seperti `Saya mau makalah AI Agent 8 halaman, tapi tanpa Ibid`, parser preferensi harus menangkap `citation_repeat_mode = "short"` sementara parser requirement tetap memproses topik, jenjang, dan target halaman.
+
 ## Tampilan footnote Word
 
 Jika tidak ada pedoman resmi yang menentukan lain:

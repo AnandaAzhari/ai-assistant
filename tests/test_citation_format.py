@@ -32,13 +32,28 @@ class CitationFormatTests(unittest.TestCase):
         self.assertIn("Edusains: Jurnal Pendidikan Sains dan Matematika", note)
         self.assertIn("https://doi.org/10.23971/eds.v4i2.512", note)
 
-    def test_repeat_note_is_short_without_ellipsis(self):
+    def test_nonconsecutive_repeat_note_is_short_without_ellipsis(self):
         full = CitationEngine.footnote_full(self._source())
         short = CitationEngine.footnote_short(self._source())
         self.assertTrue(short.startswith("Fatmawati,"))
         self.assertLess(len(short), len(full))
         self.assertNotIn("...", short)
         self.assertNotIn("…", short)
+
+    def test_ibid_is_only_for_immediate_same_source_repeat(self):
+        plan = CitationEngine.note_plan(["R1", "R1", "R2", "R1", "R2", "R2"])
+        self.assertEqual(
+            plan,
+            (
+                ("R1", "full"),
+                ("R1", "ibid"),
+                ("R2", "full"),
+                ("R1", "short"),
+                ("R2", "short"),
+                ("R2", "ibid"),
+            ),
+        )
+        self.assertEqual(CitationEngine.IBID_TEXT, "Ibid.")
 
     def test_default_footnote_visual_settings(self):
         self.assertEqual(CitationEngine.FOOTNOTE_FONT, "Times New Roman")
@@ -49,6 +64,8 @@ class CitationFormatTests(unittest.TestCase):
         self.assertIn("Citation Style Skill", policy)
         self.assertIn("full note", policy)
         self.assertIn("short note", policy)
+        self.assertIn("Ibid.", policy)
+        self.assertIn("nama jurnal dicetak miring", policy)
         self.assertIn("Times New Roman 10 pt", policy)
         self.assertIn("tidak memakai `...` atau `…`", policy)
 

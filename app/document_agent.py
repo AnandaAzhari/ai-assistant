@@ -1,7 +1,8 @@
-"""Document/Makalah Agent v0.7.
+"""Document/Makalah Agent v0.8.
 
 Requirement dasar dan data cover dikumpulkan secara lokal tanpa token AI.
 DeepSeek dipakai hanya untuk pekerjaan bernalar seperti menyusun/revisi outline.
+Research Manager mencari metadata sumber akademik nyata tanpa token model AI.
 Formatting DOCX/PDF tetap ditangani Document Engine lokal.
 """
 
@@ -14,6 +15,7 @@ from app.document_cover import MakalahCoverData
 from app.document_engine import DocumentEngine, demo_spec
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
+from app.research_manager import ResearchManager
 
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
@@ -46,10 +48,12 @@ class DocumentAgent:
         provider: ModelProvider,
         *,
         engine: DocumentEngine | None = None,
+        research: ResearchManager | None = None,
         history_limit: int = 10,
     ):
         self.provider = provider
         self.engine = engine
+        self.research = research or ResearchManager.from_env()
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
         self.requirements = MakalahRequirements()
@@ -79,15 +83,17 @@ class DocumentAgent:
 
     def status(self) -> DocumentResult:
         engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
+        research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
                 "Document Agent tersedia. Requirement dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi. "
-                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n" + engine_note,
+                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n"
+                + engine_note + "\n" + research_note,
             )
         return DocumentResult(
             "siap",
-            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n"
+            f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n"
             "Requirement + data cover diproses lokal tanpa token AI; model dipakai untuk outline/draft saja.",
         )
 
@@ -95,6 +101,26 @@ class DocumentAgent:
         if not self.engine_ready:
             return DocumentResult("belum_dikonfigurasi", "Document Engine belum tersedia pada runtime ini.")
         return DocumentResult("siap", self.engine.status_text)
+
+    def research_status(self) -> DocumentResult:
+        if not self.research:
+            return DocumentResult("belum_dikonfigurasi", "Research Manager belum tersedia pada runtime ini.")
+        return DocumentResult("siap", self.research.status_text)
+
+    def research_search(self, raw: str) -> DocumentResult:
+        if not self.research:
+            return DocumentResult("belum_dikonfigurasi", "Research Manager belum tersedia pada runtime ini.")
+        parts = raw.split(maxsplit=1)
+        query = parts[1].strip() if len(parts) > 1 else ""
+        if not query:
+            query = (self.requirements.topic_title or "").strip()
+        if not query:
+            return DocumentResult(
+                "membutuhkan_bantuan",
+                "Tulis topik setelah perintah, misalnya: `/research pencemaran lingkungan`, atau mulai sesi makalah dahulu.",
+            )
+        result = self.research.search(query, limit=10)
+        return DocumentResult(result.status, self.research.format_result(result))
 
     def build_demo(self) -> DocumentResult:
         if not self.engine_ready:
@@ -189,6 +215,10 @@ class DocumentAgent:
             return self.engine_status()
         if command == "/dokumen_demo":
             return self.build_demo()
+        if command in {"/research_status", "/riset_status"}:
+            return self.research_status()
+        if command in {"/research", "/riset"}:
+            return self.research_search(raw)
 
         if self.phase == "requirements":
             self.requirements.update(raw)

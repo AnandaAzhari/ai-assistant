@@ -41,6 +41,7 @@ Jangan menambah BAB atau bagian lain kecuali memang dibutuhkan topik atau diperi
 - Jangan memakai bullet `•` sebagai pengganti judul subbagian.
 - Bullet/numbered list boleh dipakai **hanya di dalam isi** untuk daftar contoh, langkah, manfaat, jenis, atau poin lain; bukan untuk mengganti hierarki heading.
 - Default maksimum sampai tingkat `x.x.x`. Jangan membuat tingkat lebih dalam kecuali instruksi resmi memintanya.
+- Pada **tampilan kerangka untuk pelanggan**, tampilkan struktur heading saja. Jangan menambahkan bullet berisi ringkasan paragraf di bawah setiap heading karena itu membuat kerangka terlihat seperti isi makalah dan membingungkan pelanggan.
 
 ## Target jumlah halaman
 

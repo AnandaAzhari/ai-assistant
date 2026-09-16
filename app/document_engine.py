@@ -229,17 +229,29 @@ class DocumentEngine:
     def convert_to_pdf(docx_path: Path, timeout: int = 75) -> tuple[Path | None, str]:
         """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia.
 
-        Hindari overload Documents.Open dengan parameter boolean karena PowerShell COM
-        binder pada sebagian instalasi Word gagal mengubah System.Boolean ke Object.
+        Path dikirim lewat environment variable, bukan argumen -Command PowerShell.
+        Ini menghindari kasus $args kosong/berubah ketika script inline dieksekusi.
         """
         if os.name != "nt":
             return None, "PDF belum dibuat: konversi Word COM hanya tersedia di Windows pada tahap ini."
 
-        pdf_path = docx_path.with_suffix(".pdf")
+        try:
+            src_path = docx_path.resolve(strict=True)
+        except (OSError, FileNotFoundError) as exc:
+            return None, f"PDF belum dibuat otomatis: file DOCX tidak ditemukan ({exc})."
+
+        pdf_path = src_path.with_suffix(".pdf")
+        ps_env = os.environ.copy()
+        ps_env["TAQI_DOCX_SOURCE"] = str(src_path)
+        ps_env["TAQI_PDF_DEST"] = str(pdf_path)
+
         script = r'''
 $ErrorActionPreference = 'Stop'
-$src = [System.IO.Path]::GetFullPath([string]$args[0])
-$dst = [System.IO.Path]::GetFullPath([string]$args[1])
+$src = [System.IO.Path]::GetFullPath([string]$env:TAQI_DOCX_SOURCE)
+$dst = [System.IO.Path]::GetFullPath([string]$env:TAQI_PDF_DEST)
+if ([string]::IsNullOrWhiteSpace($src)) { throw 'Path DOCX kosong.' }
+if ([string]::IsNullOrWhiteSpace($dst)) { throw 'Path PDF kosong.' }
+if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "DOCX tidak ditemukan: $src" }
 $word = $null
 $doc = $null
 try {
@@ -247,13 +259,9 @@ try {
   $word = New-Object -ComObject Word.Application
   $word.Visible = $false
   $word.DisplayAlerts = 0
-
-  # Memakai overload satu argumen paling kompatibel dengan PowerShell COM binder.
   $doc = $word.Documents.Open([string]$src)
   try { $doc.Fields.Update() | Out-Null } catch {}
   foreach ($toc in $doc.TablesOfContents) { try { $toc.Update() | Out-Null } catch {} }
-
-  # wdExportFormatPDF = 17. ExportAsFixedFormat tidak mengubah DOCX sumber.
   $doc.ExportAsFixedFormat([string]$dst, 17)
 } finally {
   if ($doc -ne $null) { try { $doc.Close(0) } catch {} }
@@ -264,12 +272,13 @@ try {
             completed = subprocess.run(
                 [
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-Command", script, str(docx_path.resolve()), str(pdf_path.resolve()),
+                    "-Command", script,
                 ],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 check=False,
+                env=ps_env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return None, f"PDF belum dibuat otomatis: {exc}"

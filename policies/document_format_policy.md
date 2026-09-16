@@ -110,11 +110,16 @@ Default penomoran halaman:
 
 ## Daftar isi
 
+Default Daftar Isi Makalah saat **tidak ada arahan resmi**:
+
 - Daftar isi diperbarui setelah struktur, nomor halaman, catatan kaki, dan Daftar Pustaka final selesai.
-- Entri `BAB I`, `BAB II`, `BAB III`, dan `DAFTAR PUSTAKA` berada pada tingkat utama yang sama.
-- Level `A.`, `B.`, `C.` berada satu tingkat di bawah BAB.
-- Level `1.`, `2.`, `3.` berada satu tingkat lagi di bawah `A.` jika memang ditampilkan.
-- Level `a.`, `b.`, `c.` berada satu tingkat lagi jika benar-benar diperlukan.
+- Kedalaman default Daftar Isi hanya sampai **Heading 3**.
+- Heading 1 (`BAB I`, `BAB II`, `BAB III`, dan `DAFTAR PUSTAKA`) ditampilkan sebagai tingkat utama.
+- Heading 2 (`A.`, `B.`, `C.`, dst.) ditampilkan satu tingkat di bawah Heading 1.
+- Heading 3 (`1.`, `2.`, `3.`, dst.) ditampilkan satu tingkat di bawah Heading 2.
+- **Heading 4 (`a.`, `b.`, `c.`, dst.) tetap dipakai di isi dokumen bila diperlukan, tetapi tidak ditampilkan di Daftar Isi secara default.**
+- Engine Word memakai field `TOC \\o "1-3"` untuk default Makalah.
+- Jika pedoman guru/dosen/sekolah/kampus menentukan Daftar Isi hanya sampai Heading 2 atau justru meminta Heading 4, ikuti pedoman tersebut.
 - Nomor halaman pada daftar isi harus mengikuti nomor final dokumen.
 
 ## Bahasa dan isi

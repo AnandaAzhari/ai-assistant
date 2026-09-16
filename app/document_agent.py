@@ -1,8 +1,8 @@
-"""Document/Makalah Agent v1.0.
+"""Document/Makalah Agent v1.1.
 
-Requirement dasar dan data cover dikumpulkan lokal tanpa token AI.
-DeepSeek dipakai untuk outline dan, hanya setelah perintah eksplisit /draft, membuat
-draft terstruktur yang memakai marker sumber R1/R2/... dari Source Registry.
+Data awal dan data cover dikumpulkan lokal tanpa token AI.
+DeepSeek dipakai untuk kerangka makalah dan, hanya setelah perintah admin eksplisit
+/draft, membuat isi makalah terstruktur dengan sumber R1/R2/... dari Source Registry.
 """
 
 from __future__ import annotations
@@ -21,20 +21,21 @@ from app.source_registry import SourceRegistry
 
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
-Requirement makalah sudah divalidasi oleh sistem.
+Data utama makalah sudah diperiksa oleh sistem.
 
-Tugasmu pada tahap ini HANYA membuat ringkasan singkat dan outline makalah.
+Tugasmu pada tahap ini HANYA membuat ringkasan singkat dan kerangka makalah.
 Aturan:
-- gunakan bahasa Indonesia yang jelas dan ringkas;
+- gunakan bahasa Indonesia yang jelas, sederhana, dan mudah dipahami siswa/i;
+- jangan gunakan istilah teknis bila ada kata yang lebih mudah;
 - jangan gunakan tabel Markdown;
-- ringkasan requirement cukup berupa bullet singkat;
-- patuhi instruksi guru/dosen di atas template standar;
+- ringkasan data cukup berupa bullet singkat;
+- jika ada arahan guru/dosen, arahan itu lebih penting daripada template standar;
 - jangan mengarang sumber atau daftar pustaka;
 - struktur default: Halaman Awal, BAB I PENDAHULUAN, BAB II PEMBAHASAN, BAB III PENUTUP, dan Daftar Pustaka bila sumber tersedia;
 - buat subbab bernomor yang relevan, tetapi jangan terlalu banyak;
-- JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah outline disetujui;
-- JANGAN membuat draft panjang;
-- akhiri dengan kalimat: `Jika outline ini sudah sesuai, balas: setuju.`
+- JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah kerangka disetujui;
+- JANGAN membuat isi makalah lengkap pada tahap ini;
+- akhiri dengan kalimat: `Jika kerangka ini sudah sesuai, balas: setuju.`
 """
 
 
@@ -98,17 +99,17 @@ class DocumentAgent:
         engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
-        draft_note = "Draft Generator: siap" if self.configured else "Draft Generator: menunggu provider AI"
+        draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
-                "Document Agent tersedia. Requirement dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
+                "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
                 + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note,
             )
         return DocumentResult(
             "siap",
             f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n"
-            "Requirement + data cover diproses lokal tanpa token AI; model dipakai untuk outline/draft saja.",
+            "Data awal + data cover diproses lokal tanpa token AI; model dipakai untuk kerangka dan isi makalah saja.",
         )
 
     def engine_status(self) -> DocumentResult:
@@ -119,7 +120,7 @@ class DocumentAgent:
     def research_status(self) -> DocumentResult:
         if not self.research:
             return DocumentResult("belum_dikonfigurasi", "Research Manager belum tersedia pada runtime ini.")
-        registry = "Source Registry siap." if self.registry else "Source Registry belum tersedia."
+        registry = "Daftar sumber siap." if self.registry else "Daftar sumber belum tersedia."
         return DocumentResult("siap", self.research.status_text + " " + registry)
 
     def research_search(self, raw: str) -> DocumentResult:
@@ -130,7 +131,7 @@ class DocumentAgent:
         if not query:
             query = (self.requirements.topic_title or "").strip()
         if not query:
-            return DocumentResult("membutuhkan_bantuan", "Tulis topik setelah perintah, misalnya: `/research pencemaran lingkungan`.")
+            return DocumentResult("membutuhkan_bantuan", "Tulis topik yang ingin dicari sumbernya.")
         result = self.research.search(query, limit=10)
         if result.status == "berhasil":
             self._last_research = result
@@ -158,19 +159,19 @@ class DocumentAgent:
 
     def research_save(self, raw: str) -> DocumentResult:
         if not self.registry:
-            return DocumentResult("belum_dikonfigurasi", "Source Registry belum tersedia.")
+            return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
         if not self._last_research or self._last_research.status != "berhasil":
-            return DocumentResult("membutuhkan_bantuan", "Belum ada hasil research. Jalankan `/research <topik>` terlebih dahulu.")
+            return DocumentResult("membutuhkan_bantuan", "Belum ada hasil pencarian sumber. Cari sumber terlebih dahulu.")
         parts = raw.split(maxsplit=1)
         selection_text = parts[1] if len(parts) > 1 else "all"
         indices = self._parse_source_selection(selection_text, len(self._last_research.sources))
         if not indices:
-            return DocumentResult("membutuhkan_bantuan", "Contoh: `/research_save all` atau `/research_save 1,2,4-6`.")
+            return DocumentResult("membutuhkan_bantuan", "Pilihan sumber tidak dikenali.")
         chosen = [self._last_research.sources[index - 1] for index in indices]
         added = self.registry.add_sources(self.source_scope, chosen)
         current = self.registry.list_sources(self.source_scope)
         if not added:
-            return DocumentResult("berhasil", "Pilihan itu sudah ada di Source Registry.\n\n" + self.registry.format_sources(current))
+            return DocumentResult("berhasil", "Sumber yang dipilih sudah tersimpan.\n\n" + self.registry.format_sources(current))
         ids = ", ".join(source.ref_id for source in added)
         return DocumentResult(
             "berhasil",
@@ -180,7 +181,7 @@ class DocumentAgent:
 
     def source_list(self) -> DocumentResult:
         if not self.registry:
-            return DocumentResult("belum_dikonfigurasi", "Source Registry belum tersedia.")
+            return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
         return DocumentResult("berhasil", self.registry.format_sources(self.registry.list_sources(self.source_scope)))
 
     def build_demo(self) -> DocumentResult:
@@ -207,7 +208,7 @@ class DocumentAgent:
             self.registry.clear_scope(self.source_scope)
         return DocumentResult(
             "berhasil",
-            "Sesi Document Agent direset. Requirement awal akan dikumpulkan secara lokal tanpa token AI.",
+            "Sesi dokumen dimulai ulang. Saya akan meminta data yang benar-benar diperlukan saja.",
         )
 
     @staticmethod
@@ -224,12 +225,12 @@ class DocumentAgent:
 
     def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
         messages = [{"role": "system", "content": OUTLINE_PROMPT}]
-        messages.append({"role": "system", "content": "REQUIREMENT MAKALAH TERVALIDASI:\n" + self.requirements.structured_text()})
+        messages.append({"role": "system", "content": "DATA MAKALAH YANG SUDAH LENGKAP:\n" + self.requirements.structured_text()})
         if revision:
             messages.extend(self._history[-self.history_limit:])
-            messages.append({"role": "user", "content": "Revisi outline sesuai permintaan ini:\n" + raw[:4000]})
+            messages.append({"role": "user", "content": "Perbaiki kerangka makalah sesuai permintaan ini:\n" + raw[:4000]})
         else:
-            messages.append({"role": "user", "content": "Buat ringkasan requirement dan outline makalah sekarang."})
+            messages.append({"role": "user", "content": "Buat ringkasan data dan kerangka makalah sekarang."})
         return messages
 
     def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
@@ -251,7 +252,7 @@ class DocumentAgent:
         text = re.sub(r"\s+", " ", raw.strip().casefold())
         if "tidak setuju" in text or "belum sesuai" in text:
             return False
-        return text in {"setuju", "sesuai", "lanjut", "oke", "ok", "ya", "iya"} or text.startswith(("setuju ", "sudah sesuai", "outline sudah sesuai"))
+        return text in {"setuju", "sesuai", "lanjut", "oke", "ok", "ya", "iya"} or text.startswith(("setuju ", "sudah sesuai", "kerangka sudah sesuai", "outline sudah sesuai"))
 
     @staticmethod
     def _member_tuple(value: str) -> tuple[str, ...]:
@@ -260,20 +261,20 @@ class DocumentAgent:
 
     def generate_draft(self) -> DocumentResult:
         if self.phase not in {"ready_for_draft", "draft_ready"}:
-            return DocumentResult("membutuhkan_bantuan", "Draft belum bisa dibuat. Lengkapi requirement, setujui outline, dan isi data cover terlebih dahulu.")
+            return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi data utama, setujui kerangka, dan isi data cover terlebih dahulu.")
         if not self.registry:
-            return DocumentResult("belum_dikonfigurasi", "Source Registry belum tersedia.")
+            return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
         sources = self.registry.list_sources(self.source_scope)
         if not sources:
             return DocumentResult(
                 "membutuhkan_sumber",
-                "Source Registry masih kosong. Cari dan simpan sumber dulu dengan `/research <topik>` lalu `/research_save ...`. Tidak ada token AI yang dipakai pada langkah itu.",
+                "Belum ada sumber yang disimpan. Cari sumber terlebih dahulu sebelum membuat isi makalah.",
             )
         result = self.draft_generator.generate(
             self.requirements.structured_text(), self.cover.structured_text(), self._outline_text, sources,
         )
         if result.status != "berhasil":
-            return DocumentResult(result.status, (result.warning or "Draft belum berhasil dibuat.") + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
+            return DocumentResult(result.status, (result.warning or "Isi makalah belum berhasil dibuat.") + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
 
         teacher = self.cover.teacher_name
         if teacher.casefold() == "tidak dicantumkan":
@@ -281,16 +282,22 @@ class DocumentAgent:
         year = self.cover.academic_year
         if year.casefold() == "tidak dicantumkan":
             year = ""
+        institution = self.cover.institution_name
+        if institution.casefold() == "tidak dicantumkan":
+            institution = ""
+        group_name = self.cover.group_name
+        if group_name.casefold() == "tidak dicantumkan":
+            group_name = ""
         self._draft_spec = MakalahSpec(
             order_id="DRAFT-" + self.source_scope.replace("DOCSRC-", ""),
             title=self.requirements.topic_title,
-            institution=self.cover.institution_name,
+            institution=institution,
             class_semester=self.requirements.class_semester,
             subject=self.requirements.subject,
             author=self.cover.author_name,
             teacher=teacher,
             year=year,
-            group_name=self.cover.group_name,
+            group_name=group_name,
             members=self._member_tuple(self.cover.group_members),
             preface=result.preface,
             sections=result.sections,
@@ -301,10 +308,10 @@ class DocumentAgent:
             paragraph for section in result.sections for paragraph in section.paragraphs
         ), flags=re.IGNORECASE)), key=lambda item: int(item[1:]))
         text = (
-            "Draft terstruktur berhasil dibuat. Belum dibuat menjadi DOCX/PDF pada tahap ini.\n\n"
-            f"Section: {len(section_titles)}\n"
-            f"Sumber yang ditandai di draft: {', '.join(cited) if cited else 'belum ada marker sumber'}\n"
-            "Formatting footnote dan daftar pustaka akan ditangani engine lokal, bukan AI."
+            "Isi makalah berhasil dibuat. Belum dijadikan file Word/PDF pada tahap ini.\n\n"
+            f"Jumlah bagian: {len(section_titles)}\n"
+            f"Sumber yang dipakai: {', '.join(cited) if cited else 'belum ada sumber yang ditandai'}\n"
+            "Catatan kaki dan daftar pustaka akan dibuat otomatis."
         )
         return DocumentResult("draft_ready", text + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
 
@@ -351,22 +358,22 @@ class DocumentAgent:
             self.phase = "ready_for_draft"
             return DocumentResult(
                 "cover_complete",
-                "Data cover utama sudah lengkap dan tersimpan lokal tanpa token AI.\n\n"
+                "Data utama untuk cover sudah cukup.\n\n"
                 + self.cover.structured_text()
-                + "\n\nJika sumber sudah ada di Source Registry, ketik `/draft` untuk membuat draft. Perintah `/draft` memakai token AI.",
+                + "\n\nUntuk pengujian admin saat ini, ketik `/draft` jika ingin membuat isi makalah. Pelanggan nantinya tidak perlu memakai perintah seperti ini.",
             )
 
         if self.phase == "ready_for_draft":
             self.cover.update(raw)
             return DocumentResult(
                 "ready_for_draft",
-                "Requirement, outline, dan cover sudah siap. Ketik `/draft` jika ingin mulai membuat draft dengan AI. Saya tidak akan memakai token sampai perintah itu diberikan.",
+                "Semua data utama sudah siap. Untuk pengujian admin saat ini, ketik `/draft` untuk membuat isi makalah. Pelanggan nantinya cukup menjawab dengan bahasa biasa.",
             )
 
         if self.phase == "draft_ready":
             return DocumentResult(
                 "draft_ready",
-                "Draft terstruktur sudah tersedia di runtime. Tahap berikutnya (No. 5) adalah mengirim draft ini ke Citation Engine + Document Engine untuk menghasilkan DOCX/PDF final.",
+                "Isi makalah sudah tersedia. Tahap berikutnya adalah membuat file Word/PDF lengkap dengan catatan kaki dan daftar pustaka otomatis.",
             )
 
-        return DocumentResult("membutuhkan_bantuan", "Status sesi dokumen tidak dikenali. Gunakan /makalah_baru untuk memulai ulang.")
+        return DocumentResult("membutuhkan_bantuan", "Status sesi dokumen tidak dikenali. Mulai ulang sesi makalah untuk mencoba lagi.")

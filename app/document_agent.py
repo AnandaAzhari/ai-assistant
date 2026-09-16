@@ -1,31 +1,36 @@
-"""Document/Makalah Agent v0.6.
+"""Document/Makalah Agent v0.7.
 
-Enam requirement dasar dikumpulkan secara lokal tanpa memanggil model AI.
-DeepSeek baru dipakai setelah data dasar lengkap. Formatting DOCX/PDF tetap
-ditangani Document Engine lokal.
+Requirement dasar dan data cover dikumpulkan secara lokal tanpa token AI.
+DeepSeek dipakai hanya untuk pekerjaan bernalar seperti menyusun/revisi outline.
+Formatting DOCX/PDF tetap ditangani Document Engine lokal.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
+from app.document_cover import MakalahCoverData
 from app.document_engine import DocumentEngine, demo_spec
 from app.document_requirements import MakalahRequirements
 from app.providers.base import ModelProvider
 
 
-WORK_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
-Requirement dasar makalah sudah divalidasi oleh sistem dan akan diberikan secara terstruktur.
-Gunakan bahasa Indonesia yang jelas dan ringkas. Jika nama pelanggan belum diketahui, gunakan sapaan `Anda`, bukan Bapak/Ibu.
+OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
+Requirement makalah sudah divalidasi oleh sistem.
 
-Aturan kerja:
+Tugasmu pada tahap ini HANYA membuat ringkasan singkat dan outline makalah.
+Aturan:
+- gunakan bahasa Indonesia yang jelas dan ringkas;
+- jangan gunakan tabel Markdown karena UI admin belum merender tabel dengan baik;
+- ringkasan requirement cukup berupa bullet singkat;
 - patuhi instruksi guru/dosen di atas template standar;
-- jangan mengarang sumber/daftar pustaka;
-- setelah requirement lengkap, tampilkan ringkasan singkat dan outline terlebih dahulu;
-- jangan membuat draft panjang sebelum outline dikonfirmasi, kecuali pengguna secara eksplisit meminta langsung dibuatkan draft;
-- struktur default: Cover, Kata Pengantar, Daftar Isi, BAB I PENDAHULUAN (1.1 dst), BAB II PEMBAHASAN (2.1 dst), BAB III PENUTUP (3.1 Kesimpulan, 3.2 Saran bila sesuai), Daftar Pustaka bila sumber tersedia;
-- sebelum file final, kumpulkan data cover yang belum ada: nama sekolah/kampus, individu/kelompok, nama penyusun/anggota, dan tahun ajaran bila relevan; nama guru/dosen opsional;
-- jangan mengaku DOCX/PDF sudah dibuat sebelum Document Engine benar-benar dipanggil.
+- jangan mengarang sumber atau daftar pustaka;
+- struktur default: Halaman Awal, BAB I PENDAHULUAN, BAB II PEMBAHASAN, BAB III PENUTUP, dan Daftar Pustaka bila sumber tersedia;
+- buat subbab bernomor yang relevan, tetapi jangan terlalu banyak;
+- JANGAN meminta data cover pada jawaban ini; data cover akan dikumpulkan sistem lokal setelah outline disetujui;
+- JANGAN membuat draft panjang;
+- akhiri dengan kalimat: `Jika outline ini sudah sesuai, balas: setuju.`
 """
 
 
@@ -48,6 +53,8 @@ class DocumentAgent:
         self.history_limit = max(2, int(history_limit))
         self._history: list[dict[str, str]] = []
         self.requirements = MakalahRequirements()
+        self.cover = MakalahCoverData()
+        self.phase = "requirements"
 
     @property
     def configured(self) -> bool:
@@ -63,19 +70,25 @@ class DocumentAgent:
             return "belum tersedia"
         return f"{self.provider.provider_name} / {self.provider.model_name}"
 
+    @property
+    def session_active(self) -> bool:
+        if self.phase != "requirements":
+            return True
+        labels = getattr(self.requirements, "FIELD_LABELS", {})
+        return any(bool(getattr(self.requirements, key, "")) for key in labels)
+
     def status(self) -> DocumentResult:
         engine_note = "Document Engine: siap" if self.engine_ready else "Document Engine: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
-                "Document Agent tersedia. Pengumpul requirement lokal aktif, tetapi DeepSeek API belum dikonfigurasi. "
-                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n"
-                + engine_note,
+                "Document Agent tersedia. Requirement dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi. "
+                "Isi DEEPSEEK_API_KEY pada .env lokal lalu restart Web Admin.\n" + engine_note,
             )
         return DocumentResult(
             "siap",
             f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n"
-            "Pengumpulan enam requirement dasar diproses lokal tanpa token AI; model baru dipanggil setelah datanya lengkap.",
+            "Requirement + data cover diproses lokal tanpa token AI; model dipakai untuk outline/draft saja.",
         )
 
     def engine_status(self) -> DocumentResult:
@@ -105,21 +118,63 @@ class DocumentAgent:
     def reset(self) -> DocumentResult:
         self._history.clear()
         self.requirements.reset()
+        self.cover.reset()
+        self.phase = "requirements"
         return DocumentResult(
             "berhasil",
             "Sesi Document Agent direset. Silakan mulai permintaan dokumen baru. "
             "Requirement awal akan dikumpulkan secara lokal tanpa token AI.",
         )
 
-    def _model_messages(self, raw: str) -> list[dict[str, str]]:
-        messages = [{"role": "system", "content": WORK_PROMPT}]
+    @staticmethod
+    def _usage_note(reply) -> str:
+        if not (reply.input_tokens or reply.output_tokens):
+            return ""
+        return (
+            f"\n\n[Model: {reply.model} | token masuk: {reply.input_tokens:,} | "
+            f"token keluar: {reply.output_tokens:,}]"
+        ).replace(",", ".")
+
+    def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
+        messages = [{"role": "system", "content": OUTLINE_PROMPT}]
         messages.append({
             "role": "system",
             "content": "REQUIREMENT MAKALAH TERVALIDASI:\n" + self.requirements.structured_text(),
         })
-        messages.extend(self._history[-self.history_limit:])
-        messages.append({"role": "user", "content": raw[:8000]})
+        if revision:
+            messages.extend(self._history[-self.history_limit:])
+            messages.append({"role": "user", "content": "Revisi outline sesuai permintaan ini:\n" + raw[:4000]})
+        else:
+            messages.append({"role": "user", "content": "Buat ringkasan requirement dan outline makalah sekarang."})
         return messages
+
+    def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
+        if not self.configured:
+            return self.status()
+        reply = self.provider.generate(
+            self._outline_messages(raw, revision=revision),
+            max_tokens=850,
+            temperature=0.3,
+            timeout=45,
+        )
+        if reply.status != "berhasil":
+            return DocumentResult(reply.status, reply.text)
+
+        if revision:
+            self._history.append({"role": "user", "content": raw[:4000]})
+        self._history.append({"role": "assistant", "content": reply.text[:10000]})
+        self._history = self._history[-self.history_limit:]
+        self.phase = "outline_confirmation"
+        return DocumentResult("berhasil", reply.text + self._usage_note(reply))
+
+    @staticmethod
+    def _outline_approved(raw: str) -> bool:
+        text = re.sub(r"\s+", " ", raw.strip().casefold())
+        if "tidak setuju" in text or "belum sesuai" in text:
+            return False
+        return text in {"setuju", "sesuai", "lanjut", "oke", "ok", "ya", "iya"} or text.startswith(
+            ("setuju ", "sudah sesuai", "outline sudah sesuai")
+        )
 
     def handle(self, message: str) -> DocumentResult:
         raw = (message or "").strip()
@@ -135,31 +190,37 @@ class DocumentAgent:
         if command == "/dokumen_demo":
             return self.build_demo()
 
-        # Tahap pengumpulan requirement tidak memanggil AI sama sekali.
-        self.requirements.update(raw)
-        if not self.requirements.complete:
-            return DocumentResult("needs_requirements", self.requirements.question_text())
+        if self.phase == "requirements":
+            self.requirements.update(raw)
+            if not self.requirements.complete:
+                return DocumentResult("needs_requirements", self.requirements.question_text())
+            return self._generate_outline(raw)
 
-        if not self.configured:
-            return self.status()
+        if self.phase == "outline_confirmation":
+            if self._outline_approved(raw):
+                self.phase = "cover"
+                self.cover.update(raw)
+                return DocumentResult("needs_cover", self.cover.question_text())
+            return self._generate_outline(raw, revision=True)
 
-        reply = self.provider.generate(
-            self._model_messages(raw),
-            max_tokens=1400,
-            temperature=0.35,
-            timeout=45,
-        )
-        if reply.status != "berhasil":
-            return DocumentResult(reply.status, reply.text)
+        if self.phase == "cover":
+            self.cover.update(raw)
+            if not self.cover.complete:
+                return DocumentResult("needs_cover", self.cover.question_text())
+            self.phase = "ready_for_draft"
+            return DocumentResult(
+                "cover_complete",
+                "Data cover utama sudah lengkap dan tersimpan lokal tanpa token AI.\n\n"
+                + self.cover.structured_text()
+                + "\n\nTahap berikutnya adalah pembuatan draft makalah dan penyambungan hasilnya ke DOCX/PDF.",
+            )
 
-        self._history.append({"role": "user", "content": raw[:8000]})
-        self._history.append({"role": "assistant", "content": reply.text[:12000]})
-        self._history = self._history[-self.history_limit:]
+        if self.phase == "ready_for_draft":
+            self.cover.update(raw)
+            return DocumentResult(
+                "ready_for_draft",
+                "Requirement dan data cover sudah siap. Tahap berikutnya adalah generator draft + DOCX/PDF; "
+                "kita belum memanggil model lagi pada pesan ini.",
+            )
 
-        usage_note = ""
-        if reply.input_tokens or reply.output_tokens:
-            usage_note = (
-                f"\n\n[Model: {reply.model} | token masuk: {reply.input_tokens:,} | "
-                f"token keluar: {reply.output_tokens:,}]"
-            ).replace(",", ".")
-        return DocumentResult("berhasil", reply.text + usage_note)
+        return DocumentResult("membutuhkan_bantuan", "Status sesi dokumen tidak dikenali. Gunakan /makalah_baru untuk memulai ulang.")

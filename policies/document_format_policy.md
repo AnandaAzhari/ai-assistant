@@ -8,6 +8,7 @@ AI tidak boleh mengubah struktur, hierarki penomoran, tata letak daftar pustaka,
 1. Instruksi/rubrik/template yang diberikan guru, dosen, sekolah, kampus, atau pelanggan.
 2. Aturan khusus instansi yang diberikan pelanggan.
 3. Policy default pada file ini dan `document_type_structure_policy.md`.
+4. Referensi fallback pada `skills/document_academic/SKILL.md`.
 
 Jika aturan tingkat 1 atau 2 bertentangan dengan policy ini, ikuti aturan yang lebih tinggi **hanya pada bagian yang bertentangan**. Bagian lain tetap mengikuti policy ini.
 
@@ -50,11 +51,18 @@ Default hierarki Makalah:
 - Jangan memakai `BAB I → 1.1 → 1.1.1` sebagai default Makalah.
 - Jangan memakai `I. → A. → 1. → a.` sebagai default Makalah.
 - Heading BAB ditampilkan terpisah, misalnya `BAB I` pada satu baris dan `PENDAHULUAN` pada baris berikutnya, rata tengah dan tebal.
-- Heading `A.`, `1.`, dan `a.` memakai satu spasi normal antara penanda dan judul; jangan menambahkan TAB acak.
-- Paragraf isi setelah heading secara default memakai first-line indent sekitar **1,25 cm**.
-- **Semua paragraf isi utama wajib memakai perataan Justify/rata kiri-kanan**, bukan rata kiri biasa, kecuali pedoman resmi instansi menentukan lain.
-- Justify diterapkan sebagai properti paragraf Word, bukan dengan menambahkan spasi manual.
-- First-line indent diterapkan sebagai properti paragraf Word, bukan dengan karakter TAB manual.
+- Heading memakai satu spasi normal antara penanda dan judul; jangan menambahkan TAB acak.
+
+Fallback indent Word saat **tidak ada arahan resmi**:
+
+- Heading 1 (`BAB ...` / `DAFTAR PUSTAKA`): rata tengah, left indent **0 cm**.
+- Heading 2 (`A.`, `B.`, `C.`): rata kiri, left indent **0 cm**.
+- Heading 3 (`1.`, `2.`, `3.`): rata kiri, left indent sekitar **0,63 cm**.
+- Heading 4 (`a.`, `b.`, `c.`): rata kiri, left indent sekitar **1,27 cm**.
+- Isi paragraf kembali memakai margin utama dan **tidak mewarisi left indent heading**.
+- Paragraf isi memakai **first-line indent 1,27 cm (720 twips / 0,5 inci)**.
+- **Semua paragraf isi utama wajib memakai Justify / rata kiri-kanan**, bukan rata kiri biasa, kecuali pedoman resmi instansi menentukan lain.
+- Justify dan first-line indent harus diterapkan sebagai properti paragraf Word, bukan spasi atau karakter TAB manual.
 - Bullet `•` tidak boleh menggantikan heading terstruktur.
 - Bullet atau numbered list hanya dipakai di dalam isi jika memang berupa daftar, bukan sebagai pengganti hierarki heading.
 - Pada tampilan kerangka untuk pelanggan, tampilkan struktur heading saja tanpa ringkasan paragraf di bawah setiap heading.
@@ -116,4 +124,4 @@ Default penomoran halaman:
 
 ## Prinsip stabilitas
 
-Document Agent boleh menyesuaikan **isi** dengan topik, jenjang, dan instruksi pelanggan, tetapi tidak boleh mengubah pola default **`BAB I → A. → 1. → a.`** secara sepihak. Jika ada instruksi khusus dari guru/dosen/sekolah/kampus, struktur hanya disesuaikan pada bagian yang diminta.
+Document Agent boleh menyesuaikan **isi** dengan topik, jenjang, dan instruksi pelanggan, tetapi tidak boleh mengubah pola default **`BAB I → A. → 1. → a.`** secara sepihak. Jika ada instruksi khusus dari guru/dosen/sekolah/kampus, struktur hanya disesuaikan pada bagian yang diminta. Jika tidak ada arahan resmi, gunakan fallback aktif pada `skills/document_academic/SKILL.md`.

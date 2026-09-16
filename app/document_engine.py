@@ -32,10 +32,10 @@ class MakalahSpec:
     class_semester: str
     subject: str
     author: str = ""
-    group_name: str = ""
-    group_members: tuple[str, ...] = field(default_factory=tuple)
     teacher: str = ""
-    academic_year: str = ""
+    year: str = ""
+    group_name: str = ""
+    members: tuple[str, ...] = field(default_factory=tuple)
     preface: tuple[str, ...] = field(default_factory=tuple)
     sections: tuple[DocumentSection, ...] = field(default_factory=tuple)
 
@@ -74,7 +74,13 @@ class DocumentEngine:
         if size:
             props.append(f'<w:sz w:val="{int(size) * 2}"/><w:szCs w:val="{int(size) * 2}"/>')
         rpr = f"<w:rPr>{''.join(props)}</w:rPr>" if props else ""
-        return f'<w:r>{rpr}<w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
+        parts = str(text or "").split("\n")
+        content: list[str] = []
+        for index, part in enumerate(parts):
+            if index:
+                content.append("<w:br/>")
+            content.append(f'<w:t xml:space="preserve">{escape(part)}</w:t>')
+        return f'<w:r>{rpr}{"".join(content)}</w:r>'
 
     @classmethod
     def _paragraph(
@@ -95,23 +101,6 @@ class DocumentEngine:
         ppr.append(f'<w:spacing w:before="{before}" w:after="{after}" w:line="{line}" w:lineRule="auto"/>')
         return f'<w:p><w:pPr>{"".join(ppr)}</w:pPr>{cls._run(text, bold=bold, size=size)}</w:p>'
 
-    @classmethod
-    def _chapter_heading(cls, title: str) -> str:
-        """Render `BAB I PENDAHULUAN` menjadi dua baris seperti referensi pelanggan."""
-        match = re.match(r"^\s*(BAB\s+[IVXLCDM0-9]+)\s+(.+?)\s*$", title, flags=re.IGNORECASE)
-        if not match:
-            return cls._paragraph(title, style="Heading1", align="center", bold=True, size=14)
-        first = match.group(1).upper()
-        second = match.group(2).upper()
-        return (
-            '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/>'
-            '<w:spacing w:before="240" w:after="120" w:line="360" w:lineRule="auto"/></w:pPr>'
-            f'{cls._run(first, bold=True, size=14)}'
-            '<w:r><w:br/></w:r>'
-            f'{cls._run(second, bold=True, size=14)}'
-            '</w:p>'
-        )
-
     @staticmethod
     def _page_break() -> str:
         return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
@@ -126,6 +115,14 @@ class DocumentEngine:
             '<w:r><w:t>Daftar isi akan diperbarui saat dokumen dibuka di Microsoft Word.</w:t></w:r>'
             '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
         )
+
+    @staticmethod
+    def _chapter_title(title: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (title or "").strip())
+        match = re.match(r"^(BAB\s+[IVXLCDM]+)\s+(.+)$", cleaned, flags=re.IGNORECASE)
+        if not match:
+            return title
+        return f"{match.group(1).upper()}\n{match.group(2).upper()}"
 
     @staticmethod
     def _styles_xml() -> str:
@@ -193,47 +190,44 @@ class DocumentEngine:
 
     def _document_xml(self, spec: MakalahSpec) -> str:
         body: list[str] = []
-
-        # COVER — mengikuti gaya referensi pelanggan: judul, tugas, pembimbing, kelompok/penulis, kelas, sekolah, tahun ajaran.
         body.append(self._paragraph("MAKALAH", align="center", bold=True, size=16, after=220))
         body.append(self._paragraph(spec.title.upper(), align="center", bold=True, size=16, after=260))
-        body.append(self._paragraph(f"Disusun untuk Memenuhi Tugas Mata Pelajaran/Mata Kuliah {spec.subject}", align="center", after=100))
+        body.append(self._paragraph(f"Disusun untuk Memenuhi Tugas Mata Pelajaran/Mata Kuliah {spec.subject}", align="center", after=120))
         if spec.teacher:
-            body.append(self._paragraph(f"Guru/Dosen Pembimbing: {spec.teacher}", align="center", after=180))
-        body.append(self._paragraph("Disusun Oleh:", align="center", bold=True, after=80))
+            body.append(self._paragraph(f"Guru/Dosen Pembimbing: {spec.teacher}", align="center", after=160))
+
+        if spec.group_name or spec.members or spec.author:
+            body.append(self._paragraph("Disusun Oleh:", align="center", bold=True, after=80))
         if spec.group_name:
-            body.append(self._paragraph(spec.group_name, align="center", bold=True, after=50))
-        if spec.group_members:
-            for member in spec.group_members:
+            body.append(self._paragraph(spec.group_name, align="center", bold=True, after=60))
+        if spec.members:
+            for member in spec.members:
                 if member.strip():
-                    body.append(self._paragraph(member.strip(), align="center", after=30))
+                    body.append(self._paragraph(member.strip(), align="center", after=30, line=240))
         elif spec.author:
             body.append(self._paragraph(spec.author, align="center", after=80))
-        body.append(self._paragraph(f"KELAS: {spec.class_semester}", align="center", bold=True, after=160))
+
+        body.append(self._paragraph(f"KELAS/SEMESTER: {spec.class_semester}", align="center", bold=True, after=90))
         body.append(self._paragraph(spec.institution.upper(), align="center", bold=True, after=80))
-        if spec.academic_year:
-            body.append(self._paragraph(f"TAHUN AJARAN {spec.academic_year}", align="center", bold=True, after=80))
+        body.append(self._paragraph(spec.year or str(datetime.now().year), align="center", bold=True, after=80))
         body.append(self._page_break())
 
-        # Bagian awal seperti referensi: Kata Pengantar lalu Daftar Isi.
         if spec.preface:
-            body.append(self._paragraph("KATA PENGANTAR", style="Heading1", align="center", bold=True, size=14))
+            body.append(self._paragraph("KATA PENGANTAR", align="center", bold=True, size=14, after=220))
             for paragraph in spec.preface:
                 if paragraph.strip():
                     body.append(self._paragraph(paragraph.strip(), align="both"))
             body.append(self._page_break())
 
-        body.append(self._paragraph("DAFTAR ISI", style="Heading1", align="center", bold=True, size=14))
+        body.append(self._paragraph("DAFTAR ISI", align="center", bold=True, size=14))
         body.append(self._toc())
         body.append(self._page_break())
 
-        # Isi: BAB ditampilkan dua baris (BAB I / PENDAHULUAN), subbab tetap 1.1, 1.2, dst.
         for section in spec.sections:
             level = max(1, min(int(section.level or 1), 3))
-            if level == 1 and re.match(r"^\s*BAB\s+[IVXLCDM0-9]+\b", section.title, flags=re.IGNORECASE):
-                body.append(self._chapter_heading(section.title))
-            else:
-                body.append(self._paragraph(section.title, style=f"Heading{level}", align="left", bold=True, size=14 if level == 1 else 12))
+            title = self._chapter_title(section.title) if level == 1 else section.title
+            align = "center" if level == 1 and title != section.title else "left"
+            body.append(self._paragraph(title, style=f"Heading{level}", align=align, bold=True, size=14 if level == 1 else 12))
             for paragraph in section.paragraphs:
                 if paragraph.strip():
                     body.append(self._paragraph(paragraph.strip(), align="both"))
@@ -269,11 +263,7 @@ class DocumentEngine:
 
     @staticmethod
     def convert_to_pdf(docx_path: Path, timeout: int = 75) -> tuple[Path | None, str]:
-        """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia.
-
-        Path dikirim lewat environment variable, bukan argumen -Command PowerShell.
-        Ini menghindari kasus $args kosong/berubah ketika script inline dieksekusi.
-        """
+        """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia."""
         if os.name != "nt":
             return None, "PDF belum dibuat: konversi Word COM hanya tersedia di Windows pada tahap ini."
 
@@ -354,36 +344,38 @@ def demo_spec() -> MakalahSpec:
     return MakalahSpec(
         order_id="DEMO-MAKALAH",
         title="Pencemaran Lingkungan",
-        institution="MAN Contoh Padangsidimpuan",
-        class_semester="XI MIPA 3",
+        institution="Taqi DocuTech - Dokumen Uji",
+        class_semester="XI",
         subject="Biologi",
+        teacher="Contoh Guru",
         group_name="Kelompok 4",
-        group_members=("Anggota Satu", "Anggota Dua", "Anggota Tiga"),
-        teacher="Nama Guru, S.Pd.",
-        academic_year="2026/2027",
+        members=("Anggota Satu", "Anggota Dua", "Anggota Tiga"),
+        year=str(datetime.now().year),
         preface=(
-            "Puji syukur kehadirat Tuhan Yang Maha Esa atas rahmat-Nya sehingga makalah ini dapat diselesaikan.",
-            "Makalah ini disusun untuk memenuhi tugas mata pelajaran Biologi dan membahas pencemaran lingkungan secara ringkas.",
-            "Kami menyadari makalah ini masih memiliki kekurangan. Kritik dan saran sangat diharapkan untuk perbaikan.",
+            "Puji syukur kami panjatkan ke hadirat Tuhan Yang Maha Esa karena makalah ini dapat diselesaikan dengan baik.",
+            "Makalah ini dibuat sebagai dokumen uji untuk memastikan struktur cover, kata pengantar, daftar isi, BAB, dan subbab dapat dibentuk otomatis oleh Taqi AI.",
         ),
         sections=(
             DocumentSection("BAB I PENDAHULUAN", (), 1),
             DocumentSection("1.1 Latar Belakang", (
                 "Pencemaran lingkungan merupakan perubahan kondisi lingkungan akibat masuknya zat, energi, atau komponen lain yang dapat menurunkan kualitas lingkungan.",
-                "Dokumen ini hanya contoh untuk menguji format Document Engine Taqi AI.",
             ), 2),
             DocumentSection("1.2 Rumusan Masalah", (
-                "Bagaimana dampak pencemaran lingkungan terhadap kehidupan manusia dan ekosistem?",
+                "Rumusan masalah disusun untuk menentukan pokok persoalan yang akan dibahas dalam makalah.",
             ), 2),
-            DocumentSection("BAB II PEMBAHASAN", (
+            DocumentSection("1.3 Tujuan", (
+                "Tujuan penulisan makalah ini adalah menjelaskan penyebab, dampak, dan upaya mengurangi pencemaran lingkungan.",
+            ), 2),
+            DocumentSection("BAB II PEMBAHASAN", (), 1),
+            DocumentSection("2.1 Jenis Pencemaran", (
                 "Pencemaran dapat terjadi pada air, udara, dan tanah. Setiap jenis pencemaran memerlukan penanganan yang berbeda.",
-            ), 1),
+            ), 2),
             DocumentSection("BAB III PENUTUP", (), 1),
             DocumentSection("3.1 Kesimpulan", (
                 "Upaya pencegahan pencemaran membutuhkan kesadaran bersama dan pengelolaan lingkungan yang bertanggung jawab.",
             ), 2),
             DocumentSection("3.2 Saran", (
-                "Masyarakat perlu menjaga lingkungan dan mengurangi sumber pencemaran dalam kehidupan sehari-hari.",
+                "Masyarakat perlu mengurangi sumber pencemar dan menjaga kebersihan lingkungan secara konsisten.",
             ), 2),
         ),
     )

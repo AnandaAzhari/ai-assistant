@@ -62,11 +62,11 @@ def demo_spec() -> MakalahSpec:
         author="Contoh Siswa",
         teacher="Contoh Guru",
         year=str(datetime.now().year),
-        preface=("Dokumen ini dibuat khusus untuk menguji footnote dan daftar pustaka otomatis.",),
+        preface=("Dokumen ini dibuat khusus untuk menguji footnote, daftar pustaka, dan nomor halaman otomatis.",),
         sections=(
-            DocumentSection("BAB I PENDAHULUAN", (), 1),
+            DocumentSection("I. Pendahuluan", (), 1),
             DocumentSection(
-                "1.1 Latar Belakang",
+                "A. Latar Belakang",
                 (
                     "Pencemaran lingkungan perlu dipahami melalui pembelajaran yang menghubungkan konsep dengan masalah nyata.[[R1]]",
                     "Pencegahan pencemaran juga berkaitan dengan pengaturan dan penegakan hukum lingkungan.[[R2]]",
@@ -74,14 +74,17 @@ def demo_spec() -> MakalahSpec:
                 ),
                 2,
             ),
-            DocumentSection("BAB II PEMBAHASAN", (), 1),
-            DocumentSection(
-                "2.1 Upaya Pencegahan",
-                ("Upaya pencegahan membutuhkan pendekatan pendidikan dan regulasi yang saling mendukung.[[R1]][[R2]]",),
-                2,
-            ),
-            DocumentSection("BAB III PENUTUP", (), 1),
-            DocumentSection("3.1 Kesimpulan", ("Pencegahan pencemaran memerlukan keterlibatan berbagai pihak.",), 2),
+            DocumentSection("B. Rumusan Masalah", ("Bagaimana upaya pencegahan pencemaran lingkungan?",), 2),
+            DocumentSection("II. Tinjauan Pustaka", (), 1),
+            DocumentSection("A. Konsep Pencemaran", ("Pencemaran berkaitan dengan perubahan kualitas lingkungan.[[R1]]",), 2),
+            DocumentSection("1. Upaya Pencegahan", ("Upaya pencegahan membutuhkan pendekatan pendidikan dan regulasi yang saling mendukung.[[R1]][[R2]]",), 3),
+            DocumentSection("III. Metodologi Penelitian", (), 1),
+            DocumentSection("A. Jenis Penelitian", ("Makalah contoh ini menggunakan kajian pustaka sederhana.",), 2),
+            DocumentSection("IV. Hasil Penelitian dan Pembahasan", (), 1),
+            DocumentSection("A. Pembahasan", ("Pendidikan dan regulasi dapat saling melengkapi dalam pencegahan pencemaran.[[R1]][[R2]]",), 2),
+            DocumentSection("V. Kesimpulan dan Saran", (), 1),
+            DocumentSection("A. Kesimpulan", ("Pencegahan pencemaran memerlukan keterlibatan berbagai pihak.",), 2),
+            DocumentSection("B. Saran", ("Upaya edukasi dan penegakan aturan perlu dilakukan secara konsisten.",), 2),
         ),
     )
 

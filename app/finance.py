@@ -24,6 +24,11 @@ BUSINESSES = (
 
 CATEGORY_RULES = {
     "expense": (
+        ((
+            "top up saldo dana istri", "top up istri", "transfer istri", "kirim ke istri", "uang istri",
+            "top up saldo suami", "top up suami", "transfer suami", "kirim ke suami", "uang suami",
+            "uang anak", "untuk anak", "uang keluarga", "untuk keluarga"
+        ), "Keluarga"),
         (("tinta", "toner"), "Tinta Printer"),
         (("kertas", "hvs", "a4", "f4"), "Kertas"),
         (("internet", "wifi", "wi-fi"), "Internet"),
@@ -82,6 +87,12 @@ def parse_amount(text: str) -> int | None:
 
 
 def detect_account(text: str) -> str | None:
+    """Deteksi akun sumber pembayaran.
+
+    Frasa eksplisit seperti `pakai BNI` atau `dari BCA` diprioritaskan agar nama
+    akun yang hanya muncul sebagai tujuan/keterangan (mis. `saldo DANA istri`)
+    tidak salah dianggap sebagai akun sumber.
+    """
     lowered = text.casefold()
     aliases = {
         "cash": "Cash", "tunai": "Cash", "bca": "BCA", "bni": "BNI",
@@ -90,6 +101,12 @@ def detect_account(text: str) -> str | None:
         "gopay": "GoPay", "go pay": "GoPay", "shopeepay": "ShopeePay",
         "shopee pay": "ShopeePay",
     }
+
+    marker = r"(?:pakai|menggunakan|via|dari|akun|metode(?:\s+pembayaran)?|bayar(?:\s+pakai)?|dibayar\s+dengan)"
+    for alias in sorted(aliases, key=len, reverse=True):
+        if re.search(rf"(?<!\w){marker}\s+{re.escape(alias)}(?!\w)", lowered):
+            return aliases[alias]
+
     for alias in sorted(aliases, key=len, reverse=True):
         if re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", lowered):
             return aliases[alias]
@@ -97,6 +114,12 @@ def detect_account(text: str) -> str | None:
 
 
 def detect_business(text: str) -> str | None:
+    """Deteksi unit usaha atau konteks Personal.
+
+    Nama usaha eksplisit selalu menang. Untuk catatan rumah tangga yang jelas,
+    seperti top up untuk istri/anak, sistem dapat menyimpulkan `Personal`
+    tanpa memaksa user menulis kata Personal setiap kali.
+    """
     lowered = text.casefold()
     aliases = {
         "taqi docutech": "Taqi DocuTech", "docutech": "Taqi DocuTech",
@@ -109,6 +132,16 @@ def detect_business(text: str) -> str | None:
     for alias in sorted(aliases, key=len, reverse=True):
         if alias in lowered:
             return aliases[alias]
+
+    personal_patterns = (
+        r"\b(?:top\s*up|transfer|kirim|uang|saldo)\b.*\b(?:istri|suami|anak)\b",
+        r"\b(?:beli|belanja|bayar)\b.*\b(?:untuk|buat)\s+(?:istri|suami|anak|keluarga)\b",
+        r"\b(?:untuk|buat|ke)\s+(?:istri|suami|anak|keluarga)\b",
+        r"\bkebutuhan\s+(?:rumah|keluarga|pribadi)\b",
+        r"\brumah\s+tangga\b",
+    )
+    if any(re.search(pattern, lowered) for pattern in personal_patterns):
+        return "Personal"
     return None
 
 
@@ -489,7 +522,8 @@ class FinanceService:
                 return FinanceResult(
                     "needs_review",
                     "Belum saya catat. Mohon lengkapi: " + ", ".join(missing) + ".\n"
-                    "Contoh: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.",
+                    "Contoh usaha: Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA.\n"
+                    "Contoh personal: Catat pengeluaran 300 ribu top up saldo DANA istri pakai BNI.",
                 )
             category, category_new = self.resolve_category(raw, kind)
             if not category:

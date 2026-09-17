@@ -61,7 +61,8 @@ class MakalahCoverData:
             "lanjut", "lanjutkan", "setuju", "oke", "ok", "iya", "ya", "boleh", "skip",
             "individu", "kelompok", "sekolah", "kampus", "universitas", "instansi",
             "guru", "dosen", "tahun", "ajaran", "akademik", "tidak", "ada", "buat",
-            "file", "word", "pdf", "sudah", "cukup",
+            "file", "word", "pdf", "sudah", "cukup", "nama", "saya", "bernama", "atas",
+            "penyusun", "siswa", "murid", "anggota",
         }
         lowered_words = {word.casefold().strip(".,") for word in words}
         if lowered_words & blocked:
@@ -340,7 +341,7 @@ class MakalahCoverData:
 
         return (
             "Sebelum saya buat isi makalah, saya masih perlu satu data wajib:\n"
-            f"**{question}**\n\n{hint}\n\n"
+            f"{question}\n\n{hint}\n\n"
             "Data cover lain boleh dikirim lebih dulu atau belakangan dan tidak harus berurutan, "
             "misalnya sekolah/kampus, tahun ajaran, atau nama guru/dosen."
         )

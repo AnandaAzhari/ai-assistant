@@ -99,6 +99,16 @@ class DocumentCoverLoopTests(unittest.TestCase):
         self.assertEqual(cover.author_name, "Ananda Azhari Batubara")
         self.assertTrue(cover.complete)
 
+    def test_explicit_student_name_can_be_sent_before_assignment_type(self):
+        cover = MakalahCoverData()
+
+        clarification = cover.update("Nama saya Ananda Azhari Batubara", expected_field="assignment_type")
+
+        self.assertEqual(clarification, "")
+        self.assertEqual(cover.author_name, "Ananda Azhari Batubara")
+        self.assertEqual(cover.assignment_type, "")
+        self.assertEqual(cover.next_required_field(), "assignment_type")
+
     def test_academic_year_can_be_answered_before_assignment_type(self):
         cover = MakalahCoverData()
 

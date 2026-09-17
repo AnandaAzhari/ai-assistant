@@ -128,6 +128,17 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Setelah kerangka dibuat, sistem menambahkan petunjuk balasan pelanggan secara deterministik. Jangan mengandalkan model untuk selalu menulis petunjuk ini karena output model dapat mencapai batas provider.
 - Kerangka tidak boleh sengaja dipotong oleh batas kecil aplikasi. Runtime Document Agent memakai batas keluaran tinggi sesuai ceiling provider agar kerangka dapat selesai; provider/model tetap memiliki batas teknis maksimum yang tidak dapat dibuat benar-benar tak terbatas.
 
+## Loop data cover
+
+- Data cover **tidak dikunci permanen** hanya karena data wajib sudah lengkap.
+- Pelanggan boleh menambah atau mengoreksi nama sekolah/kampus, tahun ajaran, nama guru/dosen, nama/nomor kelompok, atau data cover lain selama order masih aktif dan file final belum dikunci.
+- Nilai seperti `Tidak dicantumkan` boleh diganti oleh nilai nyata yang diberikan pelanggan kemudian.
+- Untuk pola yang jelas, gunakan parser lokal di `app/document_cover.py` tanpa token AI.
+- Pelanggan tidak wajib memakai format `Label: Nilai`; bahasa seperti `Nama Sekolah SMK Negeri 2 Padangsidimpuan`, `tahun ajaran 2026/2027`, atau `Nama Guru Purnama Sari` harus dapat dipahami.
+- Fase `ready_for_draft` tetap memanggil parser cover pada setiap pesan, sehingga data opsional dapat ditambahkan belakangan tanpa reset sesi.
+- AI fallback hanya diperlukan jika bahasa pelanggan benar-benar ambigu dan tidak aman dipetakan secara lokal.
+- Referensi detail implementasi: `skills/document_academic/COVER_DATA.md`.
+
 ## Referensi awal fallback
 
 Referensi ini dipakai sebagai dasar awal, bukan sebagai pengganti pedoman institusi:

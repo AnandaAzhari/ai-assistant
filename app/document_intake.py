@@ -1,8 +1,8 @@
-"""Fallback AI ringan untuk memahami bahasa pelanggan saat parser lokal ragu.
+"""AI-first interpreter untuk MakalahBrief.
 
-Prinsip: parser lokal tetap utama dan gratis. AI hanya membantu mengisi field yang
-masih kosong dari pesan pelanggan yang ambigu/typo. Output harus JSON kecil dan tidak
-boleh mengarang data yang tidak disebutkan pelanggan.
+Model memahami bahasa pelanggan, typo, urutan acak, dan koreksi. Kode aplikasi tetap
+memegang schema/state dan hanya menerima JSON terstruktur. Field yang tidak disebut
+pada pesan terbaru wajib null agar data lama tidak tertimpa tanpa alasan.
 """
 
 from __future__ import annotations
@@ -14,26 +14,47 @@ from dataclasses import dataclass
 from app.providers.base import ModelProvider
 
 
-INTAKE_PROMPT = """Kamu adalah interpreter data pelanggan untuk layanan makalah.
-Tugasmu HANYA mengekstrak data yang benar-benar disebutkan pelanggan.
-Jangan membuat judul, kelas, sekolah, mata pelajaran, jumlah halaman, atau arahan yang tidak disebutkan.
-Jika pelanggan mengatakan judul/topik belum ada, isi topic_title dengan null.
-Jika ada typo ringan, pahami maksudnya secara wajar.
+INTAKE_PROMPT = """Kamu adalah interpreter MakalahBrief untuk Document Agent Taqi DocuTech.
+Tugasmu memahami PESAN PELANGGAN TERBARU dan mengubahnya menjadi update data terstruktur.
 
-Keluarkan JSON VALID SAJA dengan key berikut:
+ATURAN WAJIB:
+- pahami bahasa Indonesia natural, singkatan chat, typo ringan, dan urutan informasi yang acak;
+- ekstrak hanya informasi yang benar-benar disebut atau dikoreksi pada PESAN TERBARU;
+- untuk field yang tidak disebut pada pesan terbaru, isi null; JANGAN mengulang data lama hanya karena ada di konteks;
+- jika pelanggan mengoreksi data lama, kembalikan nilai terbaru pada field tersebut;
+- jika koreksi hanya menyebut sebagian nilai gabungan, gunakan DATA TERSIMPAN untuk menjaga bagian yang masih berlaku.
+  Contoh: data lama `Kelas XII, Semester 1`, pesan baru `eh salah semester 2` -> `class_semester` menjadi `Kelas XII, Semester 2`;
+- `Informatika, SMK, XII semseter 1` harus dipahami sebagai subject=Informatika, institution_level=SMK, class_semester=`Kelas XII, Semester 1`;
+- jangan mengarang judul, fokus, sumber, kelas, sekolah, atau arahan yang tidak disebut pelanggan;
+- jika pelanggan mengatakan topik/judul belum ada, isi topic_title dengan null;
+- fokus, tingkat bahasa, ketentuan sumber, sitasi, hal wajib/larangan, dan pedoman resmi bersifat opsional;
+- keluarkan JSON VALID SAJA, tanpa Markdown dan tanpa penjelasan.
+
+Gunakan semua key berikut:
 {
   "institution_level": null,
   "class_semester": null,
   "subject": null,
   "topic_title": null,
+  "target_length": null,
   "teacher_instructions": null,
-  "target_length": null
+  "focus": null,
+  "language_level": null,
+  "source_requirements": null,
+  "citation_style": null,
+  "must_include": null,
+  "must_avoid": null,
+  "official_guideline": null
 }
 
-Contoh:
-Pesan: "SMK, XII semester 2, mapel Informatika, judul belum, jumlah 8 halaman"
-Hasil:
-{"institution_level":"SMK","class_semester":"Kelas XII, Semester 2","subject":"Informatika","topic_title":null,"teacher_instructions":null,"target_length":"8 halaman"}
+NORMALISASI PRAKTIS:
+- `XII semseter 1`, `kelas 12 semester 1` -> `Kelas XII, Semester 1` bila maksudnya jelas;
+- `8 hal`, `8 hlm`, `8 halaman` -> `8 halaman`;
+- `SMK`, `SMA`, `SMP`, `SD`, `kuliah` boleh langsung menjadi institution_level;
+- nama mata pelajaran boleh disebut tanpa kata `mapel`, misalnya hanya `Informatika`;
+- `bahas yang mudah dipahami` dapat menjadi language_level=`sederhana/mudah dipahami`;
+- `pakai sumber 5 tahun terakhir` dapat menjadi source_requirements=`sumber maksimal 5 tahun terakhir`;
+- jangan membuat nilai default untuk field opsional bila pelanggan tidak menyebutkannya.
 """
 
 
@@ -48,28 +69,24 @@ class IntakeResult:
 
 
 class IntakeInterpreter:
+    ALLOWED_FIELDS = {
+        "institution_level", "class_semester", "subject", "topic_title",
+        "target_length", "teacher_instructions", "focus", "language_level",
+        "source_requirements", "citation_style", "must_include", "must_avoid",
+        "official_guideline",
+    }
+
     def __init__(self, provider: ModelProvider):
         self.provider = provider
 
     @staticmethod
-    def should_use(raw: str, missing_fields: list[str]) -> bool:
-        """Panggil AI hanya bila pesan tampak menyebut field yang parser lokal masih lewatkan."""
+    def should_use(raw: str, missing_fields: list[str] | None = None) -> bool:
+        """Kompatibilitas lama: pada fase briefing semua pesan natural boleh diinterpretasi AI."""
         text = re.sub(r"\s+", " ", (raw or "").strip())
-        if not text or not missing_fields or text.startswith("/"):
-            return False
-        lowered = text.casefold()
-        cues = {
-            "institution_level": r"\b(?:sd|mi|smp|mts|sma|ma|man|smk|kampus|kuliah|universitas|perguruan)\b",
-            "class_semester": r"\b(?:kelas|semester|[ivxlcdm]{1,7}|\d{1,2})\b",
-            "subject": r"\b(?:mapel|mata\s+pelajaran|mata\s+kuliah|pelajaran|kuliah)\b",
-            "topic_title": r"\b(?:makalah|judul|topik|tentang|tentan|tenteng)\b",
-            "teacher_instructions": r"\b(?:arahan|instruksi|ketentuan|guru|dosen)\b",
-            "target_length": r"\b(?:halaman|page|pages|kata|jumlah|target|panjang)\b",
-        }
-        return any(re.search(cues.get(field, r"$^"), lowered, re.IGNORECASE) for field in missing_fields)
+        return bool(text and not text.startswith("/"))
 
-    @staticmethod
-    def _extract_json(text: str) -> dict[str, object]:
+    @classmethod
+    def _extract_json(cls, text: str) -> dict[str, object]:
         clean = (text or "").strip()
         clean = re.sub(r"^```(?:json)?\s*", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"\s*```$", "", clean)
@@ -80,11 +97,7 @@ class IntakeInterpreter:
         payload = json.loads(clean[start:end + 1])
         if not isinstance(payload, dict):
             raise ValueError("JSON interpreter harus berupa object.")
-        allowed = {
-            "institution_level", "class_semester", "subject", "topic_title",
-            "teacher_instructions", "target_length",
-        }
-        return {key: payload.get(key) for key in allowed}
+        return {key: payload.get(key) for key in cls.ALLOWED_FIELDS}
 
     def interpret(self, raw: str, current_text: str) -> IntakeResult:
         if not self.provider or not self.provider.configured:
@@ -93,11 +106,11 @@ class IntakeInterpreter:
             {"role": "system", "content": INTAKE_PROMPT},
             {
                 "role": "user",
-                "content": "DATA YANG SUDAH TERSIMPAN:\n" + current_text[:1800]
-                + "\n\nPESAN PELANGGAN BARU:\n" + (raw or "")[:1800],
+                "content": "DATA TERSIMPAN SAAT INI:\n" + current_text[:3500]
+                + "\n\nPESAN PELANGGAN TERBARU:\n" + (raw or "")[:2500],
             },
         ]
-        reply = self.provider.generate(messages, max_tokens=220, temperature=0.0, timeout=25)
+        reply = self.provider.generate(messages, max_tokens=500, temperature=0.0, timeout=25)
         if reply.status != "berhasil":
             return IntakeResult(
                 reply.status, {}, model=reply.model, input_tokens=reply.input_tokens,

@@ -28,6 +28,9 @@ ATURAN WAJIB:
 - jangan mengarang judul, fokus, sumber, kelas, sekolah, atau arahan yang tidak disebut pelanggan;
 - jika pelanggan mengatakan topik/judul belum ada, isi topic_title dengan null;
 - fokus, tingkat bahasa, ketentuan sumber, sitasi, hal wajib/larangan, dan pedoman resmi bersifat opsional;
+- preferensi teknis pengulangan catatan kaki seperti `jangan pakai Ibid`, `tanpa Ibid`, `pakai Ibid`, atau `gunakan short note` ditangani oleh DocumentPreferenceStore. JANGAN masukkan Ibid/short-note ke `must_avoid`, `must_include`, atau field isi akademik lain;
+- `must_avoid` hanya untuk larangan isi atau pembahasan, misalnya `jangan bahas sejarah AI`;
+- `citation_style` hanya untuk gaya sitasi yang benar-benar disebut pelanggan, misalnya APA, MLA, Chicago, IEEE; bukan untuk Ibid/short note;
 - keluarkan JSON VALID SAJA, tanpa Markdown dan tanpa penjelasan.
 
 Gunakan semua key berikut:
@@ -54,6 +57,7 @@ NORMALISASI PRAKTIS:
 - nama mata pelajaran boleh disebut tanpa kata `mapel`, misalnya hanya `Informatika`;
 - `bahas yang mudah dipahami` dapat menjadi language_level=`sederhana/mudah dipahami`;
 - `pakai sumber 5 tahun terakhir` dapat menjadi source_requirements=`sumber maksimal 5 tahun terakhir`;
+- `jangan pakai Ibid` -> semua field MakalahBrief terkait isi tetap null; preferensi tersebut ditangani modul lain;
 - jangan membuat nilai default untuk field opsional bila pelanggan tidak menyebutkannya.
 """
 

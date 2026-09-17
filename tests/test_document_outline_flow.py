@@ -12,8 +12,16 @@ class FakeProvider:
     provider_name = "FakeAI"
     model_name = "fake-model"
 
-    def __init__(self):
+    def __init__(self, response_text=None):
         self.calls = []
+        self.response_text = response_text or (
+            "## Usulan Fokus\n"
+            "Pengenalan AI Agent, cara kerja, penerapan, manfaat, dan tantangannya.\n\n"
+            "## Kerangka Makalah\n"
+            "COVER\nKATA PENGANTAR\nDAFTAR ISI\nBAB I — PENDAHULUAN\n"
+            "BAB II — PEMBAHASAN\nBAB III — PENUTUP\nDAFTAR PUSTAKA\n\n"
+            "<!-- TAQI_PROPOSED_FOCUS: Pengenalan AI Agent, cara kerja, penerapan, manfaat, dan tantangannya -->"
+        )
 
     def generate(self, messages, *, max_tokens=1200, temperature=0.4, timeout=45):
         self.calls.append({
@@ -24,7 +32,7 @@ class FakeProvider:
         })
         return ModelReply(
             "berhasil",
-            "Ringkasan lengkap.\n\nKerangka lengkap sampai DAFTAR PUSTAKA.",
+            self.response_text,
             self.provider_name,
             self.model_name,
             100,
@@ -45,13 +53,19 @@ class FakeResearch:
 
 
 class DocumentOutlineFlowTests(unittest.TestCase):
-    def make_agent(self, tmp: str):
-        return DocumentAgent(
-            FakeProvider(),
+    def make_agent(self, tmp: str, response_text=None):
+        agent = DocumentAgent(
+            FakeProvider(response_text),
             research=FakeResearch(),
             registry=FakeRegistry(),
             preference_store=DocumentPreferenceStore(Path(tmp) / "prefs.db"),
         )
+        agent.brief.institution_level = "SMK"
+        agent.brief.class_semester = "Kelas XII, Semester 1"
+        agent.brief.subject = "Informatika"
+        agent.brief.topic_title = "AI Agent"
+        agent.brief.target_length = "8 halaman"
+        return agent
 
     def test_outline_uses_provider_ceiling_instead_of_old_850_limit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -62,14 +76,47 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             self.assertEqual(agent.provider.calls[-1]["max_tokens"], OUTLINE_MAX_TOKENS)
             self.assertEqual(OUTLINE_MAX_TOKENS, 8000)
 
-    def test_outline_always_has_clear_local_reply_hint(self):
+    def test_outline_has_deterministic_customer_summary_and_reply_hint(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self.make_agent(tmp)
             result = agent._generate_outline("buat kerangka")
 
+            self.assertIn("## Ringkasan Kebutuhan", result.text)
+            self.assertIn("Jenjang: SMK", result.text)
+            self.assertIn("Kelas/semester: Kelas XII, Semester 1", result.text)
+            self.assertIn("Mata pelajaran/mata kuliah: Informatika", result.text)
+            self.assertIn("Topik/judul: AI Agent", result.text)
+            self.assertIn("Target: 8 halaman", result.text)
             self.assertIn("lanjutkan", result.text)
             self.assertIn("sudah sesuai", result.text)
             self.assertIn("Jika ingin diubah", result.text)
+
+    def test_outline_hides_focus_marker_but_keeps_proposed_focus_in_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp)
+            result = agent._generate_outline("buat kerangka")
+
+            self.assertNotIn("TAQI_PROPOSED_FOCUS", result.text)
+            self.assertEqual(
+                agent._proposed_focus,
+                "Pengenalan AI Agent, cara kerja, penerapan, manfaat, dan tantangannya",
+            )
+            self.assertEqual(agent.brief.focus, "")
+
+    def test_technical_note_section_is_removed_from_customer_output(self):
+        response = (
+            "## Usulan Fokus\nFokus singkat.\n\n"
+            "## Kerangka Makalah\nBAB I\nBAB II\nBAB III\nDAFTAR PUSTAKA\n\n"
+            "## Catatan Penyusunan\nHeading 1, reset nomor halaman, TOC 1-3.\n\n"
+            "<!-- TAQI_PROPOSED_FOCUS: Fokus singkat -->"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp, response)
+            result = agent._generate_outline("buat kerangka")
+
+            self.assertNotIn("Catatan Penyusunan", result.text)
+            self.assertNotIn("reset nomor halaman", result.text)
+            self.assertNotIn("TOC 1-3", result.text)
 
     def test_natural_approval_variants_are_local(self):
         approved = (
@@ -98,18 +145,38 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertFalse(DocumentAgent._outline_approved(message))
 
-    def test_lanjutkan_moves_to_cover_without_second_ai_call(self):
+    def test_lanjutkan_locks_proposed_focus_then_moves_to_cover_without_ai_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self.make_agent(tmp)
             agent.phase = "outline_confirmation"
             agent._outline_text = "Kerangka sudah ada."
+            agent._proposed_focus = "Penerapan AI Agent di sekolah"
 
             result = agent.handle("lanjutkan")
 
             self.assertEqual(result.status, "needs_cover")
             self.assertEqual(agent.phase, "cover")
+            self.assertEqual(agent.brief.focus, "Penerapan AI Agent di sekolah")
+            self.assertEqual(agent._proposed_focus, "")
             self.assertEqual(agent.provider.calls, [])
+            self.assertIn("Fokus kerangka disetujui", result.text)
+            self.assertIn("Penerapan AI Agent di sekolah", result.text)
             self.assertIn("cover", result.text.casefold())
+
+    def test_customer_focus_is_never_overwritten_by_model_proposal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp)
+            agent.brief.focus = "AI Agent untuk pembelajaran"
+            agent.phase = "outline_confirmation"
+            agent._outline_text = "Kerangka sudah ada."
+            agent._proposed_focus = "Fokus buatan model yang berbeda"
+
+            result = agent.handle("lanjutkan")
+
+            self.assertEqual(result.status, "needs_cover")
+            self.assertEqual(agent.brief.focus, "AI Agent untuk pembelajaran")
+            self.assertNotIn("Fokus kerangka disetujui", result.text)
+            self.assertEqual(agent.provider.calls, [])
 
 
 if __name__ == "__main__":

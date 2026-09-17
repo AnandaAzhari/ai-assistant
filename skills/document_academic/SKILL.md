@@ -119,6 +119,15 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Fallback visual level-4 tidak dibuat dengan karakter TAB manual; engine harus menggunakan `left indent` dan `first-line indent` Word.
 - Untuk Makalah, field TOC default hanya mengambil Heading 1 sampai Heading 3; Heading 4 tetap tersedia di dokumen tetapi tidak tampil di Daftar Isi kecuali pedoman resmi meminta.
 
+## Interaksi pelanggan saat persetujuan kerangka
+
+- Pelanggan **tidak wajib** mengetahui kata khusus seperti `setuju` dan tidak boleh diwajibkan memakai slash command.
+- Bahasa natural seperti `lanjutkan`, `lanjut aja`, `lanjut saja`, `oke lanjut`, `boleh lanjut`, `sudah sesuai`, `sudah pas`, `iya`, atau ungkapan persetujuan yang setara dapat dipakai untuk menyetujui kerangka.
+- Kalimat yang mengandung revisi seperti `lanjutkan tapi ubah BAB II`, `belum sesuai`, `jangan lanjut dulu`, `tolong revisi`, `tambahkan`, `hapus`, atau `ganti` **tidak boleh** dianggap persetujuan.
+- Persetujuan sederhana harus diproses lokal tanpa memanggil model AI lagi.
+- Setelah kerangka dibuat, sistem menambahkan petunjuk balasan pelanggan secara deterministik. Jangan mengandalkan model untuk selalu menulis petunjuk ini karena output model dapat mencapai batas provider.
+- Kerangka tidak boleh sengaja dipotong oleh batas kecil aplikasi. Runtime Document Agent memakai batas keluaran tinggi sesuai ceiling provider agar kerangka dapat selesai; provider/model tetap memiliki batas teknis maksimum yang tidak dapat dibuat benar-benar tak terbatas.
+
 ## Referensi awal fallback
 
 Referensi ini dipakai sebagai dasar awal, bukan sebagai pengganti pedoman institusi:

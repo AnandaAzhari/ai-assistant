@@ -1,9 +1,13 @@
-"""Document/Makalah Agent v2.0.
+"""Document/Makalah Agent v2.1.
 
 MakalahBrief menjadi schema pusat kebutuhan pelanggan. AI dipakai lebih dulu untuk
 memahami bahasa natural, typo, urutan acak, dan koreksi; kode deterministik tetap
 memegang state, validasi, fallback lokal, cover, research registry, serta pembuatan
 Word/PDF. DeepSeek dipakai untuk interpretasi briefing, kerangka, dan isi makalah.
+
+Outline UX v2 memisahkan ringkasan pelanggan dari detail teknis internal. Jika fokus
+belum diberikan pelanggan, model boleh mengusulkan fokus; usulan baru dikunci ke
+MakalahBrief setelah pelanggan menyetujui kerangka.
 """
 
 from __future__ import annotations
@@ -30,6 +34,11 @@ from app.source_registry import SourceRegistry
 
 
 OUTLINE_MAX_TOKENS = 8000
+OUTLINE_FOCUS_MARKER = "TAQI_PROPOSED_FOCUS"
+OUTLINE_FOCUS_RE = re.compile(
+    r"<!--\s*TAQI_PROPOSED_FOCUS\s*:\s*(.*?)\s*-->",
+    re.IGNORECASE | re.DOTALL,
+)
 OUTLINE_ACTION_HINT = (
     "\n\n---\n"
     "Jika kerangkanya sudah sesuai, cukup balas dengan bahasa biasa seperti "
@@ -48,26 +57,42 @@ COVER_FIELD_LABELS = (
 )
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
-MakalahBrief sudah diperiksa oleh sistem dan data inti sudah cukup.
+MakalahBrief sudah diperiksa sistem dan data inti sudah cukup.
 
-Tugasmu pada tahap ini HANYA membuat ringkasan singkat dan kerangka makalah.
-Aturan:
+Tugasmu pada tahap ini HANYA membuat bagian customer-facing berikut:
+1. `## Usulan Fokus` — HANYA jika fokus MakalahBrief masih kosong.
+2. `## Kerangka Makalah` — struktur makalah yang ringkas dan sesuai target panjang.
+
+JANGAN membuat `Ringkasan Data` atau `Ringkasan Kebutuhan`; sistem Python menambahkannya sendiri agar tidak mencampur data pelanggan dengan default internal.
+
+ATURAN UX CUSTOMER:
 - gunakan bahasa Indonesia yang jelas dan sesuai jenjang pelanggan;
-- jangan gunakan tabel Markdown;
-- ringkasan data cukup berupa bullet singkat;
-- gunakan fokus, tingkat bahasa, ketentuan sumber, hal wajib/larangan, dan pedoman resmi dari MakalahBrief bila tersedia;
-- jika fokus belum ditentukan pelanggan, boleh USULKAN fokus yang wajar di kerangka, tetapi tandai sebagai usulan dan jangan menganggap pelanggan sudah menyetujuinya;
-- jika ada arahan guru/dosen/sekolah/kampus, arahan itu lebih penting daripada template standar;
+- jangan tampilkan detail teknis internal seperti policy, Heading 1/2/3/4, reset nomor halaman, field Word, TOC, engine, token, atau alasan implementasi;
+- jangan membuat bagian `Catatan Penyusunan`, `Catatan Teknis`, `Aturan Teknis`, atau penjelasan internal lain;
+- jangan menulis petunjuk `balas lanjutkan/setuju`; sistem menambahkannya secara deterministik;
+- jangan mengulang nilai default seolah-olah pelanggan pernah memintanya;
+- jangan menyebut gaya sitasi default bila pelanggan tidak memintanya;
 - jangan mengarang sumber atau daftar pustaka;
+- jangan meminta data cover pada jawaban ini;
+- jangan membuat isi makalah lengkap pada tahap ini.
+
+ATURAN FOKUS:
+- jika `Fokus pembahasan` pada MakalahBrief SUDAH berisi nilai, gunakan fokus itu dan JANGAN membuat `## Usulan Fokus`;
+- jika fokus masih kosong, buat satu usulan fokus yang singkat, spesifik, sesuai topik, jenjang, mata pelajaran, dan target panjang;
+- setelah usulan fokus, tambahkan marker HTML berikut PERSIS di akhir respons:
+  `<!-- TAQI_PROPOSED_FOCUS: isi fokus satu baris -->`
+- marker hanya metadata mesin. Jangan jelaskan marker kepada pelanggan;
+- jika fokus sudah ada, jangan menambahkan marker usulan fokus.
+
+ATURAN KERANGKA:
+- jika ada arahan guru/dosen/sekolah/kampus, arahan itu lebih penting daripada template standar;
+- gunakan fokus, tingkat bahasa, ketentuan sumber, hal wajib/larangan, dan pedoman resmi dari MakalahBrief bila tersedia;
 - WAJIB mengikuti policy format dokumen yang dikirim pada system message berikutnya;
-- default Makalah memakai hierarki BAB I -> A. -> 1. -> a.; tingkat 1. dan a. hanya dipakai bila benar-benar diperlukan;
-- jangan mengganti default Makalah menjadi BAB I -> 1.1 -> 1.1.1 atau I. -> A. -> 1. -> a. tanpa instruksi resmi;
-- jangan memakai bullet sebagai pengganti heading;
+- default Makalah memakai hierarki BAB I -> A. -> 1. -> a.; level 1. dan a. hanya dipakai bila benar-benar diperlukan;
+- jangan mengganti default menjadi BAB I -> 1.1 -> 1.1.1 atau I. -> A. -> 1. -> a. tanpa instruksi resmi;
 - hormati target jumlah halaman dan jangan membuat terlalu banyak subbagian untuk dokumen pendek;
-- JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem setelah kerangka disetujui;
-- JANGAN membuat isi makalah lengkap pada tahap ini;
-- selesaikan seluruh ringkasan dan kerangka; jangan sengaja memotong bagian akhir;
-- tidak perlu menulis petunjuk kata balasan pelanggan karena sistem akan menambahkannya secara lokal setelah jawaban model.
+- sertakan COVER, KATA PENGANTAR, DAFTAR ISI, BAB I, BAB II, BAB III, dan DAFTAR PUSTAKA;
+- selesaikan seluruh kerangka; jangan sengaja memotong bagian akhir.
 """
 
 
@@ -100,6 +125,7 @@ class DocumentAgent:
         self._history: list[dict[str, str]] = []
         self._last_research: ResearchResult | None = None
         self._outline_text = ""
+        self._proposed_focus = ""
         self._draft_spec: MakalahSpec | None = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
@@ -251,6 +277,7 @@ class DocumentAgent:
         self._history.clear()
         self._last_research = None
         self._outline_text = ""
+        self._proposed_focus = ""
         self._draft_spec = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
@@ -319,10 +346,61 @@ class DocumentAgent:
         ]
         if revision:
             messages.extend(self._history[-self.history_limit:])
-            messages.append({"role": "user", "content": "Perbaiki kerangka makalah sesuai permintaan ini:\n" + raw[:4000]})
+            messages.append({"role": "user", "content": "Perbaiki fokus/kerangka sesuai permintaan pelanggan ini:\n" + raw[:4000]})
         else:
-            messages.append({"role": "user", "content": "Buat ringkasan data dan kerangka makalah sekarang."})
+            messages.append({"role": "user", "content": "Buat usulan fokus bila diperlukan dan kerangka makalah sekarang."})
         return messages
+
+    def _customer_outline_summary(self) -> str:
+        """Ringkasan deterministik: hanya data pelanggan/brief, bukan default internal."""
+        lines = [
+            "## Ringkasan Kebutuhan",
+            f"- Jenjang: {self.brief.institution_level}",
+            f"- Kelas/semester: {self.brief.class_semester}",
+            f"- Mata pelajaran/mata kuliah: {self.brief.subject}",
+            f"- Topik/judul: {self.brief.topic_title}",
+            f"- Target: {self.brief.target_length}",
+        ]
+        optional = (
+            ("Fokus pembahasan", self.brief.focus),
+            ("Arahan guru/dosen", self.brief.teacher_instructions),
+            ("Tingkat bahasa", self.brief.language_level),
+            ("Ketentuan sumber", self.brief.source_requirements),
+            ("Gaya sitasi", self.brief.citation_style),
+            ("Wajib dimasukkan", self.brief.must_include),
+            ("Harus dihindari", self.brief.must_avoid),
+            ("Pedoman/template resmi", self.brief.official_guideline),
+        )
+        for label, value in optional:
+            clean = (value or "").strip()
+            if not clean or clean.casefold() in {"tidak disebutkan", "tidak ada arahan khusus"}:
+                continue
+            lines.append(f"- {label}: {clean}")
+        if self.preferences.citation_repeat_mode == "short":
+            lines.append("- Preferensi sitasi: tanpa Ibid.; pengulangan memakai short note")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _strip_outline_noise(text: str) -> str:
+        """Guardrail output: sembunyikan metadata dan bagian teknis bila model melanggar prompt."""
+        clean = OUTLINE_FOCUS_RE.sub("", text or "")
+        clean = re.sub(
+            r"\n#{1,6}\s*(?:\d+\.\s*)?(?:Catatan Penyusunan|Catatan Teknis|Aturan Teknis|Detail Teknis)\b.*?(?=\n#{1,6}\s|\Z)",
+            "",
+            clean,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return clean.strip()
+
+    @classmethod
+    def _parse_outline_response(cls, text: str, *, focus_already_set: bool) -> tuple[str, str]:
+        proposed_focus = ""
+        if not focus_already_set:
+            match = OUTLINE_FOCUS_RE.search(text or "")
+            if match:
+                proposed_focus = re.sub(r"\s+", " ", match.group(1).strip())[:700]
+        visible = cls._strip_outline_noise(text)
+        return visible, proposed_focus
 
     def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
         if not self.configured:
@@ -336,13 +414,27 @@ class DocumentAgent:
                 "sementara_gagal",
                 "Kerangka makalah belum berhasil dibuat. Data yang Anda kirim tetap tersimpan. Cukup kirim `lanjut` untuk mencoba lagi.",
             )
+
+        visible_outline, proposed_focus = self._parse_outline_response(
+            reply.text,
+            focus_already_set=bool(self.brief.focus),
+        )
+        if not visible_outline:
+            return DocumentResult(
+                "sementara_gagal",
+                "Kerangka makalah belum berhasil dibaca dengan lengkap. Data Anda tetap tersimpan; kirim `lanjut` untuk mencoba lagi.",
+            )
+
         if revision:
             self._history.append({"role": "user", "content": raw[:4000]})
-        self._outline_text = reply.text
+        self._proposed_focus = proposed_focus if not self.brief.focus else ""
+        self._outline_text = visible_outline
         self._history.append({"role": "assistant", "content": self._outline_text})
         self._history = self._history[-self.history_limit:]
         self.phase = "outline_confirmation"
-        return DocumentResult("berhasil", reply.text.rstrip() + OUTLINE_ACTION_HINT + self._usage_note(reply))
+
+        customer_text = self._customer_outline_summary() + "\n\n" + visible_outline.rstrip()
+        return DocumentResult("berhasil", customer_text + OUTLINE_ACTION_HINT + self._usage_note(reply))
 
     @staticmethod
     def _outline_approved(raw: str) -> bool:
@@ -579,8 +671,17 @@ class DocumentAgent:
 
         if self.phase == "outline_confirmation":
             if self._outline_approved(raw):
+                approved_focus = ""
+                if self._proposed_focus and self.brief.approve_focus(self._proposed_focus):
+                    approved_focus = self.brief.focus
+                self._proposed_focus = ""
                 self.phase = "cover"
-                return DocumentResult("needs_cover", self.cover.question_text())
+                prefix = f"Fokus kerangka disetujui: **{approved_focus}**\n\n" if approved_focus else ""
+                return DocumentResult("needs_cover", prefix + self.cover.question_text())
+
+            # Revisi natural seperti `fokuskan ke penggunaan AI Agent di sekolah`
+            # juga boleh memperbarui MakalahBrief sebelum model menyusun ulang kerangka.
+            self._apply_intake_ai_first(raw)
             return self._generate_outline(raw, revision=True)
 
         if self.phase == "cover":

@@ -16,21 +16,24 @@ import os
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 
 from app.citation_engine import CitationEngine
 from app.document_cover import MakalahCoverData
 from app.document_draft import DraftGenerator
-from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
+from app.document_engine import DocumentEngine, DocumentSection, MakalahSpec, demo_spec
 from app.document_intake import IntakeInterpreter, IntakeResult
 from app.document_policy import load_document_format_policy
 from app.document_research import DocumentResearch
+from app.document_session import DocumentSessionStore
 from app.document_preferences import (
     DocumentPreferences,
     DocumentPreferenceStore,
     PreferenceParseResult,
 )
 from app.makalah_brief import MakalahBrief
+from app.nara_context import load_nara_identity
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
 from app.source_registry import SourceRegistry
@@ -116,6 +119,7 @@ class DocumentAgent:
         preference_store: DocumentPreferenceStore | None = None,
         history_limit: int = 10,
         source_scope: str | None = None,
+        session_store: DocumentSessionStore | None = None,
     ):
         self.provider = provider
         self.engine = engine
@@ -139,6 +143,9 @@ class DocumentAgent:
         self._final_docx_path = ""
         self._final_pdf_path = ""
         self._last_intake_result: IntakeResult | None = None
+        self._turn_intake: IntakeResult | None = None
+        self._conversation: list[dict[str, str]] = []
+        self._continue_after_cover = False
         self.brief = MakalahBrief()
         # Alias sementara agar modul lama yang membaca `requirements` tetap kompatibel.
         self.requirements = self.brief
@@ -146,6 +153,9 @@ class DocumentAgent:
         self.phase = "requirements"
         self.source_scope = (source_scope or os.environ.get("DOCUMENT_SOURCE_SCOPE", "DOCSRC-ADMIN-DEFAULT")).strip() or "DOCSRC-ADMIN-DEFAULT"
         self.preferences = self.preference_store.load(self.source_scope)
+        self.session_store = session_store
+        if self.session_store is not None:
+            self._restore_session()
 
     @property
     def configured(self) -> bool:
@@ -182,7 +192,11 @@ class DocumentAgent:
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
         intake_note = "MakalahBrief: AI-first + validasi/fallback lokal" if self.configured else "MakalahBrief: fallback lokal"
-        policy_note = "Format makalah: policy Markdown aktif"
+        policy_note = "Nara: identitas + skill percakapan Markdown aktif; format dokumen memakai policy Markdown"
+        if self._last_intake_result is not None:
+            mode = "AI" if self._last_intake_result.status == "berhasil" else "fallback lokal (interpretasi AI gagal)"
+            intake_note += "; pemahaman terakhir: " + mode
+        policy_note += "; sesi SQLite aktif" if self.session_store is not None else "; sesi dalam memori"
         preference_note = f"Preferensi sitasi: {self.preferences.citation_repeat_mode}"
         final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
@@ -294,6 +308,8 @@ class DocumentAgent:
         self._final_docx_path = ""
         self._final_pdf_path = ""
         self._last_intake_result = None
+        self._conversation.clear()
+        self._continue_after_cover = False
         self.brief.reset()
         self.cover.reset()
         self.preference_store.reset(self.source_scope)
@@ -322,12 +338,13 @@ class DocumentAgent:
         """AI memahami pesan dulu; parser lokal hanya mengisi celah jika AI gagal/lewat."""
         result: IntakeResult | None = None
         if self.configured:
-            result = self.intake_interpreter.interpret(raw, self.brief.structured_text())
+            result = self._turn_intake or self.intake_interpreter.interpret(raw, self.brief.structured_text())
             self._last_intake_result = result
             if result.status == "berhasil":
                 self.brief.apply_ai_values(result.values)
         # Fallback tidak menimpa nilai yang sudah dipahami AI.
-        self.brief.apply_local_fallback(raw)
+        if result is None or result.status != "berhasil" or result.intent == "legacy":
+            self.brief.apply_local_fallback(raw)
         return result
 
     def _apply_preferences(self, raw: str) -> PreferenceParseResult:
@@ -352,7 +369,7 @@ class DocumentAgent:
 
     def _outline_messages(self, raw: str, *, revision: bool = False) -> list[dict[str, str]]:
         messages = [
-            {"role": "system", "content": OUTLINE_PROMPT},
+            {"role": "system", "content": load_nara_identity() + "\n\n" + OUTLINE_PROMPT},
             {"role": "system", "content": "POLICY FORMAT DOKUMEN WAJIB:\n" + load_document_format_policy()},
             {"role": "system", "content": "MAKALAHBRIEF AKTIF:\n" + self.brief.structured_text()},
         ]
@@ -445,6 +462,7 @@ class DocumentAgent:
     def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
         if not self.configured:
             return self.status()
+        self._save_session()
         messages = self._outline_messages(raw, revision=revision)
         reply = self.provider.generate(messages, max_tokens=OUTLINE_MAX_TOKENS, temperature=0.3, timeout=45)
         if reply.status != "berhasil" and "kosong" in (reply.text or "").casefold():
@@ -550,6 +568,7 @@ class DocumentAgent:
     def _research_and_draft(self) -> DocumentResult:
         if not self.brief.complete or not self.cover.complete or not self._outline_text:
             return DocumentResult("membutuhkan_bantuan", "Lengkapi data dan setujui kerangka terlebih dahulu.")
+        self._save_session()
         context = self.brief.structured_text() + "\n" + self._outline_text
         try:
             sources = self.registry.list_sources(self.source_scope)
@@ -570,7 +589,7 @@ class DocumentAgent:
                     detail = reasons.get(result.reason, "Penyiapan sumber belum berhasil diselesaikan.")
                     return DocumentResult(result.status,
                         "Persetujuan Anda sudah diterima. " + detail + "\n\n"
-                        "Draft belum dibuat. Data makalah tetap tersimpan selama sesi ini aktif. "
+                        "Draft belum dibuat. Data makalah tetap tersedia. "
                         "Untuk mengulang proses, Anda bisa mengatakan `coba lagi` atau `ulangi riset`.")
                 self.registry.add_sources(self.source_scope, result.sources)
                 titles = {s.title.strip().casefold() for s in result.sources}
@@ -725,12 +744,195 @@ class DocumentAgent:
             "lanjut riset", "lanjutkan riset", "lanjut buat draft", "buat draft",
         }
 
+    def _invalidate_content(self) -> None:
+        self._automatic_source_ids.clear()
+        self._automatic_research_context = ""
+        self._draft_spec = None
+        self._final_docx_path = ""
+        self._final_pdf_path = ""
+
+    def _save_session(self) -> None:
+        if self.session_store is None:
+            return
+        self.session_store.save(self.source_scope, {
+            "version": 1, "brief": asdict(self.brief), "cover": asdict(self.cover),
+            "phase": self.phase, "outline": self._outline_text,
+            "proposed_focus": self._proposed_focus,
+            "pending_revision": self._pending_outline_revision,
+            "continue_after_cover": self._continue_after_cover,
+            "history": self._history, "conversation": self._conversation,
+            "source_ids": sorted(self._automatic_source_ids),
+            "research_context": self._automatic_research_context,
+            "draft": asdict(self._draft_spec) if self._draft_spec is not None else None,
+            "docx": self._final_docx_path, "pdf": self._final_pdf_path,
+        })
+
+    def _restore_session(self) -> None:
+        payload = self.session_store.load(self.source_scope)
+        if payload is None:
+            return
+        phase = payload.get("phase")
+        if phase not in {"requirements", "outline_confirmation", "cover", "ready_for_draft", "draft_ready", "final_ready"}:
+            raise ValueError("Fase sesi dokumen tidak valid; data lama tidak ditimpa.")
+        brief = MakalahBrief(**payload["brief"])
+        cover = MakalahCoverData(**payload["cover"])
+        if any(not isinstance(v, str) for v in (*asdict(brief).values(), *asdict(cover).values())):
+            raise ValueError("Data sesi dokumen tidak valid.")
+        draft = payload.get("draft")
+        spec = None
+        if draft is not None:
+            draft = dict(draft)
+            draft["sections"] = tuple(DocumentSection(
+                title=s["title"], paragraphs=tuple(s["paragraphs"]), level=s["level"]
+            ) for s in draft["sections"])
+            draft["preface"] = tuple(draft["preface"])
+            draft["members"] = tuple(draft["members"])
+            spec = MakalahSpec(**draft)
+        if phase in {"draft_ready", "final_ready"} and spec is None:
+            raise ValueError("Draft sesi tidak lengkap.")
+        self.brief = self.requirements = brief
+        self.cover = cover
+        self.phase = phase
+        self._draft_spec = spec
+        self._outline_text = payload["outline"]
+        self._proposed_focus = payload["proposed_focus"]
+        self._pending_outline_revision = payload["pending_revision"]
+        self._continue_after_cover = bool(payload["continue_after_cover"])
+        self._history = payload["history"][-self.history_limit:]
+        self._conversation = payload["conversation"][-self.history_limit:]
+        self._automatic_source_ids = set(payload["source_ids"])
+        self._automatic_research_context = payload["research_context"]
+        self._final_docx_path = payload["docx"]
+        self._final_pdf_path = payload["pdf"]
+        if self.phase == "final_ready" and not Path(self._final_docx_path).is_file():
+            self._final_docx_path = self._final_pdf_path = ""
+            self.phase = "draft_ready"
+
+    def _sync_draft_cover(self) -> None:
+        if self._draft_spec is None:
+            return
+        def optional(value):
+            return "" if value == "Tidak dicantumkan" else value
+        self._draft_spec = replace(
+            self._draft_spec, author=self.cover.author_name if self.cover.assignment_type == "individu" else "",
+            institution=optional(self.cover.institution_name), teacher=optional(self.cover.teacher_name),
+            year=optional(self.cover.academic_year),
+            group_name=optional(self.cover.group_name) if self.cover.assignment_type == "kelompok" else "",
+            members=self._member_tuple(self.cover.group_members) if self.cover.assignment_type == "kelompok" else (),
+        )
+        self._final_docx_path = ""
+        self._final_pdf_path = ""
+        self.phase = "draft_ready" if self.cover.complete else "cover"
+
+    def _handle_interpreted_turn(self, raw: str, turn: IntakeResult) -> DocumentResult:
+        before = self._cover_snapshot(self.cover)
+        old_phase = self.phase
+        old_brief = asdict(self.brief)
+        # Null means no update; explicit empty strings clear only the named field.
+        for key, value in turn.values.items():
+            if value == "":
+                setattr(self.brief, key, "")
+        self.brief.apply_ai_values(turn.values)
+        for key, value in turn.cover_values.items():
+            setattr(self.cover, key, value)
+        if self.cover.assignment_type == "individu":
+            self.cover.group_name = ""
+            self.cover.group_members = ""
+        elif self.cover.assignment_type == "kelompok":
+            self.cover.author_name = ""
+        after = self._cover_snapshot(self.cover)
+        confirmation = self._cover_update_message(before, after, can_continue=False)
+        brief_changed = old_brief != asdict(self.brief)
+        if before != after:
+            self._sync_draft_cover()
+        if brief_changed:
+            self._invalidate_content()
+            self._outline_text = ""
+            self._proposed_focus = ""
+            self._continue_after_cover = False
+            self.phase = "requirements" if not self.brief.complete else "outline_confirmation"
+            if old_phase != "requirements":
+                self._pending_outline_revision = raw
+        if turn.intent == "revise":
+            self._invalidate_content()
+            self._outline_text = ""
+            self._proposed_focus = ""
+            self._continue_after_cover = False
+            self._pending_outline_revision = raw
+            self.phase = "outline_confirmation" if self.brief.complete else "requirements"
+        if turn.intent == "pause":
+            self._continue_after_cover = False
+            return DocumentResult("paused", self._join_cover_messages(confirmation,
+                "Baik, proses saya jeda. Data yang sudah jelas tetap dicatat; beri tahu saat ingin melanjutkan."))
+        if turn.clarification:
+            return DocumentResult("needs_clarification", self._join_cover_messages(confirmation, turn.clarification))
+        if turn.intent in {"question", "unclear"}:
+            return DocumentResult("needs_clarification" if turn.intent == "unclear" else "answered",
+                self._join_cover_messages(confirmation, turn.reply or "Bagian mana yang ingin Anda tanyakan atau ubah?"))
+        # No action can bypass these application-owned readiness checks.
+        if not self.brief.complete:
+            self.phase = "requirements"
+            return DocumentResult("needs_requirements", self._join_cover_messages(confirmation, self.brief.question_text()))
+        if self.phase == "requirements" or self._pending_outline_revision or not self._outline_text:
+            revision = self._pending_outline_revision
+            return self._generate_outline(revision or raw, revision=bool(revision))
+        if self.phase == "outline_confirmation":
+            if turn.intent not in {"approve", "continue"}:
+                return DocumentResult("outline_confirmation", self._join_cover_messages(confirmation,
+                    "Kerangkanya masih menunggu persetujuan Anda. Apakah sudah sesuai, atau ada bagian yang ingin diubah?"))
+            approved = self._proposed_focus and self.brief.approve_focus(self._proposed_focus)
+            self._proposed_focus = ""
+            self._continue_after_cover = True
+            self.phase = "cover"
+            confirmation = self._join_cover_messages(confirmation,
+                f"Fokus kerangka disetujui: **{self.brief.focus}**" if approved else "Kerangka sudah disetujui.")
+        if self.phase in {"cover", "ready_for_draft"}:
+            if not self.cover.complete:
+                self.phase = "cover"
+                return DocumentResult("needs_cover", self._join_cover_messages(confirmation, self.cover.question_text()))
+            self.phase = "ready_for_draft"
+            if self._continue_after_cover or turn.intent in {"continue", "approve"}:
+                self._continue_after_cover = False
+                # A retained draft after a cover-only correction needs no new research.
+                if self._draft_spec is not None:
+                    self.phase = "draft_ready"
+                    return DocumentResult("draft_ready", self._join_cover_messages(confirmation,
+                        "Data cover sudah lengkap. Draft tetap tersedia; apakah ingin dibuatkan Word/PDF?"))
+                result = self._research_and_draft()
+                return DocumentResult(result.status, self._join_cover_messages(confirmation, result.text))
+            return DocumentResult("cover_complete", self._join_cover_messages(confirmation,
+                "Data cover sudah cukup. Apakah saya lanjut mencari sumber dan menyusun draft?"))
+        if self.phase == "draft_ready":
+            if turn.intent in {"approve", "continue"}:
+                return self.build_final()
+            return DocumentResult("draft_ready", self._join_cover_messages(confirmation,
+                "Draft sudah tersedia. Anda dapat meminta revisi atau melanjutkan ke file Word/PDF."))
+        if self.phase == "final_ready":
+            return self.build_final()
+        return DocumentResult("membutuhkan_bantuan", "Tahap dokumen belum dapat dilanjutkan.")
+
     def handle(self, message: str) -> DocumentResult:
         # Web Admin is threaded: do not run two research/draft jobs for one session.
         if not self._handle_lock.acquire(blocking=False):
             return DocumentResult("sedang_diproses", "Permintaan sebelumnya masih diproses. Mohon tunggu sebentar.")
         try:
-            return self._handle_message(message)
+            self._turn_intake = None
+            try:
+                result = self._handle_message(message)
+            except (OSError, sqlite3.Error):
+                result = DocumentResult("sementara_gagal", "Proses belum selesai karena akses file atau penyimpanan gagal. Data dalam sesi masih tersedia; silakan coba lagi.")
+            if message and not message.strip().startswith("/"):
+                self._conversation.extend([
+                    {"role": "user", "content": message[:12000]},
+                    {"role": "assistant", "content": result.text[:6000]},
+                ])
+                self._conversation = self._conversation[-self.history_limit:]
+            try:
+                self._save_session()
+            except (OSError, ValueError, sqlite3.Error):
+                return DocumentResult("session_save_failed", result.text +
+                    "\n\nPenyimpanan sesi ke disk gagal. Data saat ini masih ada di aplikasi yang terbuka; jangan tutup sebelum penyimpanan berhasil.")
+            return result
         finally:
             self._handle_lock.release()
 
@@ -738,6 +940,8 @@ class DocumentAgent:
         raw = (message or "").strip()
         if not raw:
             return DocumentResult("membutuhkan_bantuan", "Pesan dokumen kosong.")
+        if len(raw) > 12000:
+            return DocumentResult("membutuhkan_bantuan", "Pesannya terlalu panjang untuk satu kali pembaruan. Mohon kirim dalam beberapa bagian.")
         text = raw.casefold()
         command = text.split(maxsplit=1)[0]
         if command in {"/dokumen_baru", "/makalah_baru"}:
@@ -767,6 +971,24 @@ class DocumentAgent:
             if preference_result.changed and self.phase == "draft_ready" and not self._final_docx_path:
                 extra = "\nPreferensi ini akan dipakai saat file Word/PDF dibuat."
             return DocumentResult("preference_updated", preference_result.message + extra)
+
+        if not raw.startswith("/") and self.configured:
+            self._turn_intake = self.intake_interpreter.interpret(
+                raw, self.brief.structured_text(), context={
+                    "phase": self.phase,
+                    "cover": asdict(self.cover),
+                    "next_required_cover_field": self.cover.next_required_field(),
+                    "missing_brief_fields": self.brief.missing_fields(),
+                    "outline": self._outline_text[:12000],
+                    "proposed_focus": self._proposed_focus,
+                    "pending_revision": self._pending_outline_revision,
+                    "conversation": self._conversation,
+                    "continue_after_cover": self._continue_after_cover,
+                },
+            )
+            self._last_intake_result = self._turn_intake
+            if self._turn_intake.status == "berhasil" and self._turn_intake.intent != "legacy":
+                return self._handle_interpreted_turn(raw, self._turn_intake)
 
         if self.phase == "requirements":
             self._apply_intake_ai_first(raw)

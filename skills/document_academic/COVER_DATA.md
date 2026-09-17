@@ -17,7 +17,7 @@ Contoh data yang boleh ditambahkan belakangan:
 
 ## Bahasa pelanggan
 
-Utamakan parser lokal deterministik tanpa token AI untuk pola yang jelas, misalnya:
+Utamakan interpretasi AI dengan konteks percakapan, termasuk untuk pola jelas seperti:
 
 - `Nama Sekolah SMK Negeri 2 Padangsidimpuan`
 - `sekolah saya SMK Negeri 2 Padangsidimpuan`
@@ -30,7 +30,7 @@ Utamakan parser lokal deterministik tanpa token AI untuk pola yang jelas, misaln
 
 Pelanggan tidak wajib memakai tanda titik dua atau format formulir tertentu.
 
-Jika pesan jelas dapat dipahami parser lokal, jangan memanggil AI. AI fallback hanya boleh dipakai nanti untuk pesan yang benar-benar ambigu dan tidak aman dipetakan secara deterministik.
+Interpreter `app/document_intake.py` membaca `CONVERSATION.md` dan menerima data cover sejak pesan pertama. Parser lokal hanya digunakan ketika provider gagal atau output tidak valid. Hasil AI yang valid tidak ditambal ulang oleh parser.
 
 ## Context-aware slot filling
 
@@ -43,7 +43,7 @@ Pengumpulan cover memakai konsep **slot filling**, bukan formulir berurutan.
 - Bentuk nilai yang khas boleh dikenali walaupun tidak memakai label. Contoh: `2026/2027` dikenali sebagai tahun ajaran dan `SMK Negeri 2 Padangsidimpuan` dikenali sebagai sekolah.
 - Jawaban nama polos hanya boleh langsung dipetakan ketika konteks pertanyaan aktif aman. Contoh: setelah Nara bertanya `Siapa nama penyusun?`, jawaban `Ananda Azhari Batubara` langsung menjadi `author_name`.
 - Jika nama polos muncul tanpa konteks aman, jangan menebak. Minta klarifikasi apakah nama tersebut adalah nama penyusun/siswa, guru/dosen, atau anggota kelompok.
-- Klarifikasi ambigu dilakukan lokal dan **tidak perlu memanggil AI**.
+- AI mengusulkan klarifikasi singkat; field ambigu tidak diisi.
 
 Contoh alur tidak berurutan:
 
@@ -112,12 +112,12 @@ Jangan mengubah data cover order lain. Data harus tetap scoped per sesi/order.
 
 ## Implementasi
 
-Implementasi parser aktif berada di `app/document_cover.py`.
+- `app/document_intake.py`: interpretasi AI, schema patch dan intent, evidence dari pesan terbaru.
+- `app/document_agent.py`: menerapkan patch valid, menentukan fase, mengonfirmasi perubahan.
+- `app/document_cover.py`: schema cover, kelengkapan, pertanyaan wajib, dan parser fallback.
+- `app/document_session.py`: menyimpan sesi Web Admin ke SQLite, terpisah per scope.
 
-`MakalahCoverData.next_required_field()` menentukan field wajib yang sedang ditunggu. `MakalahCoverData.update(..., expected_field=...)` memakai konteks ini hanya untuk jawaban polos yang aman, sementara field eksplisit dan nilai berbentuk khas tetap boleh masuk dalam urutan apa pun.
-
-`MakalahCoverData.update()` dipanggil berulang selama fase cover dan fase `ready_for_draft`, sehingga data opsional dapat ditambahkan setelah data wajib selesai tanpa reset sesi dan tanpa token AI.
-
-`DocumentAgent` membandingkan snapshot sebelum dan sesudah pembaruan. Jika ada nilai berubah, respons memakai status `cover_updated` dan menampilkan field yang berubah. Jika nama polos ambigu, respons memakai `needs_cover_clarification` dan tidak menebak nilai.
-
-Jika di masa depan pembaruan cover diizinkan setelah draft dibuat, metadata `MakalahSpec` juga harus disinkronkan sebelum file final dibangun agar cover Word/PDF memakai nilai terbaru.
+Koreksi cover setelah draft memperbarui metadata `MakalahSpec`; Word/PDF lama dibatalkan
+agar hasil berikutnya menggunakan data terbaru. Koreksi kebutuhan akademik membatalkan
+draft/kerangka lama dan meminta persetujuan kerangka baru. Pembaruan field tidak boleh
+menimpa field lain yang tidak disebut. Reset sesi melalui `/makalah_baru` juga disimpan.

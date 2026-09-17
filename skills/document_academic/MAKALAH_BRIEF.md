@@ -81,7 +81,7 @@ Pertanyaan Nara bukan formulir wajib. Jika Nara sedang menanyakan kelas tetapi p
 
 MakalahBrief menyimpan kebutuhan akademik dan kualitas isi. Data cover administratif tetap dikelola `MakalahCoverData` agar tanggung jawab terpisah dan mudah divalidasi.
 
-Data cover dapat menyusul setelah kerangka disetujui dan tetap mengikuti aturan pada `COVER_DATA.md`.
+Data cover boleh masuk sejak pesan pertama atau menyusul setelah kerangka disetujui. Interpreter membaca `CONVERSATION.md`; schema dan kelengkapan mengikuti `COVER_DATA.md`.
 
 ## Sumber kebenaran runtime
 

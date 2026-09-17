@@ -160,7 +160,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertIn("SMK Negeri 2 Padangsidimpuan", result.text)
             self.assertIn("2026/2027", result.text)
             self.assertIn("Purnama Sari", result.text)
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_ready_for_draft_correction_confirms_latest_value(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -176,7 +176,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertEqual(agent.cover.teacher_name, "Nurhayati")
             self.assertIn("Guru/dosen: Nurhayati", result.text)
             self.assertNotIn("Guru/dosen: Purnama Sari", result.text)
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_agent_accepts_out_of_order_year_and_keeps_asking_required_field(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,7 +190,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertEqual(agent.cover.assignment_type, "")
             self.assertIn("Tahun ajaran: 2026/2027", result.text)
             self.assertIn("individu atau kelompok", result.text)
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_agent_accepts_plain_author_name_from_active_question(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,7 +206,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertEqual(second.status, "cover_complete")
             self.assertEqual(agent.cover.author_name, "Ananda Azhari Batubara")
             self.assertEqual(agent.phase, "ready_for_draft")
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 2)  # AI attempted before local fallback
 
     def test_ready_for_draft_plain_name_requests_clarification_instead_of_guessing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -221,7 +221,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertIn("nama penyusun/siswa", result.text)
             self.assertIn("nama guru/dosen", result.text)
             self.assertEqual(agent.cover.teacher_name, "")
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_combined_unlabelled_message_completes_cover_in_one_turn(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -239,7 +239,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertEqual(agent.cover.teacher_name, "dewi lestari")
             self.assertNotIn("Siapa **nama penyusun", result.text)
             self.assertEqual(result.text.count("`lanjutkan`"), 1)
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_combined_values_work_in_any_order(self):
         values = ("individu", "Rafi Pratama", "SMK Contoh", "2026/2027", "guru Dewi Lestari")
@@ -327,7 +327,7 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertEqual(agent.cover.academic_year, "2026/2027")
             self.assertEqual(agent.cover.institution_name, "SMK Contoh")
             self.assertEqual(agent.cover.teacher_name, "Dewi")
-            self.assertEqual(provider.calls, [])
+            self.assertEqual(len(provider.calls), 1)  # AI attempted before local fallback
 
     def test_repeated_same_cover_message_is_safe(self):
         cover = MakalahCoverData()

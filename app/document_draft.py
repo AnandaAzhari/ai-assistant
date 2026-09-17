@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from app.document_engine import DocumentSection
 from app.document_policy import load_document_format_policy
+from app.nara_context import load_nara_identity
 from app.providers.base import ModelProvider
 from app.source_registry import RegisteredSource
 
@@ -139,7 +140,7 @@ class DraftGenerator:
             "\n\nKERANGKA DISETUJUI:\n" + outline_text[:12000] +
             "\n\nSOURCE REGISTRY:\n" + source_text[:30000]
         )
-        system = DRAFT_PROMPT + "\n\nDOCUMENT FORMAT POLICY WAJIB:\n" + load_document_format_policy()
+        system = load_nara_identity() + "\n\n" + DRAFT_PROMPT + "\n\nDOCUMENT FORMAT POLICY WAJIB:\n" + load_document_format_policy()
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     @staticmethod

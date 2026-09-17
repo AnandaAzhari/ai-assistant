@@ -146,7 +146,7 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertFalse(DocumentAgent._outline_approved(message))
 
-    def test_lanjutkan_locks_proposed_focus_then_moves_to_cover_without_ai_call(self):
+    def test_lanjutkan_fallback_locks_focus_after_invalid_ai_reply(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self.make_agent(tmp)
             agent.phase = "outline_confirmation"
@@ -159,7 +159,7 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             self.assertEqual(agent.phase, "cover")
             self.assertEqual(agent.brief.focus, "Penerapan AI Agent di sekolah")
             self.assertEqual(agent._proposed_focus, "")
-            self.assertEqual(agent.provider.calls, [])
+            self.assertEqual(len(agent.provider.calls), 1)
             self.assertIn("Fokus kerangka disetujui", result.text)
             self.assertIn("Penerapan AI Agent di sekolah", result.text)
             self.assertIn("cover", result.text.casefold())
@@ -177,7 +177,7 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             self.assertEqual(result.status, "needs_cover")
             self.assertEqual(agent.brief.focus, "AI Agent untuk pembelajaran")
             self.assertNotIn("Fokus kerangka disetujui", result.text)
-            self.assertEqual(agent.provider.calls, [])
+            self.assertEqual(len(agent.provider.calls), 1)
 
     def test_duplicate_summary_approval_and_internal_notes_are_hidden(self):
         response = (

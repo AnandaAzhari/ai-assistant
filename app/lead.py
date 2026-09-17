@@ -180,7 +180,7 @@ class LeadAgent:
         if command in {"/dokumen_baru", "/makalah_baru"}:
             if self.document is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = self.document.reset()
+            result = self.document.handle(raw)
             return LeadReply("document", result.status, result.text)
 
         document_commands = {"/makalah", "/dokumen", "/paper", "/laporan"}

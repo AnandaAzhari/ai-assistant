@@ -1,3 +1,8 @@
+---
+name: document-academic
+description: Panduan Nara untuk makalah, struktur dokumen akademik, dan sitasi; dipakai sebagai fallback ketika pelanggan tidak memberikan pedoman resmi.
+---
+
 # Document Academic Skill — Referensi Default
 
 Skill ini adalah referensi aktif untuk Document Agent saat membuat Makalah, KTI, atau Skripsi ketika pelanggan **tidak memberikan pedoman resmi** dari guru, dosen, sekolah, program studi, fakultas, atau kampus.
@@ -13,7 +18,8 @@ Jangan menganggap fallback sebagai aturan universal. Begitu ada pedoman resmi, p
 
 ## MakalahBrief v2 — fondasi percakapan Makalah
 
-- Tahap briefing Makalah memakai **AI-first understanding + deterministic control**.
+- Percakapan Makalah memakai **AI-first understanding + deterministic control**, termasuk briefing, cover, koreksi, pertanyaan, dan persetujuan.
+- Identitas Nara berada di `agents/document_agent.md`. Interpreter memuat `CONVERSATION.md` untuk schema patch, intent, konteks, dan contoh percakapan.
 - AI/Nara memahami bahasa natural pelanggan, typo, singkatan, urutan acak, serta koreksi. Contoh `Informatika, SMK, XII semseter 1` harus dapat dipahami sebagai mata pelajaran Informatika, jenjang SMK, Kelas XII Semester 1.
 - AI tidak boleh mengendalikan state secara bebas. Hasil interpreter harus masuk ke schema `MakalahBrief` dalam bentuk data terstruktur; Python tetap memvalidasi, menyimpan, dan menentukan fase berikutnya.
 - Lima data inti sebelum kerangka: jenjang, kelas/semester, mata pelajaran/mata kuliah, topik/judul, dan target halaman/kata.
@@ -137,7 +143,7 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Pelanggan **tidak wajib** mengetahui kata khusus seperti `setuju` dan tidak boleh diwajibkan memakai slash command.
 - Bahasa natural seperti `lanjutkan`, `lanjut aja`, `lanjut saja`, `oke lanjut`, `boleh lanjut`, `sudah sesuai`, `sudah pas`, `iya`, atau ungkapan persetujuan yang setara dapat dipakai untuk menyetujui kerangka.
 - Kalimat yang mengandung revisi seperti `lanjutkan tapi ubah BAB II`, `belum sesuai`, `jangan lanjut dulu`, `tolong revisi`, `tambahkan`, `hapus`, atau `ganti` **tidak boleh** dianggap persetujuan.
-- Persetujuan sederhana harus diproses lokal tanpa memanggil model AI lagi.
+- AI memahami maksud persetujuan dari konteks; Python hanya menerapkannya pada kerangka aktif yang sudah ditampilkan. Pengenalan lokal tetap tersedia jika provider gagal.
 - Setelah kerangka dibuat, sistem menambahkan petunjuk balasan pelanggan secara deterministik. Jangan mengandalkan model untuk selalu menulis petunjuk ini karena output model dapat mencapai batas provider.
 - Kerangka tidak boleh sengaja dipotong oleh batas kecil aplikasi. Runtime Document Agent memakai batas keluaran tinggi sesuai ceiling provider agar kerangka dapat selesai; provider/model tetap memiliki batas teknis maksimum yang tidak dapat dibuat benar-benar tak terbatas.
 
@@ -151,7 +157,7 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 
 ## Riset dan draft otomatis
 
-- Setelah cover cukup, loop koreksi tetap terbuka. Persetujuan natural seperti `lanjutkan` atau `sudah cukup` memulai riset lalu draft tanpa slash command.
+- Persetujuan kerangka diteruskan sampai cover lengkap, lalu riset/draft dapat dimulai tanpa persetujuan berulang. Pesan jeda membatalkan kelanjutan otomatis. Sesudah kegagalan riset, tunggu permintaan mencoba lagi.
 - Runtime `app/document_research.py` membuat maksimal dua kueri berdasarkan topik dan fokus yang disetujui. Seleksi memakai metadata dan abstrak, bukan klaim verifikasi teks penuh.
 - Sumber otomatis wajib memiliki judul, penulis, tahun yang masuk akal, DOI/URL, dan abstrak. Model menilai relevansi serta ketentuan brief; Python memvalidasi indeks kandidat sebelum menyimpan sumber per scope.
 - Jika sumber tidak cukup atau ketentuan tidak dapat diverifikasi, hentikan proses tanpa mengarang sumber. Kegagalan draft mempertahankan sumber terpilih agar percobaan ulang tidak mengulang riset.
@@ -164,20 +170,20 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Data cover **tidak dikunci permanen** hanya karena data wajib sudah lengkap.
 - Pelanggan boleh menambah atau mengoreksi nama sekolah/kampus, tahun ajaran, nama guru/dosen, nama/nomor kelompok, atau data cover lain selama order masih aktif dan file final belum dikunci.
 - Nilai seperti `Tidak dicantumkan` boleh diganti oleh nilai nyata yang diberikan pelanggan kemudian.
-- Untuk pola yang jelas, gunakan parser lokal di `app/document_cover.py` tanpa token AI.
+- Gunakan interpreter AI terlebih dahulu untuk semua data cover. Parser `app/document_cover.py` hanya fallback jika provider atau output gagal.
 - Pelanggan tidak wajib memakai format `Label: Nilai`; bahasa seperti `Nama Sekolah SMK Negeri 2 Padangsidimpuan`, `tahun ajaran 2026/2027`, atau `Nama Guru Purnama Sari` harus dapat dipahami.
 - Pengumpulan cover memakai **context-aware slot filling**: pertanyaan Nara hanya menunjukkan slot wajib yang sedang kurang, bukan urutan formulir yang harus diikuti pelanggan.
 - Pelanggan boleh menjawab tidak berurutan. Nilai khas seperti `2026/2027` atau `SMK Negeri 2 Padangsidimpuan` tetap boleh disimpan walaupun Nara sedang menanyakan field lain.
 - Jika Nara sedang menanyakan satu field nama yang jelas, pelanggan boleh menjawab nama polos tanpa awalan `Nama:`. Contoh: pertanyaan `Siapa nama penyusun?` dapat dijawab cukup `Ananda Azhari Batubara`.
 - Nama polos tanpa konteks aman **tidak boleh ditebak**. Minta klarifikasi apakah nama itu milik penyusun/siswa, guru/dosen, atau anggota kelompok.
-- Klarifikasi ambigu dilakukan lokal tanpa panggilan AI.
+- AI mengusulkan satu klarifikasi spesifik ketika peran/nilai ambigu; jangan mengisi field yang belum jelas.
 - Koreksi natural seperti `Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati` harus memperbarui nilai lama, bukan membuat data ganda.
-- Fase `ready_for_draft` tetap memanggil parser cover pada setiap pesan, sehingga data opsional dapat ditambahkan belakangan tanpa reset sesi.
+- Semua fase menerima koreksi data. Perubahan cover memperbarui metadata draft dan membatalkan file final lama; perubahan kebutuhan akademik meminta persetujuan kerangka baru.
 - Jika nilai cover berubah, Document Agent harus memberi konfirmasi eksplisit berisi field yang berubah, misalnya `Guru/dosen: Nurhayati`, agar pelanggan tahu perubahan benar-benar tersimpan.
 - Jangan membalas hanya `Semua data utama sudah siap` setelah sebuah pesan berhasil mengubah cover.
 - Loop tetap terbuka sampai pelanggan memilih melanjutkan proses atau file final dikunci.
 - Pelanggan boleh meneruskan proses dengan bahasa natural seperti `lanjutkan` atau `sudah cukup`; slash command tetap hanya untuk admin/pengujian internal.
-- AI fallback untuk cover hanya diperlukan jika bahasa pelanggan benar-benar ambigu dan tidak aman dipetakan secara lokal; keputusan AI-first pada MakalahBrief tidak berarti format/engine atau state cover harus diserahkan sepenuhnya ke model.
+- AI mengembalikan patch dengan kutipan pesan sebagai evidence. Python memvalidasi schema, menyimpan state, serta memeriksa kelengkapan sebelum menjalankan alat.
 - Referensi detail implementasi: `skills/document_academic/COVER_DATA.md`.
 
 ## Referensi awal fallback

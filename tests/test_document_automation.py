@@ -91,16 +91,16 @@ class DocumentAutomationTests(unittest.TestCase):
         self.assertEqual(self.agent.phase, "draft_ready")
         self.assertEqual(len(self.registry.list_sources("order-a")), 1)
         self.assertEqual(self.registry.list_sources("order-b")[0].title, "Other order")
-        self.assertEqual(len(self.provider.calls), 3)
-        for call in self.provider.calls:
+        self.assertEqual(len(self.provider.calls), 4)
+        for call in self.provider.calls[1:]:
             self.assertIn("AI Agent untuk pembelajaran", call[-1]["content"])
-        self.assertNotIn("Siswa Uji", self.provider.calls[0][-1]["content"])
+        self.assertNotIn("Siswa Uji", self.provider.calls[1][-1]["content"])
         self.assertNotIn("Other order", self.provider.calls[-1][-1]["content"])
         self.assertNotIn("/draft", result.text)
         with patch.object(self.agent, "build_final", return_value=result) as final:
             self.agent.handle("lanjutkan")
             final.assert_called_once()
-        self.assertEqual(len(self.provider.calls), 3)
+        self.assertEqual(len(self.provider.calls), 5)
 
     def test_source_without_abstract_stops_before_draft_and_preserves_data(self):
         self.research.sources = (replace(SOURCE, abstract=""),)
@@ -109,7 +109,7 @@ class DocumentAutomationTests(unittest.TestCase):
         self.assertEqual(self.agent.phase, "ready_for_draft")
         self.assertEqual(self.agent.cover.author_name, "Siswa Uji")
         self.assertIsNone(self.agent.draft_spec)
-        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(len(self.provider.calls), 2)
         self.assertEqual(self.registry.list_sources("order-a"), [])
 
     def test_unmet_source_requirements_stop_without_registry_write(self):

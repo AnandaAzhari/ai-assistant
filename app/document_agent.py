@@ -1,4 +1,4 @@
-"""Document/Makalah Agent v1.5.
+"""Document/Makalah Agent v1.6.
 
 Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
 AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
@@ -33,6 +33,14 @@ from app.research_manager import ResearchManager, ResearchResult
 from app.source_registry import SourceRegistry
 
 
+OUTLINE_MAX_TOKENS = 8000
+OUTLINE_ACTION_HINT = (
+    "\n\n---\n"
+    "Jika kerangkanya sudah sesuai, cukup balas dengan bahasa biasa seperti "
+    "`lanjutkan`, `lanjut saja`, `sudah sesuai`, atau `oke lanjut`. "
+    "Jika ingin diubah, tuliskan bagian yang perlu diperbaiki."
+)
+
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
 Data utama makalah sudah diperiksa oleh sistem.
 
@@ -51,7 +59,8 @@ Aturan:
 - hormati target jumlah halaman dan jangan membuat terlalu banyak subbagian untuk dokumen pendek;
 - JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah kerangka disetujui;
 - JANGAN membuat isi makalah lengkap pada tahap ini;
-- akhiri dengan: `Apakah kerangka makalah ini sudah sesuai? Jika sudah, balas setuju atau lanjut. Jika ada yang ingin diubah, tuliskan bagian yang ingin diperbaiki.`
+- selesaikan seluruh ringkasan dan kerangka; jangan sengaja memotong bagian akhir;
+- tidak perlu menulis petunjuk kata balasan pelanggan karena sistem akan menambahkannya secara lokal setelah jawaban model.
 """
 
 
@@ -304,9 +313,9 @@ class DocumentAgent:
         if not self.configured:
             return self.status()
         messages = self._outline_messages(raw, revision=revision)
-        reply = self.provider.generate(messages, max_tokens=850, temperature=0.3, timeout=45)
+        reply = self.provider.generate(messages, max_tokens=OUTLINE_MAX_TOKENS, temperature=0.3, timeout=45)
         if reply.status != "berhasil" and "kosong" in (reply.text or "").casefold():
-            reply = self.provider.generate(messages, max_tokens=850, temperature=0.2, timeout=45)
+            reply = self.provider.generate(messages, max_tokens=OUTLINE_MAX_TOKENS, temperature=0.2, timeout=45)
         if reply.status != "berhasil":
             return DocumentResult(
                 "sementara_gagal",
@@ -314,18 +323,44 @@ class DocumentAgent:
             )
         if revision:
             self._history.append({"role": "user", "content": raw[:4000]})
-        self._outline_text = reply.text[:12000]
+        self._outline_text = reply.text
         self._history.append({"role": "assistant", "content": self._outline_text})
         self._history = self._history[-self.history_limit:]
         self.phase = "outline_confirmation"
-        return DocumentResult("berhasil", reply.text + self._usage_note(reply))
+        return DocumentResult("berhasil", reply.text.rstrip() + OUTLINE_ACTION_HINT + self._usage_note(reply))
 
     @staticmethod
     def _outline_approved(raw: str) -> bool:
         text = re.sub(r"\s+", " ", raw.strip().casefold())
-        if "tidak setuju" in text or "belum sesuai" in text:
+        text = text.strip(" .,!?:;")
+        if not text:
             return False
-        return text in {"setuju", "sesuai", "lanjut", "oke", "ok", "ya", "iya"} or text.startswith(("setuju ", "sudah sesuai", "kerangka sudah sesuai", "outline sudah sesuai"))
+
+        rejection_or_revision = (
+            "tidak setuju", "belum sesuai", "tidak sesuai", "belum pas", "jangan lanjut",
+            "jangan lanjutkan", "tahan dulu", "jangan dulu", "ubah ", "revisi", "perbaiki",
+            "ganti ", "kurang ", "tambahkan", "hapus ", "hilangkan",
+        )
+        if any(term in text for term in rejection_or_revision):
+            return False
+
+        exact = {
+            "setuju", "sesuai", "lanjut", "lanjutkan", "lanjut aja", "lanjut saja",
+            "oke", "ok", "ya", "iya", "boleh", "sudah sesuai", "sudah pas", "udah pas",
+            "oke lanjut", "oke lanjutkan", "ok lanjut", "ok lanjutkan", "boleh lanjut",
+            "boleh lanjutkan", "silakan lanjut", "silahkan lanjut", "gas", "gas lanjut",
+        }
+        if text in exact:
+            return True
+
+        approval_prefixes = (
+            "setuju ", "sudah sesuai ", "sudah pas ", "udah pas ",
+            "kerangka sudah sesuai", "outline sudah sesuai", "kerangkanya sudah sesuai",
+            "lanjut aja ", "lanjut saja ", "oke lanjut ", "oke lanjutkan ",
+            "ok lanjut ", "ok lanjutkan ", "boleh lanjut ", "boleh lanjutkan ",
+            "silakan lanjut ", "silahkan lanjut ",
+        )
+        return text.startswith(approval_prefixes)
 
     @staticmethod
     def _member_tuple(value: str) -> tuple[str, ...]:
@@ -503,7 +538,6 @@ class DocumentAgent:
         if self.phase == "outline_confirmation":
             if self._outline_approved(raw):
                 self.phase = "cover"
-                self.cover.update(raw)
                 return DocumentResult("needs_cover", self.cover.question_text())
             return self._generate_outline(raw, revision=True)
 

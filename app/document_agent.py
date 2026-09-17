@@ -1,4 +1,4 @@
-"""Document/Makalah Agent v1.7.
+"""Document/Makalah Agent v1.8.
 
 Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
 AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
@@ -405,6 +405,10 @@ class DocumentAgent:
         )
         return "\n".join(lines)
 
+    @staticmethod
+    def _join_cover_messages(*parts: str) -> str:
+        return "\n\n".join(part.strip() for part in parts if part and part.strip())
+
     def generate_draft(self) -> DocumentResult:
         if self.phase not in {"ready_for_draft", "draft_ready"}:
             return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi data utama, setujui kerangka, dan isi data cover terlebih dahulu.")
@@ -581,31 +585,44 @@ class DocumentAgent:
 
         if self.phase == "cover":
             before = self._cover_snapshot(self.cover)
-            self.cover.update(raw)
+            expected_field = self.cover.next_required_field()
+            clarification = self.cover.update(raw, expected_field=expected_field)
             after = self._cover_snapshot(self.cover)
-            if not self.cover.complete:
-                confirmation = self._cover_update_message(before, after)
-                question = self.cover.question_text()
-                if confirmation:
-                    return DocumentResult("needs_cover", confirmation + "\n\n" + question)
-                return DocumentResult("needs_cover", question)
-            self.phase = "ready_for_draft"
             confirmation = self._cover_update_message(before, after)
-            intro = confirmation + "\n\n" if confirmation else ""
+            question = self.cover.question_text()
+
+            if clarification:
+                return DocumentResult(
+                    "needs_cover_clarification",
+                    self._join_cover_messages(confirmation, clarification, question),
+                )
+            if not self.cover.complete:
+                return DocumentResult(
+                    "needs_cover",
+                    self._join_cover_messages(confirmation, question),
+                )
+
+            self.phase = "ready_for_draft"
             return DocumentResult(
                 "cover_complete",
-                intro
-                + "Data utama untuk cover sudah cukup.\n\n"
-                + self.cover.structured_text()
-                + "\n\nData cover tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
-                "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
+                self._join_cover_messages(
+                    confirmation,
+                    "Data utama untuk cover sudah cukup.\n\n" + self.cover.structured_text(),
+                    "Data cover tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
+                    "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
+                ),
             )
 
         if self.phase == "ready_for_draft":
             before = self._cover_snapshot(self.cover)
-            self.cover.update(raw)
+            clarification = self.cover.update(raw, expected_field="")
             after = self._cover_snapshot(self.cover)
             confirmation = self._cover_update_message(before, after)
+            if clarification:
+                return DocumentResult(
+                    "needs_cover_clarification",
+                    self._join_cover_messages(confirmation, clarification),
+                )
             if confirmation:
                 return DocumentResult("cover_updated", confirmation)
             return DocumentResult(

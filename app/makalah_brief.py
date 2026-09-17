@@ -1,4 +1,4 @@
-"""MakalahBrief v2 — schema pusat untuk memahami kebutuhan makalah pelanggan.
+"""MakalahBrief v2.1 — schema pusat kebutuhan makalah pelanggan.
 
 AI menjadi interpreter utama bahasa pelanggan. Kode deterministik tetap memegang
 schema, validasi, state, dan fallback lokal sehingga model tidak menentukan alur
@@ -122,6 +122,20 @@ class MakalahBrief:
             return DEFAULT_LENGTH_SENTINEL
         return ""
 
+    @staticmethod
+    def _is_citation_repeat_instruction(value: str) -> bool:
+        """Pisahkan larangan sitasi teknis dari isi akademik `must_avoid`.
+
+        Contoh `jangan pakai Ibid` ditangani DocumentPreferenceStore, bukan disimpan
+        sebagai materi yang harus dihindari di MakalahBrief.
+        """
+        clean = re.sub(r"[^a-z]+", " ", (value or "").casefold()).strip()
+        if not clean:
+            return False
+        return "ibid" in clean and not any(
+            term in clean for term in ("materi", "topik", "pembahasan", "konten", "bahasan")
+        )
+
     def apply_ai_values(self, values: dict[str, object]) -> list[str]:
         """Terapkan update AI terbaru dan izinkan koreksi field yang sudah terisi.
 
@@ -152,12 +166,30 @@ class MakalahBrief:
                 value = self._normalize_target_length(value)
                 if not value:
                     continue
+            if key == "must_avoid" and self._is_citation_repeat_instruction(value):
+                # Preferensi Ibid./short note punya state tersendiri dan tidak boleh
+                # muncul sebagai larangan isi akademik di ringkasan pelanggan.
+                continue
 
             old = getattr(self, key, "")
             if old != value:
                 setattr(self, key, value)
                 changed.append(key)
         return changed
+
+    def approve_focus(self, proposed_focus: str) -> bool:
+        """Kunci usulan fokus hanya setelah pelanggan menyetujui kerangka.
+
+        Fokus yang sudah diberikan eksplisit pelanggan tidak boleh ditimpa oleh usulan
+        model. Return True hanya ketika nilai baru benar-benar disimpan.
+        """
+        if self.focus:
+            return False
+        clean = self._clean(proposed_focus, 700)
+        if not clean:
+            return False
+        self.focus = clean
+        return True
 
     def apply_local_fallback(self, message: str) -> list[str]:
         """Isi celah field inti dengan parser deterministik lama.

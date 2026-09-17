@@ -11,6 +11,19 @@ Skill ini adalah referensi aktif untuk Document Agent saat membuat Makalah, KTI,
 
 Jangan menganggap fallback sebagai aturan universal. Begitu ada pedoman resmi, pedoman resmi mengalahkan fallback hanya pada bagian yang diaturnya.
 
+## MakalahBrief v2 — fondasi percakapan Makalah
+
+- Tahap briefing Makalah memakai **AI-first understanding + deterministic control**.
+- AI/Nara memahami bahasa natural pelanggan, typo, singkatan, urutan acak, serta koreksi. Contoh `Informatika, SMK, XII semseter 1` harus dapat dipahami sebagai mata pelajaran Informatika, jenjang SMK, Kelas XII Semester 1.
+- AI tidak boleh mengendalikan state secara bebas. Hasil interpreter harus masuk ke schema `MakalahBrief` dalam bentuk data terstruktur; Python tetap memvalidasi, menyimpan, dan menentukan fase berikutnya.
+- Lima data inti sebelum kerangka: jenjang, kelas/semester, mata pelajaran/mata kuliah, topik/judul, dan target halaman/kata.
+- Data kualitas seperti fokus pembahasan, tingkat bahasa, arahan guru/dosen, ketentuan sumber, gaya sitasi, materi wajib/larangan, dan pedoman resmi disimpan jika disebut pelanggan tetapi tidak wajib memblokir kerangka.
+- Jika fokus belum diberikan, Nara boleh mengusulkan fokus saat kerangka dan harus menandainya sebagai usulan.
+- Koreksi terbaru pelanggan mengalahkan nilai lama. Contoh `eh salah semester 2` harus memperbarui Semester 1 menjadi Semester 2 tanpa menghapus informasi Kelas XII yang masih berlaku.
+- Field yang tidak disebut dalam pesan terbaru tidak boleh diubah hanya karena model melihat state lama.
+- Parser lokal `document_requirements.py` tetap tersedia sebagai fallback bila AI/provider gagal atau output tidak valid.
+- Referensi implementasi lengkap: `skills/document_academic/MAKALAH_BRIEF.md`.
+
 ## Fallback tipografi akademik
 
 Jika tidak ada arahan resmi, gunakan titik awal berikut:
@@ -146,7 +159,7 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Jangan membalas hanya `Semua data utama sudah siap` setelah sebuah pesan berhasil mengubah cover.
 - Loop tetap terbuka sampai pelanggan memilih melanjutkan proses atau file final dikunci.
 - Pelanggan boleh meneruskan proses dengan bahasa natural seperti `lanjutkan` atau `sudah cukup`; slash command tetap hanya untuk admin/pengujian internal.
-- AI fallback hanya diperlukan jika bahasa pelanggan benar-benar ambigu dan tidak aman dipetakan secara lokal.
+- AI fallback untuk cover hanya diperlukan jika bahasa pelanggan benar-benar ambigu dan tidak aman dipetakan secara lokal; keputusan AI-first pada MakalahBrief tidak berarti format/engine atau state cover harus diserahkan sepenuhnya ke model.
 - Referensi detail implementasi: `skills/document_academic/COVER_DATA.md`.
 
 ## Referensi awal fallback

@@ -135,7 +135,12 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Nilai seperti `Tidak dicantumkan` boleh diganti oleh nilai nyata yang diberikan pelanggan kemudian.
 - Untuk pola yang jelas, gunakan parser lokal di `app/document_cover.py` tanpa token AI.
 - Pelanggan tidak wajib memakai format `Label: Nilai`; bahasa seperti `Nama Sekolah SMK Negeri 2 Padangsidimpuan`, `tahun ajaran 2026/2027`, atau `Nama Guru Purnama Sari` harus dapat dipahami.
+- Koreksi natural seperti `Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati` harus memperbarui nilai lama, bukan membuat data ganda.
 - Fase `ready_for_draft` tetap memanggil parser cover pada setiap pesan, sehingga data opsional dapat ditambahkan belakangan tanpa reset sesi.
+- Jika nilai cover berubah, Document Agent harus memberi konfirmasi eksplisit berisi field yang berubah, misalnya `Guru/dosen: Nurhayati`, agar pelanggan tahu perubahan benar-benar tersimpan.
+- Jangan membalas hanya `Semua data utama sudah siap` setelah sebuah pesan berhasil mengubah cover.
+- Loop tetap terbuka sampai pelanggan memilih melanjutkan proses atau file final dikunci.
+- Pelanggan boleh meneruskan proses dengan bahasa natural seperti `lanjutkan` atau `sudah cukup`; slash command tetap hanya untuk admin/pengujian internal.
 - AI fallback hanya diperlukan jika bahasa pelanggan benar-benar ambigu dan tidak aman dipetakan secara lokal.
 - Referensi detail implementasi: `skills/document_academic/COVER_DATA.md`.
 

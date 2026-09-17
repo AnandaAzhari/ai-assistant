@@ -132,9 +132,11 @@ class MakalahBrief:
         clean = re.sub(r"[^a-z]+", " ", (value or "").casefold()).strip()
         if not clean:
             return False
-        return "ibid" in clean and not any(
-            term in clean for term in ("materi", "topik", "pembahasan", "konten", "bahasan")
-        )
+        return bool(re.fullmatch(
+            r"(?:(?:jangan|tidak|tanpa|hindari)\s+)?"
+            r"(?:(?:pakai|memakai|gunakan|menggunakan|penggunaan)\s+)?"
+            r"(?:ibid|short note|short notes)(?:\s+saja)?", clean,
+        ))
 
     def apply_ai_values(self, values: dict[str, object]) -> list[str]:
         """Terapkan update AI terbaru dan izinkan koreksi field yang sudah terisi.
@@ -166,10 +168,13 @@ class MakalahBrief:
                 value = self._normalize_target_length(value)
                 if not value:
                     continue
-            if key == "must_avoid" and self._is_citation_repeat_instruction(value):
+            if key == "must_avoid":
                 # Preferensi Ibid./short note punya state tersendiri dan tidak boleh
                 # muncul sebagai larangan isi akademik di ringkasan pelanggan.
-                continue
+                parts = re.split(r"\s*[,;]\s*|\s+dan\s+", value, flags=re.I)
+                value = "; ".join(part for part in parts if not self._is_citation_repeat_instruction(part))
+                if not value:
+                    continue
 
             old = getattr(self, key, "")
             if old != value:

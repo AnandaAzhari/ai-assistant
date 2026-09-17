@@ -101,11 +101,11 @@ class DraftGenerator:
     def _length_guidance(requirements_text: str) -> str:
         """Target halaman default dihitung setelah cover; cover tidak termasuk."""
         text = requirements_text or ""
-        word_match = re.search(r"Jumlah halaman/kata:\s*(\d+)\s*kata", text, re.IGNORECASE)
+        word_match = re.search(r"(?:Jumlah halaman/kata|Target panjang):\s*(\d+)\s*kata", text, re.IGNORECASE)
         if word_match:
             return f"Target panjang eksplisit: sekitar {word_match.group(1)} kata."
 
-        page_match = re.search(r"Jumlah halaman/kata:\s*(\d+)\s*halaman", text, re.IGNORECASE)
+        page_match = re.search(r"(?:Jumlah halaman/kata|Target panjang):\s*(\d+)\s*halaman", text, re.IGNORECASE)
         if not page_match:
             return "Ikuti target panjang pada data makalah secara proporsional."
 
@@ -163,6 +163,8 @@ class DraftGenerator:
         if not isinstance(preface_raw, list) or not isinstance(sections_raw, list):
             raise ValueError("Struktur JSON isi makalah tidak sesuai.")
         preface = tuple(str(item).strip() for item in preface_raw if str(item).strip())[:5]
+        if any("[[" in item for item in preface):
+            raise ValueError("Marker sumber hanya boleh berada pada isi makalah.")
         sections: list[DocumentSection] = []
         used_markers: set[str] = set()
         marker_pattern = re.compile(r"\[\[(R\d+)\]\]", re.IGNORECASE)
@@ -170,6 +172,8 @@ class DraftGenerator:
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "").strip()
+            if "[[" in title:
+                raise ValueError("Marker sumber tidak boleh berada pada judul bagian.")
             if not title or re.sub(r"^[IVXLCDM]+\.\s*", "", title, flags=re.IGNORECASE).strip().casefold() == "daftar pustaka":
                 continue
             try:
@@ -186,6 +190,8 @@ class DraftGenerator:
                     continue
                 for match in marker_pattern.finditer(value):
                     used_markers.add(match.group(1).upper())
+                if "[[" in marker_pattern.sub("", value) or "]]" in marker_pattern.sub("", value):
+                    raise ValueError("Marker sumber tidak valid.")
                 paragraphs.append(value)
             sections.append(DocumentSection(title, tuple(paragraphs), level))
         unknown = sorted(used_markers - allowed_refs)
@@ -193,6 +199,8 @@ class DraftGenerator:
             raise ValueError("Isi makalah memakai marker sumber yang tidak terdaftar: " + ", ".join(unknown))
         if not sections:
             raise ValueError("Model tidak menghasilkan bagian makalah.")
+        if not used_markers:
+            raise ValueError("Isi makalah belum memiliki sitasi sumber yang terdaftar.")
         return preface, tuple(sections)
 
     def generate(

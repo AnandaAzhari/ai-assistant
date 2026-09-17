@@ -51,6 +51,10 @@ Field berikut tidak memblokir pembuatan kerangka, tetapi harus disimpan jika pel
 
 Jika fokus tidak diberikan pelanggan, Nara boleh mengusulkan fokus saat membuat kerangka. Usulan harus terlihat sebagai usulan, bukan dianggap instruksi pelanggan.
 
+Usulan disimpan sementara dalam `_proposed_focus`. Persetujuan kerangka menguncinya melalui `MakalahBrief.approve_focus`; fokus eksplisit pelanggan tidak ditimpa. Nilai tersebut ikut dalam konteks pencarian, seleksi sumber, dan draft. Jika marker fokus tidak ada atau berbeda, teks usulan yang terlihat menjadi acuan. Revisi yang gagal tidak boleh mengunci usulan lama.
+
+Preferensi pengulangan sitasi seperti `tanpa Ibid` atau `pakai short note` disimpan oleh `DocumentPreferenceStore`, bukan sebagai `must_avoid`. Jika pesan juga berisi larangan materi, bagian larangan materi tetap dipertahankan.
+
 ## Koreksi pelanggan
 
 Nilai terbaru pelanggan mengalahkan nilai lama pada order yang sama.

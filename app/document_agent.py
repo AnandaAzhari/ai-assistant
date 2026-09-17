@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
+import threading
 from dataclasses import dataclass
 
 from app.citation_engine import CitationEngine
@@ -22,6 +24,7 @@ from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
 from app.document_intake import IntakeInterpreter, IntakeResult
 from app.document_policy import load_document_format_policy
+from app.document_research import DocumentResearch
 from app.document_preferences import (
     DocumentPreferences,
     DocumentPreferenceStore,
@@ -112,6 +115,7 @@ class DocumentAgent:
         registry: SourceRegistry | None = None,
         preference_store: DocumentPreferenceStore | None = None,
         history_limit: int = 10,
+        source_scope: str | None = None,
     ):
         self.provider = provider
         self.engine = engine
@@ -119,6 +123,10 @@ class DocumentAgent:
         self.registry = registry or SourceRegistry.from_env()
         self.draft_generator = DraftGenerator(provider)
         self.intake_interpreter = IntakeInterpreter(provider)
+        self.automatic_research = DocumentResearch(provider, self.research)
+        self._handle_lock = threading.Lock()
+        self._automatic_source_ids: set[str] = set()
+        self._automatic_research_context = ""
         self.citation_engine = CitationEngine(engine) if engine is not None else None
         self.preference_store = preference_store or DocumentPreferenceStore.from_env()
         self.history_limit = max(2, int(history_limit))
@@ -126,6 +134,7 @@ class DocumentAgent:
         self._last_research: ResearchResult | None = None
         self._outline_text = ""
         self._proposed_focus = ""
+        self._pending_outline_revision = ""
         self._draft_spec: MakalahSpec | None = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
@@ -135,7 +144,7 @@ class DocumentAgent:
         self.requirements = self.brief
         self.cover = MakalahCoverData()
         self.phase = "requirements"
-        self.source_scope = os.environ.get("DOCUMENT_SOURCE_SCOPE", "DOCSRC-ADMIN-DEFAULT").strip() or "DOCSRC-ADMIN-DEFAULT"
+        self.source_scope = (source_scope or os.environ.get("DOCUMENT_SOURCE_SCOPE", "DOCSRC-ADMIN-DEFAULT")).strip() or "DOCSRC-ADMIN-DEFAULT"
         self.preferences = self.preference_store.load(self.source_scope)
 
     @property
@@ -274,10 +283,13 @@ class DocumentAgent:
         return DocumentResult("berhasil", "\n".join(lines))
 
     def reset(self) -> DocumentResult:
+        self._automatic_source_ids.clear()
+        self._automatic_research_context = ""
         self._history.clear()
         self._last_research = None
         self._outline_text = ""
         self._proposed_focus = ""
+        self._pending_outline_revision = ""
         self._draft_spec = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
@@ -383,14 +395,26 @@ class DocumentAgent:
     @staticmethod
     def _strip_outline_noise(text: str) -> str:
         """Guardrail output: sembunyikan metadata dan bagian teknis bila model melanggar prompt."""
-        clean = OUTLINE_FOCUS_RE.sub("", text or "")
+        clean = re.sub(r"<!--.*?(?:-->|\Z)", "", text or "", flags=re.DOTALL)
         clean = re.sub(
-            r"\n#{1,6}\s*(?:\d+\.\s*)?(?:Catatan Penyusunan|Catatan Teknis|Aturan Teknis|Detail Teknis)\b.*?(?=\n#{1,6}\s|\Z)",
+            r"(?:^|\n)#{1,6}\s*(?:\d+\.\s*)?(?:Ringkasan(?: Data| Kebutuhan)?|Catatan Penyusunan|Catatan Teknis|Aturan Teknis|Detail Teknis)\b.*?(?=\n#{1,2}\s|\Z)",
             "",
             clean,
             flags=re.IGNORECASE | re.DOTALL,
         )
-        return clean.strip()
+        lines = []
+        for line in clean.splitlines():
+            if re.search(r"\b(?:balas|jawab|ketik|kirim)\b.*\b(?:lanjut\w*|setuju|sesuai)\b", line, re.I):
+                continue
+            if re.search(r"\b(?:jika|kalau|apabila)\b.*\b(?:sesuai|diubah|revisi|setuju)\b", line, re.I):
+                continue
+            if re.search(r"\b(?:Heading\s*[1-4]|reset nomor halaman|field Word|TOC|policy|token|engine)\b", line, re.I):
+                # Preserve a real heading if only its parenthetical annotation is technical.
+                line = re.sub(r"\([^)]*\b(?:Heading|TOC|engine)\b[^)]*\)", "", line, flags=re.I)
+                if re.search(r"\b(?:Heading\s*[1-4]|reset nomor halaman|field Word|TOC|policy|token|engine)\b", line, re.I):
+                    continue
+            lines.append(line.rstrip())
+        return "\n".join(lines).strip("\n -")
 
     @classmethod
     def _parse_outline_response(cls, text: str, *, focus_already_set: bool) -> tuple[str, str]:
@@ -400,7 +424,23 @@ class DocumentAgent:
             if match:
                 proposed_focus = re.sub(r"\s+", " ", match.group(1).strip())[:700]
         visible = cls._strip_outline_noise(text)
-        return visible, proposed_focus
+        if not visible:
+            return "", ""
+        focus_block = re.search(r"(?:^|\n)##\s+Usulan Fokus\s*\n(.*?)(?=\n##\s|\Z)", visible, re.I | re.S)
+        if focus_block:
+            if focus_already_set:
+                visible = visible[:focus_block.start()] + visible[focus_block.end():]
+                proposed_focus = ""
+            else:
+                shown = re.sub(r"\s+", " ", focus_block.group(1)).strip(" \n-*_")
+                # Never lock hidden metadata that differs from the visible proposal.
+                if shown.rstrip(".") != proposed_focus.rstrip("."):
+                    proposed_focus = shown
+        elif proposed_focus:
+            visible = "## Usulan Fokus\n" + proposed_focus + "\n\n" + visible
+        if len(proposed_focus) > 700:
+            return "", ""
+        return visible.strip(), proposed_focus
 
     def _generate_outline(self, raw: str, *, revision: bool = False) -> DocumentResult:
         if not self.configured:
@@ -429,18 +469,23 @@ class DocumentAgent:
             self._history.append({"role": "user", "content": raw[:4000]})
         self._proposed_focus = proposed_focus if not self.brief.focus else ""
         self._outline_text = visible_outline
+        self._pending_outline_revision = ""
         self._history.append({"role": "assistant", "content": self._outline_text})
         self._history = self._history[-self.history_limit:]
         self.phase = "outline_confirmation"
 
         customer_text = self._customer_outline_summary() + "\n\n" + visible_outline.rstrip()
-        return DocumentResult("berhasil", customer_text + OUTLINE_ACTION_HINT + self._usage_note(reply))
+        return DocumentResult("berhasil", customer_text + OUTLINE_ACTION_HINT)
 
     @staticmethod
     def _outline_approved(raw: str) -> bool:
         text = re.sub(r"\s+", " ", raw.strip().casefold())
         text = text.strip(" .,!?:;")
         if not text:
+            return False
+        if re.search(r"\b(?:tapi|tetapi|namun|kecuali|asalkan|asal|belum|jangan|tidak|ubah|revisi|ganti|hapus|tambahkan|tambahi|tambahkanlah|fokuskan)\b", text):
+            return False
+        if "?" in raw:
             return False
 
         rejection_or_revision = (
@@ -460,14 +505,9 @@ class DocumentAgent:
         if text in exact:
             return True
 
-        approval_prefixes = (
-            "setuju ", "sudah sesuai ", "sudah pas ", "udah pas ",
-            "kerangka sudah sesuai", "outline sudah sesuai", "kerangkanya sudah sesuai",
-            "lanjut aja ", "lanjut saja ", "oke lanjut ", "oke lanjutkan ",
-            "ok lanjut ", "ok lanjutkan ", "boleh lanjut ", "boleh lanjutkan ",
-            "silakan lanjut ", "silahkan lanjut ",
-        )
-        return text.startswith(approval_prefixes)
+        text = re.sub(r"^(?:kerangka|outline|kerangkanya)\s+", "", text)
+        text = re.sub(r"(?:\s+(?:ya|aja|saja|makasih|terima kasih))+$", "", text)
+        return text in exact
 
     @staticmethod
     def _member_tuple(value: str) -> tuple[str, ...]:
@@ -506,12 +546,42 @@ class DocumentAgent:
     def _join_cover_messages(*parts: str) -> str:
         return "\n\n".join(part.strip() for part in parts if part and part.strip())
 
-    def generate_draft(self) -> DocumentResult:
+    def _research_and_draft(self) -> DocumentResult:
+        if not self.brief.complete or not self.cover.complete or not self._outline_text:
+            return DocumentResult("membutuhkan_bantuan", "Lengkapi data dan setujui kerangka terlebih dahulu.")
+        context = self.brief.structured_text() + "\n" + self._outline_text
+        try:
+            sources = self.registry.list_sources(self.source_scope)
+            cached = [s for s in sources if s.ref_id in self._automatic_source_ids]
+            if context != self._automatic_research_context or len(cached) != len(self._automatic_source_ids) or not cached:
+                result = self.automatic_research.run(self.brief, self._outline_text)
+                if result.status != "berhasil":
+                    return DocumentResult(result.status,
+                        "Sumber yang cukup dan sesuai kebutuhan belum berhasil disiapkan. "
+                        "Data makalah tetap tersimpan. Anda dapat mencoba lagi dengan mengatakan `lanjutkan`.")
+                self.registry.add_sources(self.source_scope, result.sources)
+                titles = {s.title.strip().casefold() for s in result.sources}
+                cached = [s for s in self.registry.list_sources(self.source_scope) if s.title.strip().casefold() in titles]
+                if not cached:
+                    return DocumentResult("sementara_gagal", "Sumber belum berhasil disimpan. Data tetap tersimpan; silakan coba lagi.")
+                self._automatic_source_ids = {s.ref_id for s in cached}
+                self._automatic_research_context = context
+            result = self.generate_draft(sources=cached)
+        except (OSError, ValueError, RuntimeError, sqlite3.Error):
+            return DocumentResult("sementara_gagal", "Riset atau draft belum berhasil diproses. Data tetap tersimpan; silakan coba lagi.")
+        if result.status != "draft_ready":
+            return DocumentResult(result.status, "Draft belum berhasil dibuat atau belum lolos pemeriksaan sitasi. Data dan sumber tetap tersimpan; silakan coba lagi.")
+        return DocumentResult("draft_ready",
+            "Draft makalah sudah dibuat dari sumber yang dipilih berdasarkan metadata dan abstrak.\n\n"
+            "Jika ingin dibuatkan file Word/PDF, cukup katakan `lanjutkan`.")
+
+    def generate_draft(self, *, sources=None) -> DocumentResult:
         if self.phase not in {"ready_for_draft", "draft_ready"}:
             return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi MakalahBrief, setujui kerangka, dan isi data cover terlebih dahulu.")
         if not self.registry:
             return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
-        sources = self.registry.list_sources(self.source_scope)
+        if sources is None:
+            sources = self.registry.list_sources(self.source_scope)
         if not sources:
             return DocumentResult(
                 "membutuhkan_sumber",
@@ -621,6 +691,10 @@ class DocumentAgent:
     @staticmethod
     def _wants_final_file(text: str) -> bool:
         clean = re.sub(r"\s+", " ", (text or "").strip().casefold())
+        if re.search(r"\b(?:jangan|belum|tidak|tapi|ubah|revisi)\b", clean) or "?" in clean:
+            return False
+        if DocumentAgent._outline_approved(text):
+            return True
         if clean in {"ya", "iya", "boleh", "lanjut", "oke", "ok", "setuju"}:
             return True
         phrases = (
@@ -630,6 +704,15 @@ class DocumentAgent:
         return any(phrase in clean for phrase in phrases)
 
     def handle(self, message: str) -> DocumentResult:
+        # Web Admin is threaded: do not run two research/draft jobs for one session.
+        if not self._handle_lock.acquire(blocking=False):
+            return DocumentResult("sedang_diproses", "Permintaan sebelumnya masih diproses. Mohon tunggu sebentar.")
+        try:
+            return self._handle_message(message)
+        finally:
+            self._handle_lock.release()
+
+    def _handle_message(self, message: str) -> DocumentResult:
         raw = (message or "").strip()
         if not raw:
             return DocumentResult("membutuhkan_bantuan", "Pesan dokumen kosong.")
@@ -671,6 +754,10 @@ class DocumentAgent:
 
         if self.phase == "outline_confirmation":
             if self._outline_approved(raw):
+                if self._pending_outline_revision:
+                    return self._generate_outline(self._pending_outline_revision, revision=True)
+                if not self._outline_text:
+                    return self._generate_outline(raw)
                 approved_focus = ""
                 if self._proposed_focus and self.brief.approve_focus(self._proposed_focus):
                     approved_focus = self.brief.focus
@@ -682,6 +769,9 @@ class DocumentAgent:
             # Revisi natural seperti `fokuskan ke penggunaan AI Agent di sekolah`
             # juga boleh memperbarui MakalahBrief sebelum model menyusun ulang kerangka.
             self._apply_intake_ai_first(raw)
+            self._pending_outline_revision = raw[:4000]
+            self._proposed_focus = ""
+            self._outline_text = ""
             return self._generate_outline(raw, revision=True)
 
         if self.phase == "cover":
@@ -707,11 +797,13 @@ class DocumentAgent:
                     confirmation,
                     "Data utama untuk cover sudah cukup.\n\n" + self.cover.structured_text(),
                     "Data cover tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
-                    "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
+                    "Jika sudah cukup, katakan `lanjutkan`; saya akan mencari sumber dan membuat draft.",
                 ),
             )
 
         if self.phase == "ready_for_draft":
+            if self._outline_approved(raw) or text.strip(" .!") == "sudah cukup":
+                return self._research_and_draft()
             before = self._cover_snapshot(self.cover)
             clarification = self.cover.update(raw, expected_field="")
             after = self._cover_snapshot(self.cover)
@@ -726,7 +818,7 @@ class DocumentAgent:
             return DocumentResult(
                 "ready_for_draft",
                 "Semua data utama sudah siap. Data cover masih boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
-                "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
+                "Jika sudah cukup, katakan `lanjutkan`; saya akan mencari sumber dan membuat draft.",
             )
 
         if self.phase == "draft_ready":

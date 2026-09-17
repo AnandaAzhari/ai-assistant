@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.document_agent import DocumentAgent, OUTLINE_MAX_TOKENS
 from app.document_preferences import DocumentPreferenceStore
@@ -177,6 +178,74 @@ class DocumentOutlineFlowTests(unittest.TestCase):
             self.assertEqual(agent.brief.focus, "AI Agent untuk pembelajaran")
             self.assertNotIn("Fokus kerangka disetujui", result.text)
             self.assertEqual(agent.provider.calls, [])
+
+    def test_duplicate_summary_approval_and_internal_notes_are_hidden(self):
+        response = (
+            "## Catatan Teknis\nHeading 1 dan TOC\n"
+            "## Ringkasan Data\nChicago default\n"
+            "## Usulan Fokus\nPenerapan AI Agent di sekolah.\n"
+            "## Kerangka Makalah\nBAB I (Heading 1)\nBAB II\nBAB III\nDAFTAR PUSTAKA\n"
+            "Jika sudah sesuai, balas `lanjutkan`.\nJika ingin diubah, tuliskan revisi.\n"
+            "<!-- TAQI_PROPOSED_FOCUS: Penerapan AI Agent di sekolah -->"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp, response)
+            result = agent._generate_outline("buat kerangka")
+            self.assertEqual(result.text.count("`lanjutkan`"), 1)
+            self.assertEqual(result.text.count("Jika ingin diubah"), 1)
+            for internal in ("Heading", "TOC", "Chicago default", "token", "TAQI_PROPOSED_FOCUS"):
+                self.assertNotIn(internal, result.text)
+            self.assertIn("BAB I", result.text)
+            self.assertIn("DAFTAR PUSTAKA", result.text)
+
+    def test_visible_focus_is_used_when_marker_is_missing_or_disagrees(self):
+        for marker in ("", "<!-- TAQI_PROPOSED_FOCUS: Fokus tersembunyi -->"):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as tmp:
+                agent = self.make_agent(tmp, "## Usulan Fokus\nAI di sekolah.\n## Kerangka Makalah\nBAB I\nBAB II\nBAB III\n" + marker)
+                agent._generate_outline("buat kerangka")
+                self.assertEqual(agent.brief.focus, "")
+                agent.handle("lanjutkan")
+                self.assertEqual(agent.brief.focus, "AI di sekolah.")
+
+    def test_model_proposal_is_removed_when_customer_has_explicit_focus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp)
+            agent.brief.focus = "AI untuk bengkel"
+            result = agent._generate_outline("buat kerangka")
+            self.assertNotIn("## Usulan Fokus", result.text)
+            self.assertEqual(agent._proposed_focus, "")
+
+    def test_failed_revision_cannot_approve_previous_outline_or_focus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp)
+            agent._generate_outline("buat kerangka")
+            with patch.object(agent, "_apply_intake_ai_first"), patch.object(
+                agent.provider, "generate", return_value=ModelReply("gagal", "timeout", "fake", "fake")
+            ):
+                result = agent.handle("ubah BAB II")
+            self.assertEqual(result.status, "sementara_gagal")
+            self.assertEqual(agent._proposed_focus, "")
+            self.assertEqual(agent._outline_text, "")
+            result = agent.handle("lanjutkan")
+            self.assertEqual(result.status, "berhasil")
+            self.assertEqual(agent.phase, "outline_confirmation")
+            self.assertEqual(agent.brief.focus, "")
+            self.assertIn("ubah BAB II", agent.provider.calls[-1]["messages"][-1]["content"])
+            agent.handle("lanjutkan")
+            self.assertEqual(agent.phase, "cover")
+
+    def test_conditional_approval_and_new_data_are_not_approval(self):
+        for text in ("setuju tapi fokus ke sekolah", "oke lanjut semester 2", "setuju, hapus", "boleh lanjut?", "sudah sesuai kecuali BAB II", "setuju asal lebih ringkas"):
+            with self.subTest(text=text):
+                self.assertFalse(DocumentAgent._outline_approved(text))
+
+    def test_citation_preference_preserves_actual_content_restriction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self.make_agent(tmp)
+            agent.brief.apply_ai_values({"must_avoid": "tanpa Ibid, jangan bahas sejarah AI"})
+            self.assertEqual(agent.brief.must_avoid, "jangan bahas sejarah AI")
+            agent.brief.apply_ai_values({"must_avoid": "pakai short note"})
+            self.assertEqual(agent.brief.must_avoid, "jangan bahas sejarah AI")
 
 
 if __name__ == "__main__":

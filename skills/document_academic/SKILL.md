@@ -141,6 +141,24 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Setelah kerangka dibuat, sistem menambahkan petunjuk balasan pelanggan secara deterministik. Jangan mengandalkan model untuk selalu menulis petunjuk ini karena output model dapat mencapai batas provider.
 - Kerangka tidak boleh sengaja dipotong oleh batas kecil aplikasi. Runtime Document Agent memakai batas keluaran tinggi sesuai ceiling provider agar kerangka dapat selesai; provider/model tetap memiliki batas teknis maksimum yang tidak dapat dibuat benar-benar tak terbatas.
 
+## Outline UX v2 dan persetujuan fokus
+
+- Ringkasan kebutuhan dibuat Python dari data pelanggan; nilai default internal tidak ditampilkan sebagai permintaan pelanggan.
+- Model hanya menyusun usulan fokus (bila kosong) dan kerangka. Petunjuk persetujuan ditambahkan sistem satu kali; metadata, token, dan catatan format internal disembunyikan.
+- Fokus usulan tetap sementara sampai kerangka disetujui. Nilai yang dikunci harus sesuai fokus yang terlihat pelanggan; marker tersembunyi tidak boleh menggantinya dengan fokus lain.
+- Bila pembuatan revisi gagal, kerangka lama tidak boleh disetujui. Balasan melanjutkan mencoba revisi kembali dan meminta persetujuan atas hasil barunya.
+- `tanpa Ibid` dan `short note` adalah preferensi sitasi, bukan larangan materi. Larangan isi yang dikirim bersamanya tetap disimpan.
+
+## Riset dan draft otomatis
+
+- Setelah cover cukup, loop koreksi tetap terbuka. Persetujuan natural seperti `lanjutkan` atau `sudah cukup` memulai riset lalu draft tanpa slash command.
+- Runtime `app/document_research.py` membuat maksimal dua kueri berdasarkan topik dan fokus yang disetujui. Seleksi memakai metadata dan abstrak, bukan klaim verifikasi teks penuh.
+- Sumber otomatis wajib memiliki judul, penulis, tahun yang masuk akal, DOI/URL, dan abstrak. Model menilai relevansi serta ketentuan brief; Python memvalidasi indeks kandidat sebelum menyimpan sumber per scope.
+- Jika sumber tidak cukup atau ketentuan tidak dapat diverifikasi, hentikan proses tanpa mengarang sumber. Kegagalan draft mempertahankan sumber terpilih agar percobaan ulang tidak mengulang riset.
+- Draft wajib memiliki sitasi terdaftar. Marker tidak dikenal, rusak, atau berada pada judul/kata pengantar ditolak. Validasi marker tidak membuktikan kebenaran setiap klaim.
+- File Word/PDF dibuat melalui persetujuan natural berikutnya. Slash command tetap tersedia untuk admin.
+- Web Admin saat ini memakai satu sesi admin. Integrasi multi-order harus memberikan `source_scope` yang berbeda untuk setiap order dan instance agen yang terpisah; jangan berbagi scope admin default untuk pelanggan berbeda.
+
 ## Loop data cover
 
 - Data cover **tidak dikunci permanen** hanya karena data wajib sudah lengkap.

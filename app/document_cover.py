@@ -1,8 +1,8 @@
 """Pengumpul data cover makalah lokal tanpa token AI.
 
 Data cover boleh dilengkapi atau diubah berulang selama sesi/order masih aktif.
-Parser lokal menangani bahasa pelanggan yang umum agar informasi cover tidak perlu
-selalu dikirim dengan format `Label: Nilai` dan tidak memboroskan token AI.
+Parser lokal menangani bahasa pelanggan yang umum, jawaban tidak berurutan, dan
+jawaban polos yang aman dipetakan dari konteks pertanyaan aktif.
 """
 
 from __future__ import annotations
@@ -32,21 +32,25 @@ class MakalahCoverData:
 
     @property
     def complete(self) -> bool:
+        return not bool(self.next_required_field())
+
+    def next_required_field(self) -> str:
+        """Field wajib berikutnya yang sedang diminta sistem.
+
+        Field ini hanya menjadi konteks untuk jawaban polos. Pelanggan tetap boleh
+        mengirim field lain lebih dulu; parser eksplisit/value-shaped tetap diproses.
+        """
         if not self.assignment_type:
-            return False
-        if self.assignment_type == "individu":
-            return bool(self.author_name)
-        if self.assignment_type == "kelompok":
-            return bool(self.group_members)
-        return False
+            return "assignment_type"
+        if self.assignment_type == "individu" and not self.author_name:
+            return "author_name"
+        if self.assignment_type == "kelompok" and not self.group_members:
+            return "group_members"
+        return ""
 
     @staticmethod
     def _looks_like_plain_name(value: str) -> bool:
-        """Deteksi jawaban nama sederhana saat sistem memang sedang menunggu nama.
-
-        Contoh: `Ananda Azhari Batubara` atau `Siti Nurhaliza`.
-        Sengaja konservatif supaya kalimat seperti `lanjut buat file` tidak dianggap nama.
-        """
+        """Deteksi nama orang sederhana tanpa label."""
         clean = re.sub(r"\s+", " ", (value or "").strip())
         if not clean or ":" in clean or "," in clean or len(clean) > 90:
             return False
@@ -54,14 +58,39 @@ class MakalahCoverData:
         if not 1 <= len(words) <= 7:
             return False
         blocked = {
-            "lanjut", "setuju", "oke", "ok", "iya", "ya", "boleh", "skip",
-            "individu", "kelompok", "sekolah", "kampus", "guru", "dosen",
-            "tahun", "ajaran", "tidak", "ada", "buat", "file", "word", "pdf",
+            "lanjut", "lanjutkan", "setuju", "oke", "ok", "iya", "ya", "boleh", "skip",
+            "individu", "kelompok", "sekolah", "kampus", "universitas", "instansi",
+            "guru", "dosen", "tahun", "ajaran", "akademik", "tidak", "ada", "buat",
+            "file", "word", "pdf", "sudah", "cukup",
         }
         lowered_words = {word.casefold().strip(".,") for word in words}
         if lowered_words & blocked:
             return False
-        return all(re.fullmatch(r"[\w.'’-]+", word, flags=re.UNICODE) for word in words)
+        return all(re.fullmatch(r"[\w.'’\-]+", word, flags=re.UNICODE) for word in words)
+
+    @classmethod
+    def _looks_like_member_list(cls, value: str) -> bool:
+        clean = (value or "").strip()
+        if not clean or len(clean) > 500:
+            return False
+        parts = [part.strip() for part in re.split(r"[,;\n]+", clean) if part.strip()]
+        return bool(parts) and all(cls._looks_like_plain_name(part) for part in parts)
+
+    @staticmethod
+    def _looks_like_academic_year(value: str) -> bool:
+        clean = re.sub(r"\s+", "", (value or "").strip().casefold())
+        clean = re.sub(r"^(?:ta|t\.a\.?)[.:=-]?", "", clean)
+        return bool(re.fullmatch(r"20\d{2}[/\-]20\d{2}", clean))
+
+    @staticmethod
+    def _looks_like_institution(value: str) -> bool:
+        clean = re.sub(r"\s+", " ", (value or "").strip().casefold())
+        prefixes = (
+            "sd ", "sdn ", "mi ", "min ", "smp ", "smpn ", "mts ", "mtsn ",
+            "sma ", "sman ", "smk ", "smkn ", "ma ", "man ", "universitas ",
+            "institut ", "politeknik ", "akademi ", "sekolah tinggi ", "stai ", "uin ",
+        )
+        return clean.startswith(prefixes)
 
     @staticmethod
     def _clean_value(value: str) -> str:
@@ -80,11 +109,7 @@ class MakalahCoverData:
             setattr(self, key, clean)
 
     def _update_corrections(self, raw: str) -> None:
-        """Tangani koreksi eksplisit seperti `nama gurunya ... ganti menjadi ...`.
-
-        Koreksi eksplisit diprioritaskan karena pelanggan bisa memperbarui data yang
-        sebelumnya sudah tersimpan tanpa perlu mengulang sesi atau memakai format form.
-        """
+        """Tangani koreksi eksplisit seperti `nama gurunya ... ganti menjadi ...`."""
         for source_line in raw.splitlines():
             line = re.sub(r"^\s*(?:[-*>•]\s*)?", "", source_line).strip()
             if not line:
@@ -110,24 +135,13 @@ class MakalahCoverData:
                 clean = self._clean_value(value)
                 if clean:
                     self.group_members = clean
-            elif any(term in lowered for term in ("nama penyusun", "penyusun", "nama saya")):
+            elif any(term in lowered for term in ("nama penyusun", "penyusun", "nama saya", "nama siswa", "nama murid")):
                 clean = self._clean_value(value)
                 if clean:
                     self.author_name = clean
 
-    def _update_natural_optional_fields(self, raw: str) -> None:
-        """Baca data cover opsional dari bahasa biasa, tanpa AI.
-
-        Contoh yang didukung:
-        - `Nama sekolah SMK Negeri 2 Padangsidimpuan`
-        - `sekolah saya SMK Negeri 2 Padangsidimpuan`
-        - `tahun ajaran 2026/2027`
-        - `Nama Guru Purnama Sari`
-        - `dosen pengampu Budi Santoso`
-
-        Parser dijalankan setiap kali ada pesan baru, jadi nilai yang sebelumnya
-        `Tidak dicantumkan` tetap bisa ditambahkan atau diganti kemudian.
-        """
+    def _update_natural_fields(self, raw: str) -> None:
+        """Baca field berlabel secara natural walaupun urutannya acak."""
         line_patterns = {
             "institution_name": (
                 r"^(?:nama\s+)?(?:sekolah|kampus|universitas|instansi)\s+(?:saya\s+)?(.+)$",
@@ -138,10 +152,18 @@ class MakalahCoverData:
             ),
             "teacher_name": (
                 r"^(?:nama\s+)?(?:guru|dosen)(?:\s+(?:pembimbing|pengampu))?\s+(?:saya\s+)?(.+)$",
-                r"^(?:guru|dosen)\s+saya\s+(?:adalah\s+)?(.+)$",
+                r"^(?:guru|dosen)(?:nya|\s+saya)?\s+(?:adalah\s+)?(.+)$",
+                r"^(.+?)\s+(?:itu\s+)?nama\s+(?:guru|dosen)(?:nya)?$",
             ),
             "group_name": (
                 r"^(?:nama|nomor)\s+kelompok\s+(.+)$",
+            ),
+            "group_members": (
+                r"^(?:anggota(?:\s+kelompok)?|nama\s+anggota)\s*(?:adalah\s+)?(.+)$",
+            ),
+            "author_name": (
+                r"^(?:nama\s+)?(?:penyusun|siswa|murid)\s+(?:saya\s+)?(.+)$",
+                r"^(?:nama\s+saya|saya\s+bernama|atas\s+nama)\s+(.+)$",
             ),
         }
 
@@ -149,24 +171,82 @@ class MakalahCoverData:
             line = re.sub(r"^\s*(?:[-*>•]\s*)?", "", source_line).strip()
             if not line or ":" in line:
                 continue
-            # Baris koreksi eksplisit sudah diproses oleh _update_corrections().
             if re.search(r"\b(?:ganti|ubah|diganti|diubah)\b", line, re.IGNORECASE):
                 continue
             for key, patterns in line_patterns.items():
                 matched = False
                 for pattern in patterns:
                     match = re.match(pattern, line, re.IGNORECASE)
-                    if match:
-                        self._apply_optional_value(key, match.group(1))
-                        matched = True
-                        break
+                    if not match:
+                        continue
+                    value = match.group(1)
+                    if key in {"institution_name", "academic_year", "teacher_name", "group_name"}:
+                        self._apply_optional_value(key, value)
+                    else:
+                        clean = self._clean_value(value)
+                        if clean:
+                            setattr(self, key, clean)
+                    matched = True
+                    break
                 if matched:
                     break
 
-    def update(self, message: str) -> None:
+    def _apply_contextual_plain_value(self, raw: str, expected_field: str) -> str:
+        """Gunakan bentuk nilai + konteks pertanyaan untuk jawaban tanpa label.
+
+        Return string non-kosong berarti jawaban ambigu dan perlu klarifikasi lokal.
+        """
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if len(lines) != 1:
+            return ""
+        clean = self._clean_value(lines[0])
+        if not clean or ":" in lines[0]:
+            return ""
+
+        lowered = clean.casefold()
+        if lowered in {"individu", "sendiri", "tugas individu"}:
+            self.assignment_type = "individu"
+            return ""
+        if lowered in {"kelompok", "tugas kelompok"}:
+            self.assignment_type = "kelompok"
+            return ""
+        if self._looks_like_academic_year(clean):
+            self.academic_year = clean
+            return ""
+        if self._looks_like_institution(clean):
+            self.institution_name = clean
+            return ""
+
+        if expected_field == "author_name" and self._looks_like_plain_name(clean):
+            self.author_name = clean
+            return ""
+        if expected_field == "teacher_name" and self._looks_like_plain_name(clean):
+            self.teacher_name = clean
+            return ""
+        if expected_field == "group_members" and self._looks_like_member_list(clean):
+            self.group_members = clean
+            return ""
+        if expected_field == "institution_name" and self._looks_like_institution(clean):
+            self.institution_name = clean
+            return ""
+        if expected_field == "academic_year" and self._looks_like_academic_year(clean):
+            self.academic_year = clean
+            return ""
+
+        # Nama polos tanpa konteks nama yang aktif tidak boleh ditebak. Bisa jadi
+        # nama penyusun, guru/dosen, anggota kelompok, atau koreksi nilai sebelumnya.
+        if self._looks_like_plain_name(clean):
+            return (
+                f"Saya membaca **{clean}** sebagai nama, tetapi belum aman menentukan untuk siapa. "
+                "Apakah ini nama penyusun/siswa, nama guru/dosen, atau anggota kelompok?"
+            )
+        return ""
+
+    def update(self, message: str, *, expected_field: str = "") -> str:
+        """Perbarui data cover dan kembalikan pesan klarifikasi jika ada ambiguitas."""
         raw = (message or "").strip()
         if not raw:
-            return
+            return ""
 
         label_map = {
             "sekolah": "institution_name",
@@ -180,6 +260,8 @@ class MakalahCoverData:
             "tugas": "assignment_type",
             "nama penyusun": "author_name",
             "penyusun": "author_name",
+            "nama siswa": "author_name",
+            "nama murid": "author_name",
             "nama": "author_name",
             "kelompok": "group_name",
             "nama kelompok": "group_name",
@@ -218,14 +300,14 @@ class MakalahCoverData:
             if key in {"institution_name", "group_name", "academic_year", "teacher_name"}:
                 self._apply_optional_value(key, value)
                 continue
-            setattr(self, key, value[:500])
+            clean = self._clean_value(value)
+            if clean:
+                setattr(self, key, clean)
 
-        # Koreksi eksplisit diproses sebelum parser natural biasa agar nilai terbaru menang.
+        # Koreksi terbaru menang atas nilai lama.
         self._update_corrections(raw)
-
-        # Jalankan parser natural setiap pesan, termasuk setelah data wajib cover lengkap.
-        # Dengan begitu pelanggan boleh menambahkan data opsional belakangan tanpa reset.
-        self._update_natural_optional_fields(raw)
+        # Field eksplisit boleh dikirim dalam urutan apa pun.
+        self._update_natural_fields(raw)
 
         lowered = raw.casefold()
         if not self.assignment_type:
@@ -234,49 +316,34 @@ class MakalahCoverData:
             elif re.search(r"\b(?:individu|sendiri)\b", lowered):
                 self.assignment_type = "individu"
 
-        # Bahasa natural untuk nama, mis. `nama saya Ananda Azhari Batubara`.
-        if self.assignment_type == "individu" and not self.author_name:
-            match = re.search(r"\b(?:nama\s+saya|saya\s+bernama|atas\s+nama)\s+(.+)$", raw, re.IGNORECASE)
-            if match:
-                candidate = match.group(1).strip(" .")
-                if self._looks_like_plain_name(candidate):
-                    self.author_name = candidate[:500]
-            elif self._looks_like_plain_name(raw):
-                # Jika satu-satunya data yang sedang ditunggu adalah nama penyusun,
-                # jawaban nama polos harus diterima tanpa wajib menulis `Nama:`.
-                self.author_name = raw[:500]
-
-        if self.assignment_type == "kelompok" and not self.group_members:
-            match = re.search(r"\b(?:anggota(?:\s+kelompok)?|nama\s+anggota)\s*[:=]?\s*(.+)$", raw, re.IGNORECASE)
-            if match:
-                self.group_members = match.group(1).strip()[:500]
+        return self._apply_contextual_plain_value(raw, expected_field)
 
     def question_text(self) -> str:
-        missing: list[str] = []
-        if not self.assignment_type:
-            missing.append("Tugas individu atau kelompok")
-        elif self.assignment_type == "individu":
-            if not self.author_name:
-                missing.append("Nama penyusun")
-        elif self.assignment_type == "kelompok":
-            if not self.group_members:
-                missing.append("Nama anggota kelompok")
-
-        if not missing:
+        expected = self.next_required_field()
+        if not expected:
             return (
                 "Data utama untuk cover sudah cukup.\n\n"
                 "Data opsional tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat, "
-                "misalnya nama sekolah/kampus, nama/nomor kelompok, tahun ajaran, dan nama guru/dosen."
+                "misalnya nama sekolah/kampus, nama/nomor kelompok, tahun ajaran, dan nama guru/dosen. "
+                "Data tidak harus dikirim berurutan."
             )
 
-        lines = ["Sebelum saya buat isi makalah, saya masih perlu data untuk cover:"]
-        for index, item in enumerate(missing, start=1):
-            lines.append(f"{index}. **{item}**")
-        lines.append(
-            "\nOpsional dan boleh ditambahkan belakangan: nama sekolah/kampus, nama/nomor kelompok, "
-            "tahun ajaran, dan nama guru/dosen."
+        if expected == "assignment_type":
+            question = "Tugas ini **individu atau kelompok**?"
+            hint = "Cukup jawab `individu` atau `kelompok`."
+        elif expected == "author_name":
+            question = "Siapa **nama penyusun/siswa** yang akan dicantumkan di cover?"
+            hint = "Cukup balas namanya saja, misalnya `Ananda Azhari Batubara`."
+        else:
+            question = "Siapa saja **anggota kelompok** yang akan dicantumkan di cover?"
+            hint = "Boleh kirim nama satu per satu atau beberapa nama dipisahkan koma."
+
+        return (
+            "Sebelum saya buat isi makalah, saya masih perlu satu data wajib:\n"
+            f"**{question}**\n\n{hint}\n\n"
+            "Data cover lain boleh dikirim lebih dulu atau belakangan dan tidak harus berurutan, "
+            "misalnya sekolah/kampus, tahun ajaran, atau nama guru/dosen."
         )
-        return "\n".join(lines)
 
     def structured_text(self) -> str:
         institution = self.institution_name or "Tidak dicantumkan"

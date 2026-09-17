@@ -523,7 +523,7 @@ class DocumentAgent:
         return value.strip() if value and value.strip() else "Tidak dicantumkan"
 
     @classmethod
-    def _cover_update_message(cls, before: dict[str, str], after: dict[str, str]) -> str:
+    def _cover_update_message(cls, before: dict[str, str], after: dict[str, str], *, can_continue: bool = True) -> str:
         changed = [
             (key, label, after.get(key, ""))
             for key, label in COVER_FIELD_LABELS
@@ -537,9 +537,10 @@ class DocumentAgent:
         lines.append(
             "\nJika masih ada data cover yang ingin ditambahkan atau diubah, kirim saja kapan pun sebelum file final dibuat."
         )
-        lines.append(
-            "Jika sudah cukup, lanjutkan proses dengan bahasa biasa seperti `lanjutkan` atau `sudah cukup`."
-        )
+        if can_continue:
+            lines.append(
+                "Jika sudah cukup, lanjutkan proses dengan bahasa biasa seperti `lanjutkan` atau `sudah cukup`."
+            )
         return "\n".join(lines)
 
     @staticmethod
@@ -556,9 +557,21 @@ class DocumentAgent:
             if context != self._automatic_research_context or len(cached) != len(self._automatic_source_ids) or not cached:
                 result = self.automatic_research.run(self.brief, self._outline_text)
                 if result.status != "berhasil":
+                    reasons = {
+                        "planning_unavailable": "Layanan AI belum berhasil menyiapkan kata kunci pencarian.",
+                        "planning_invalid": "Kata kunci pencarian dari AI belum dapat diproses.",
+                        "search_failed": "Pencarian sumber belum berhasil mendapatkan hasil dari layanan referensi.",
+                        "no_results": "Pencarian selesai, tetapi belum menemukan kandidat sumber.",
+                        "incomplete_metadata": "Kandidat sumber ditemukan, tetapi informasi bibliografi atau abstraknya belum lengkap untuk dipakai menulis draft.",
+                        "selection_unavailable": "Sumber ditemukan, tetapi layanan AI belum berhasil memeriksa kesesuaiannya.",
+                        "selection_invalid": "Sumber ditemukan, tetapi hasil pemilihan sumber dari AI belum dapat diproses.",
+                        "sources_insufficient": "Sumber sudah diperiksa, tetapi belum cukup sesuai dengan fokus atau ketentuan makalah.",
+                    }
+                    detail = reasons.get(result.reason, "Penyiapan sumber belum berhasil diselesaikan.")
                     return DocumentResult(result.status,
-                        "Sumber yang cukup dan sesuai kebutuhan belum berhasil disiapkan. "
-                        "Data makalah tetap tersimpan. Anda dapat mencoba lagi dengan mengatakan `lanjutkan`.")
+                        "Persetujuan Anda sudah diterima. " + detail + "\n\n"
+                        "Draft belum dibuat. Data makalah tetap tersimpan selama sesi ini aktif. "
+                        "Untuk mengulang proses, Anda bisa mengatakan `coba lagi` atau `ulangi riset`.")
                 self.registry.add_sources(self.source_scope, result.sources)
                 titles = {s.title.strip().casefold() for s in result.sources}
                 cached = [s for s in self.registry.list_sources(self.source_scope) if s.title.strip().casefold() in titles]
@@ -703,6 +716,15 @@ class DocumentAgent:
         )
         return any(phrase in clean for phrase in phrases)
 
+    @classmethod
+    def _wants_research(cls, raw: str) -> bool:
+        clean = re.sub(r"\s+", " ", raw.strip().casefold()).strip(" .!,")
+        return cls._outline_approved(raw) or clean in {
+            "sudah cukup", "sudah cukup ya", "datanya sudah cukup", "udah cukup",
+            "coba lagi", "coba ulang", "ulangi riset", "cari ulang sumber",
+            "lanjut riset", "lanjutkan riset", "lanjut buat draft", "buat draft",
+        }
+
     def handle(self, message: str) -> DocumentResult:
         # Web Admin is threaded: do not run two research/draft jobs for one session.
         if not self._handle_lock.acquire(blocking=False):
@@ -779,7 +801,7 @@ class DocumentAgent:
             expected_field = self.cover.next_required_field()
             clarification = self.cover.update(raw, expected_field=expected_field)
             after = self._cover_snapshot(self.cover)
-            confirmation = self._cover_update_message(before, after)
+            confirmation = self._cover_update_message(before, after, can_continue=False)
             question = self.cover.question_text()
 
             if clarification:
@@ -802,12 +824,12 @@ class DocumentAgent:
             )
 
         if self.phase == "ready_for_draft":
-            if self._outline_approved(raw) or text.strip(" .!") == "sudah cukup":
+            if self._wants_research(raw):
                 return self._research_and_draft()
             before = self._cover_snapshot(self.cover)
             clarification = self.cover.update(raw, expected_field="")
             after = self._cover_snapshot(self.cover)
-            confirmation = self._cover_update_message(before, after)
+            confirmation = self._cover_update_message(before, after, can_continue=self.cover.complete and not clarification)
             if clarification:
                 return DocumentResult(
                     "needs_cover_clarification",

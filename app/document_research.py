@@ -16,6 +16,7 @@ from app.research_manager import ResearchManager, ResearchSource
 class AutoResearchResult:
     status: str
     sources: tuple[ResearchSource, ...] = ()
+    reason: str = ""
 
 
 class DocumentResearch:
@@ -56,23 +57,28 @@ class DocumentResearch:
             {"role": "user", "content": context},
         ], max_tokens=400, temperature=0.0, timeout=30)
         if plan.status != "berhasil":
-            return AutoResearchResult("sementara_gagal")
+            return AutoResearchResult("sementara_gagal", reason="planning_unavailable")
         try:
             queries = self._json(plan.text).get("queries")
             if (not isinstance(queries, list) or not 1 <= len(queries) <= 2
                     or any(not isinstance(q, str) or not 3 <= len(q.strip()) <= 200 for q in queries)):
                 raise ValueError("Invalid queries")
         except (ValueError, TypeError):
-            return AutoResearchResult("sementara_gagal")
+            return AutoResearchResult("sementara_gagal", reason="planning_invalid")
 
         candidates = []
+        found_count = 0
+        search_succeeded = False
         for query in dict.fromkeys(q.strip() for q in queries):
             result = self.research.search(query, limit=10)
             if result.status == "berhasil":
+                search_succeeded = True
+                found_count += len(result.sources)
                 candidates.extend(s for s in result.sources if self.eligible(s))
         candidates = ResearchManager._dedupe(candidates)[:20]
         if not candidates:
-            return AutoResearchResult("membutuhkan_sumber")
+            reason = "incomplete_metadata" if found_count else "no_results" if search_succeeded else "search_failed"
+            return AutoResearchResult("membutuhkan_sumber", reason=reason)
         # Only public bibliographic metadata enters selection, never cover identity.
         records = [{
             "index": i, "title": s.title, "authors": s.authors, "year": s.year,
@@ -94,16 +100,18 @@ class DocumentResearch:
             )},
         ], max_tokens=500, temperature=0.0, timeout=45)
         if selection.status != "berhasil":
-            return AutoResearchResult("sementara_gagal")
+            return AutoResearchResult("sementara_gagal", reason="selection_unavailable")
         try:
             payload = self._json(selection.text)
             indices = payload.get("selected_indices")
-            if payload.get("sufficient") is not True:
-                return AutoResearchResult("membutuhkan_sumber")
+            if type(payload.get("sufficient")) is not bool:
+                raise ValueError("Invalid sufficiency assessment")
+            if payload["sufficient"] is False:
+                return AutoResearchResult("membutuhkan_sumber", reason="sources_insufficient")
             if (not isinstance(indices, list) or not indices
                     or any(type(i) is not int or not 1 <= i <= len(candidates) for i in indices)
                     or len(set(indices)) != len(indices)):
                 raise ValueError("Invalid candidate selection")
         except (ValueError, TypeError):
-            return AutoResearchResult("sementara_gagal")
+            return AutoResearchResult("sementara_gagal", reason="selection_invalid")
         return AutoResearchResult("berhasil", tuple(candidates[i - 1] for i in indices))

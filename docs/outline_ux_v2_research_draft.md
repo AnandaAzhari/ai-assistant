@@ -24,7 +24,8 @@ Sesi percakapan/brief tetap berada di memori seperti implementasi sebelumnya; ha
 ## Uji lokal
 
 - `test_document_outline_flow.py`: 14 tes lulus.
-- `test_document_automation.py`: 14 tes lulus.
+- `test_document_automation.py`: 19 tes lulus setelah perbaikan pesan kegagalan/retry.
+- `test_document_cover_loop.py`: 25 tes lulus setelah perbaikan pesan gabungan.
 - `test_makalah*.py`: 23 tes lulus.
 - `test_citation*.py`: 7 tes lulus.
 
@@ -44,3 +45,14 @@ cd /d/ai-assistant && git pull --ff-only && python -m unittest discover -s tests
 ```
 
 Setelah hasil tes dikonfirmasi, jalankan ulang Web Admin dan coba order baru dengan input dari handoff. Periksa hanya satu petunjuk approval dan konfirmasi fokus sebelum melanjutkan uji cover → riset → draft.
+
+## Perbaikan dari uji langsung cover
+
+- Pesan gabungan dipisahkan pada koma, titik koma, atau baris baru; semua field yang jelas diproses sebelum menyelesaikan nama polos berdasarkan konteks.
+- Satu nama polos pada tugas individu yang sedang menunggu nama dapat mengisi penyusun. Jika terdapat beberapa nama tanpa peran yang jelas, data sekolah/tahun tetap disimpan dan nama dimintakan klarifikasi.
+- Gelar dengan titik dan daftar anggota eksplisit mempertahankan koma. Koreksi `bukan ..., ganti menjadi ...` tetap diproses sebagai satu bagian.
+- Konfirmasi cover yang belum lengkap tidak lagi mengajak pelanggan melanjutkan; cover lengkap menampilkan satu petunjuk melanjutkan.
+- `sudah cukup` sudah merupakan persetujuan riset, bukan kegagalan pengenalan intent. Pesan penyiapan sumber kini membedakan tahap gagal: kata kunci AI, pencarian, kelengkapan metadata/abstrak, atau seleksi sumber.
+- `coba lagi` / `ulangi riset` diterima untuk mengulang di fase siap draft. Respons tidak lagi memberi kesan pelanggan wajib mengganti `sudah cukup` dengan `lanjutkan`.
+- Penyebab kegagalan riset pada uji Windows sebelumnya belum dapat ditentukan karena pesan versi lama menggabungkan semua kegagalan. Perubahan ini memberi diagnosis tahap; tidak mengklaim koneksi provider/sumber telah diperbaiki.
+- Data yang sudah tercampur oleh parser lama perlu dikirim kembali setelah pembaruan; tidak dilakukan migrasi otomatis terhadap nilai ambigu. Restart Web Admin menghapus brief/cover dalam memori, sehingga pengujian setelah restart memerlukan sesi baru.

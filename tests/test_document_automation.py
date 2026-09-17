@@ -192,6 +192,41 @@ class DocumentAutomationTests(unittest.TestCase):
     def test_negative_request_cannot_trigger_final_file(self):
         self.assertFalse(DocumentAgent._wants_final_file("jangan buat file dulu"))
 
+    def test_sudah_cukup_is_accepted_and_retry_uses_natural_language(self):
+        self.research.sources = (replace(SOURCE, abstract=""),)
+        result = self.agent.handle("sudah cukup")
+        self.assertIn("Persetujuan Anda sudah diterima", result.text)
+        self.assertIn("abstraknya belum lengkap", result.text)
+        self.assertNotIn("`lanjutkan`", result.text)
+        self.assertEqual(len(self.research.calls), 1)
+        self.research.sources = (SOURCE,)
+        self.assertEqual(self.agent.handle("coba lagi").status, "draft_ready")
+        self.assertEqual(len(self.research.calls), 2)
+
+    def test_search_failure_has_its_own_message(self):
+        with patch.object(self.research, "search", return_value=ResearchResult("gagal", "test")):
+            result = self.agent.handle("ulangi riset")
+        self.assertIn("Pencarian sumber belum berhasil", result.text)
+        self.assertNotIn("abstraknya belum lengkap", result.text)
+        self.assertIsNone(self.agent.draft_spec)
+
+    def test_invalid_plan_is_not_reported_as_missing_sources(self):
+        with patch.object(self.provider, "generate", return_value=ModelReply("berhasil", "bad JSON", "test", "test")):
+            result = self.agent.handle("sudah cukup")
+        self.assertIn("Kata kunci pencarian dari AI belum dapat diproses", result.text)
+        self.assertEqual(self.research.calls, [])
+
+    def test_invalid_selection_is_distinct_from_insufficient_sources(self):
+        self.provider.selection = {"sufficient": "true", "selected_indices": [1]}
+        result = self.agent.handle("coba lagi")
+        self.assertIn("hasil pemilihan sumber dari AI belum dapat diproses", result.text)
+        self.assertEqual(self.registry.list_sources("order-a"), [])
+
+    def test_research_retry_does_not_treat_negative_or_question_as_consent(self):
+        for raw in ("jangan coba lagi", "sudah cukup tapi ubah guru", "coba lagi?"):
+            with self.subTest(raw=raw):
+                self.assertFalse(DocumentAgent._wants_research(raw))
+
 
 if __name__ == "__main__":
     unittest.main()

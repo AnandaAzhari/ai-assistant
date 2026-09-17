@@ -8,7 +8,7 @@ jawaban polos yang aman dipetakan dari konteks pertanyaan aktif.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -63,6 +63,7 @@ class MakalahCoverData:
             "guru", "dosen", "tahun", "ajaran", "akademik", "tidak", "ada", "buat",
             "file", "word", "pdf", "sudah", "cukup", "nama", "saya", "bernama", "atas",
             "penyusun", "siswa", "murid", "anggota",
+            "coba", "ulangi", "riset", "draft", "sumber",
         }
         lowered_words = {word.casefold().strip(".,") for word in words}
         if lowered_words & blocked:
@@ -244,6 +245,82 @@ class MakalahCoverData:
         return ""
 
     def update(self, message: str, *, expected_field: str = "") -> str:
+        """Read all independently identifiable values before resolving a bare name.
+
+        Commas/semicolons/newlines separate fields; degree suffixes and explicit
+        member lists retain their commas. Multiple unlabelled names stay ambiguous.
+        """
+        raw = (message or "").strip()
+        chunks = [part.strip() for part in re.split(r"[,;\n]+", raw) if part.strip()]
+        if len(chunks) <= 1:
+            return self._update_single(raw, expected_field=expected_field)
+
+        segments: list[str] = []
+        for part in chunks:
+            part = re.sub(
+                r"^dan\s+(?=(?:nama|guru|dosen|tahun|sekolah|kampus|anggota)\b)",
+                "", part, flags=re.I,
+            )
+            if segments and re.match(r"^(?:ganti|ubah|diganti|diubah)\s+(?:menjadi|jadi|ke)\b", part, re.I):
+                segments[-1] += ", " + part
+                continue
+            # A degree such as S.Pd. belongs to the preceding name.
+            if segments and re.fullmatch(r"(?:[A-Za-z]{1,4}\.){1,4}", part):
+                segments[-1] += ", " + part
+                continue
+            # Preserve explicit member-list continuation: Anggota: Rafi, Bima.
+            if (segments and re.match(r"^(?:nama\s+)?anggota\b", segments[-1], re.I)
+                    and self._looks_like_plain_name(part)
+                    and not self._looks_like_institution(part)
+                    and not self._looks_like_academic_year(part)):
+                segments[-1] += ", " + part
+                continue
+            segments.append(part)
+
+        unlabelled: list[str] = []
+        explicit_assignment = False
+        explicit_fields: set[str] = set()
+        for part in segments:
+            # Probe a fresh object so recognition is independent of existing data.
+            probe = MakalahCoverData()
+            probe._update_single(part)
+            if any(getattr(probe, item.name) for item in fields(probe)):
+                self._update_single(part)
+                explicit_fields.update(item.name for item in fields(probe) if getattr(probe, item.name))
+                if re.fullmatch(r"(?:tugas\s+)?(?:individu|sendiri|kelompok)[.!]?", part, re.I):
+                    explicit_assignment = True
+            else:
+                unlabelled.append(part)
+
+        if not unlabelled:
+            return ""
+        names = [self._clean_value(part) for part in unlabelled]
+        if not all(self._looks_like_plain_name(name.split(",", 1)[0]) for name in names):
+            return "Ada bagian data cover yang belum saya pahami. Mohon jelaskan: " + "; ".join(unlabelled)
+
+        if (self.assignment_type == "kelompok" and not self.group_members
+                and (explicit_assignment or expected_field == "group_members")):
+            self.group_members = ", ".join(names)
+            return ""
+        if len(names) == 1:
+            if (self.assignment_type == "individu" and self.author_name
+                    and names[0].casefold() == self.author_name.casefold()):
+                return ""
+            if (self.assignment_type == "individu" and not self.author_name
+                    and (explicit_assignment or expected_field == "author_name")):
+                self.author_name = names[0]
+                return ""
+            if expected_field in {"author_name", "teacher_name"}:
+                # An explicitly labelled value in this message takes precedence.
+                if expected_field not in explicit_fields:
+                    setattr(self, expected_field, names[0])
+                    return ""
+        return (
+            "Saya sudah mencatat data yang jelas. Nama **" + "; ".join(names)
+            + "** belum jelas perannya. Mana nama penyusun/siswa, guru/dosen, atau anggota kelompok?"
+        )
+
+    def _update_single(self, message: str, *, expected_field: str = "") -> str:
         """Perbarui data cover dan kembalikan pesan klarifikasi jika ada ambiguitas."""
         raw = (message or "").strip()
         if not raw:

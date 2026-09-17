@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from itertools import permutations
 
 from app.document_agent import DocumentAgent
 from app.document_cover import MakalahCoverData
@@ -221,6 +222,124 @@ class DocumentCoverLoopTests(unittest.TestCase):
             self.assertIn("nama guru/dosen", result.text)
             self.assertEqual(agent.cover.teacher_name, "")
             self.assertEqual(provider.calls, [])
+
+    def test_combined_unlabelled_message_completes_cover_in_one_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent, provider = self.make_agent(tmp)
+            agent.phase = "cover"
+            result = agent.handle(
+                "individu, rafi pratama, Smk negeri 4 contoh, 2026/2027, dan guru dewi lestari"
+            )
+            self.assertEqual(result.status, "cover_complete")
+            self.assertEqual(agent.phase, "ready_for_draft")
+            self.assertEqual(agent.cover.assignment_type, "individu")
+            self.assertEqual(agent.cover.author_name, "rafi pratama")
+            self.assertEqual(agent.cover.institution_name, "Smk negeri 4 contoh")
+            self.assertEqual(agent.cover.academic_year, "2026/2027")
+            self.assertEqual(agent.cover.teacher_name, "dewi lestari")
+            self.assertNotIn("Siapa **nama penyusun", result.text)
+            self.assertEqual(result.text.count("`lanjutkan`"), 1)
+            self.assertEqual(provider.calls, [])
+
+    def test_combined_values_work_in_any_order(self):
+        values = ("individu", "Rafi Pratama", "SMK Contoh", "2026/2027", "guru Dewi Lestari")
+        for parts in permutations(values):
+            with self.subTest(parts=parts):
+                cover = MakalahCoverData()
+                self.assertEqual(cover.update(", ".join(parts), expected_field="assignment_type"), "")
+                self.assertEqual(cover.author_name, "Rafi Pratama")
+                self.assertEqual(cover.teacher_name, "Dewi Lestari")
+                self.assertEqual(cover.institution_name, "SMK Contoh")
+                self.assertEqual(cover.academic_year, "2026/2027")
+
+    def test_retry_after_only_assignment_was_saved_fills_remaining_data(self):
+        cover = MakalahCoverData(assignment_type="individu")
+        result = cover.update(
+            "Rafi Pratama; SMK Contoh; 2026/2027; guru Dewi Lestari",
+            expected_field="author_name",
+        )
+        self.assertEqual(result, "")
+        self.assertTrue(cover.complete)
+        self.assertEqual(cover.author_name, "Rafi Pratama")
+        self.assertEqual(cover.teacher_name, "Dewi Lestari")
+
+    def test_inline_labels_and_teacher_degree_are_preserved(self):
+        cover = MakalahCoverData()
+        result = cover.update(
+            "Jenis tugas: individu, Nama penyusun: Rafi Pratama, Nama sekolah: SMK Contoh, "
+            "tahun ajaran: 2026/2027, guru: Dewi Lestari, S.Pd."
+        )
+        self.assertEqual(result, "")
+        self.assertEqual(cover.teacher_name, "Dewi Lestari, S.Pd")
+        self.assertEqual(cover.author_name, "Rafi Pratama")
+        self.assertEqual(cover.institution_name, "SMK Contoh")
+
+    def test_explicit_members_list_keeps_all_names_and_excludes_other_fields(self):
+        cover = MakalahCoverData()
+        result = cover.update("kelompok, anggota: Rafi, Bima, Citra, SMK Contoh, 2026/2027, guru Dewi")
+        self.assertEqual(result, "")
+        self.assertEqual(cover.group_members, "Rafi, Bima, Citra")
+        self.assertEqual(cover.institution_name, "SMK Contoh")
+        self.assertEqual(cover.teacher_name, "Dewi")
+
+    def test_bare_member_names_use_explicit_group_context(self):
+        cover = MakalahCoverData()
+        result = cover.update("kelompok, Rafi, Bima, SMK Contoh, 2026/2027")
+        self.assertEqual(result, "")
+        self.assertEqual(cover.group_members, "Rafi, Bima")
+        self.assertTrue(cover.complete)
+
+    def test_two_bare_names_are_not_guessed_for_individual_assignment(self):
+        cover = MakalahCoverData()
+        result = cover.update("individu, Rafi Pratama, Dewi Lestari, SMK Contoh")
+        self.assertIn("belum jelas perannya", result)
+        self.assertEqual(cover.author_name, "")
+        self.assertEqual(cover.teacher_name, "")
+        self.assertEqual(cover.institution_name, "SMK Contoh")
+
+    def test_incomplete_cover_does_not_invite_continuation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent, _ = self.make_agent(tmp)
+            agent.phase = "cover"
+            result = agent.handle("individu, SMK Contoh, 2026/2027")
+            self.assertEqual(result.status, "needs_cover")
+            self.assertIn("nama penyusun", result.text)
+            self.assertNotIn("`lanjutkan`", result.text)
+            self.assertEqual(agent.cover.academic_year, "2026/2027")
+
+    def test_comma_correction_and_other_fields_are_separate(self):
+        cover = MakalahCoverData(assignment_type="individu", author_name="Rafi", teacher_name="Dewi")
+        result = cover.update("Nama gurunya bukan Dewi, ganti menjadi Ratna, tahun ajaran 2026/2027")
+        self.assertEqual(result, "")
+        self.assertEqual(cover.teacher_name, "Ratna")
+        self.assertEqual(cover.academic_year, "2026/2027")
+        self.assertEqual(cover.author_name, "Rafi")
+
+    def test_resending_optional_data_repairs_previously_combined_year(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            agent, provider = self.make_agent(tmp)
+            agent.phase = "ready_for_draft"
+            agent.cover.assignment_type = "individu"
+            agent.cover.author_name = "Rafi"
+            agent.cover.academic_year = "2026/2027, nama sekolah SMK Contoh, dan nama guru Dewi"
+            result = agent.handle("tahun ajaran 2026/2027, nama sekolah SMK Contoh, dan nama guru Dewi")
+            self.assertEqual(result.status, "cover_updated")
+            self.assertEqual(agent.cover.academic_year, "2026/2027")
+            self.assertEqual(agent.cover.institution_name, "SMK Contoh")
+            self.assertEqual(agent.cover.teacher_name, "Dewi")
+            self.assertEqual(provider.calls, [])
+
+    def test_repeated_same_cover_message_is_safe(self):
+        cover = MakalahCoverData()
+        message = "individu, Rafi, SMK Contoh, 2026/2027, guru Dewi"
+        self.assertEqual(cover.update(message, expected_field="assignment_type"), "")
+        self.assertEqual(cover.update(message), "")
+        self.assertEqual(cover.author_name, "Rafi")
+
+    def test_retry_words_are_not_saved_as_author_name(self):
+        cover = MakalahCoverData(assignment_type="individu")
+        cover.update("coba lagi", expected_field="author_name")
+        self.assertEqual(cover.author_name, "")
 
 
 if __name__ == "__main__":

@@ -68,7 +68,18 @@ class DocumentCoverLoopTests(unittest.TestCase):
         self.assertEqual(cover.academic_year, "2026/2027")
         self.assertEqual(cover.teacher_name, "Guru Baru")
 
-    def test_ready_for_draft_phase_keeps_cover_loop_open(self):
+    def test_explicit_correction_phrase_updates_existing_value(self):
+        cover = MakalahCoverData(
+            assignment_type="individu",
+            author_name="Ananda",
+            teacher_name="Purnama Sari",
+        )
+
+        cover.update("Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati.")
+
+        self.assertEqual(cover.teacher_name, "Nurhayati")
+
+    def test_ready_for_draft_phase_keeps_cover_loop_open_and_confirms_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = DocumentPreferenceStore(Path(tmp) / "prefs.db")
             provider = FakeProvider()
@@ -88,10 +99,37 @@ class DocumentCoverLoopTests(unittest.TestCase):
                 "Nama Guru Purnama Sari"
             )
 
-            self.assertEqual(result.status, "ready_for_draft")
+            self.assertEqual(result.status, "cover_updated")
             self.assertEqual(agent.cover.institution_name, "SMK Negeri 2 Padangsidimpuan")
             self.assertEqual(agent.cover.academic_year, "2026/2027")
             self.assertEqual(agent.cover.teacher_name, "Purnama Sari")
+            self.assertIn("Data cover berhasil diperbarui", result.text)
+            self.assertIn("SMK Negeri 2 Padangsidimpuan", result.text)
+            self.assertIn("2026/2027", result.text)
+            self.assertIn("Purnama Sari", result.text)
+            self.assertEqual(provider.calls, [])
+
+    def test_ready_for_draft_correction_confirms_latest_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = DocumentPreferenceStore(Path(tmp) / "prefs.db")
+            provider = FakeProvider()
+            agent = DocumentAgent(
+                provider,
+                research=FakeResearch(),
+                registry=FakeRegistry(),
+                preference_store=store,
+            )
+            agent.cover.assignment_type = "individu"
+            agent.cover.author_name = "Ananda"
+            agent.cover.teacher_name = "Purnama Sari"
+            agent.phase = "ready_for_draft"
+
+            result = agent.handle("Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati.")
+
+            self.assertEqual(result.status, "cover_updated")
+            self.assertEqual(agent.cover.teacher_name, "Nurhayati")
+            self.assertIn("Guru/dosen: Nurhayati", result.text)
+            self.assertNotIn("Guru/dosen: Purnama Sari", result.text)
             self.assertEqual(provider.calls, [])
 
 

@@ -135,6 +135,11 @@ Jika pelanggan benar-benar tidak memiliki pedoman:
 - Nilai seperti `Tidak dicantumkan` boleh diganti oleh nilai nyata yang diberikan pelanggan kemudian.
 - Untuk pola yang jelas, gunakan parser lokal di `app/document_cover.py` tanpa token AI.
 - Pelanggan tidak wajib memakai format `Label: Nilai`; bahasa seperti `Nama Sekolah SMK Negeri 2 Padangsidimpuan`, `tahun ajaran 2026/2027`, atau `Nama Guru Purnama Sari` harus dapat dipahami.
+- Pengumpulan cover memakai **context-aware slot filling**: pertanyaan Nara hanya menunjukkan slot wajib yang sedang kurang, bukan urutan formulir yang harus diikuti pelanggan.
+- Pelanggan boleh menjawab tidak berurutan. Nilai khas seperti `2026/2027` atau `SMK Negeri 2 Padangsidimpuan` tetap boleh disimpan walaupun Nara sedang menanyakan field lain.
+- Jika Nara sedang menanyakan satu field nama yang jelas, pelanggan boleh menjawab nama polos tanpa awalan `Nama:`. Contoh: pertanyaan `Siapa nama penyusun?` dapat dijawab cukup `Ananda Azhari Batubara`.
+- Nama polos tanpa konteks aman **tidak boleh ditebak**. Minta klarifikasi apakah nama itu milik penyusun/siswa, guru/dosen, atau anggota kelompok.
+- Klarifikasi ambigu dilakukan lokal tanpa panggilan AI.
 - Koreksi natural seperti `Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati` harus memperbarui nilai lama, bukan membuat data ganda.
 - Fase `ready_for_draft` tetap memanggil parser cover pada setiap pesan, sehingga data opsional dapat ditambahkan belakangan tanpa reset sesi.
 - Jika nilai cover berubah, Document Agent harus memberi konfirmasi eksplisit berisi field yang berubah, misalnya `Guru/dosen: Nurhayati`, agar pelanggan tahu perubahan benar-benar tersimpan.

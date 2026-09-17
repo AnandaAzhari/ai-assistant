@@ -79,6 +79,42 @@ class MakalahCoverData:
         else:
             setattr(self, key, clean)
 
+    def _update_corrections(self, raw: str) -> None:
+        """Tangani koreksi eksplisit seperti `nama gurunya ... ganti menjadi ...`.
+
+        Koreksi eksplisit diprioritaskan karena pelanggan bisa memperbarui data yang
+        sebelumnya sudah tersimpan tanpa perlu mengulang sesi atau memakai format form.
+        """
+        for source_line in raw.splitlines():
+            line = re.sub(r"^\s*(?:[-*>•]\s*)?", "", source_line).strip()
+            if not line:
+                continue
+            match = re.search(
+                r"\b(?:ganti|ubah|diganti|diubah)\s+(?:menjadi|jadi|ke)\s+(.+?)\s*[.!]?$",
+                line,
+                re.IGNORECASE,
+            )
+            if not match:
+                continue
+            value = match.group(1)
+            lowered = line.casefold()
+            if any(term in lowered for term in ("sekolah", "kampus", "universitas", "instansi")):
+                self._apply_optional_value("institution_name", value)
+            elif "tahun ajaran" in lowered or "tahun akademik" in lowered:
+                self._apply_optional_value("academic_year", value)
+            elif "guru" in lowered or "dosen" in lowered:
+                self._apply_optional_value("teacher_name", value)
+            elif "kelompok" in lowered and "anggota" not in lowered:
+                self._apply_optional_value("group_name", value)
+            elif "anggota" in lowered:
+                clean = self._clean_value(value)
+                if clean:
+                    self.group_members = clean
+            elif any(term in lowered for term in ("nama penyusun", "penyusun", "nama saya")):
+                clean = self._clean_value(value)
+                if clean:
+                    self.author_name = clean
+
     def _update_natural_optional_fields(self, raw: str) -> None:
         """Baca data cover opsional dari bahasa biasa, tanpa AI.
 
@@ -112,6 +148,9 @@ class MakalahCoverData:
         for source_line in raw.splitlines():
             line = re.sub(r"^\s*(?:[-*>•]\s*)?", "", source_line).strip()
             if not line or ":" in line:
+                continue
+            # Baris koreksi eksplisit sudah diproses oleh _update_corrections().
+            if re.search(r"\b(?:ganti|ubah|diganti|diubah)\b", line, re.IGNORECASE):
                 continue
             for key, patterns in line_patterns.items():
                 matched = False
@@ -180,6 +219,9 @@ class MakalahCoverData:
                 self._apply_optional_value(key, value)
                 continue
             setattr(self, key, value[:500])
+
+        # Koreksi eksplisit diproses sebelum parser natural biasa agar nilai terbaru menang.
+        self._update_corrections(raw)
 
         # Jalankan parser natural setiap pesan, termasuk setelah data wajib cover lengkap.
         # Dengan begitu pelanggan boleh menambahkan data opsional belakangan tanpa reset.

@@ -89,6 +89,22 @@ class MakalahBriefV2Tests(unittest.TestCase):
         self.assertEqual(brief.topic_title, "AI Agent")
         self.assertEqual(changed, ["class_semester"])
 
+    def test_approved_focus_is_saved_only_when_customer_has_not_set_one(self):
+        brief = MakalahBrief()
+
+        self.assertTrue(brief.approve_focus("Penerapan AI Agent di sekolah"))
+        self.assertEqual(brief.focus, "Penerapan AI Agent di sekolah")
+        self.assertFalse(brief.approve_focus("Fokus lain dari model"))
+        self.assertEqual(brief.focus, "Penerapan AI Agent di sekolah")
+
+    def test_ibid_instruction_is_not_saved_as_must_avoid_content(self):
+        brief = MakalahBrief()
+
+        changed = brief.apply_ai_values({"must_avoid": "Ibid."})
+
+        self.assertEqual(changed, [])
+        self.assertEqual(brief.must_avoid, "")
+
     def test_agent_ai_first_understands_typo_and_random_order(self):
         payload = {
             "institution_level": "SMK",

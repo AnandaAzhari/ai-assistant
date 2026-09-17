@@ -25,6 +25,7 @@ Utamakan parser lokal deterministik tanpa token AI untuk pola yang jelas, misaln
 - `Nama Guru Purnama Sari`
 - `dosen pengampu Budi Santoso`
 - `Nama Sekolah: SMK Negeri 2 Padangsidimpuan`
+- `Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati.`
 
 Pelanggan tidak wajib memakai tanda titik dua atau format formulir tertentu.
 
@@ -40,12 +41,34 @@ Alur yang diinginkan:
 4. Setiap pesan baru tetap boleh diperiksa untuk pembaruan data cover.
 5. Nilai `Tidak dicantumkan` bukan keputusan permanen; jika pelanggan kemudian memberi nilai nyata, nilai baru menggantikannya.
 6. Jika pelanggan mengoreksi nilai lama, gunakan nilai terbaru untuk file final.
+7. Jika ada perubahan yang berhasil dibaca, balas dengan konfirmasi nilai yang berubah agar pelanggan tahu datanya benar-benar tersimpan.
+8. Loop tetap terbuka sampai pelanggan memilih melanjutkan proses atau file final dikunci.
 
 Contoh:
 
 - awal: `Sekolah/kampus: Tidak dicantumkan`
 - kemudian pelanggan: `Nama sekolah SMK Negeri 2 Padangsidimpuan`
 - hasil terbaru: `Sekolah/kampus: SMK Negeri 2 Padangsidimpuan`
+
+Contoh koreksi:
+
+- awal: `Guru/dosen: Purnama Sari`
+- pelanggan: `Nama gurunya bukan Purnama Sari, ganti menjadi Nurhayati.`
+- hasil terbaru: `Guru/dosen: Nurhayati`
+
+## UX konfirmasi
+
+Setelah pembaruan berhasil, respons sebaiknya ringkas dan eksplisit, misalnya:
+
+`Data cover berhasil diperbarui:`
+
+- `Sekolah/kampus: SMK Negeri 2 Padangsidimpuan`
+- `Tahun ajaran: 2026/2027`
+- `Guru/dosen: Purnama Sari`
+
+Lalu jelaskan bahwa pelanggan tetap boleh menambahkan atau mengubah data cover lain sebelum file final dibuat. Pelanggan tidak perlu memakai slash command; bahasa natural seperti `lanjutkan` atau `sudah cukup` boleh dipakai untuk meneruskan proses.
+
+Jangan membalas hanya dengan `Semua data utama sudah siap` ketika pesan pelanggan sebenarnya baru saja mengubah data cover, karena pelanggan perlu melihat konfirmasi nilai terbaru.
 
 ## Prioritas
 
@@ -61,5 +84,7 @@ Jangan mengubah data cover order lain. Data harus tetap scoped per sesi/order.
 Implementasi parser aktif berada di `app/document_cover.py`.
 
 `MakalahCoverData.update()` dipanggil berulang selama fase cover dan fase `ready_for_draft`, sehingga data opsional dapat ditambahkan setelah data wajib selesai tanpa reset sesi dan tanpa token AI.
+
+`DocumentAgent` membandingkan snapshot sebelum dan sesudah pembaruan. Jika ada nilai berubah, respons memakai status `cover_updated` dan menampilkan field yang berubah.
 
 Jika di masa depan pembaruan cover diizinkan setelah draft dibuat, metadata `MakalahSpec` juga harus disinkronkan sebelum file final dibangun agar cover Word/PDF memakai nilai terbaru.

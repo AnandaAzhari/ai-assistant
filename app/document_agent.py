@@ -1,13 +1,9 @@
-"""Document/Makalah Agent v1.8.
+"""Document/Makalah Agent v2.0.
 
-Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
-AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
-yang kemungkinan disebut tetapi belum terbaca. DeepSeek dipakai untuk kerangka dan
-isi makalah. Struktur default dikunci oleh policies/document_format_policy.md;
-instruksi guru/dosen/sekolah/kampus dapat mengoverride bagian yang relevan.
-Document Preferences memproses preferensi pelanggan secara lokal per order/scope.
-Sesudah isi siap, CitationEngine + DocumentEngine membuat catatan kaki,
-daftar pustaka, DOCX, dan PDF secara lokal tanpa memanggil model AI lagi.
+MakalahBrief menjadi schema pusat kebutuhan pelanggan. AI dipakai lebih dulu untuk
+memahami bahasa natural, typo, urutan acak, dan koreksi; kode deterministik tetap
+memegang state, validasi, fallback lokal, cover, research registry, serta pembuatan
+Word/PDF. DeepSeek dipakai untuk interpretasi briefing, kerangka, dan isi makalah.
 """
 
 from __future__ import annotations
@@ -20,14 +16,14 @@ from app.citation_engine import CitationEngine
 from app.document_cover import MakalahCoverData
 from app.document_draft import DraftGenerator
 from app.document_engine import DocumentEngine, MakalahSpec, demo_spec
-from app.document_intake import IntakeInterpreter
+from app.document_intake import IntakeInterpreter, IntakeResult
 from app.document_policy import load_document_format_policy
 from app.document_preferences import (
     DocumentPreferences,
     DocumentPreferenceStore,
     PreferenceParseResult,
 )
-from app.document_requirements import MakalahRequirements
+from app.makalah_brief import MakalahBrief
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
 from app.source_registry import SourceRegistry
@@ -52,14 +48,15 @@ COVER_FIELD_LABELS = (
 )
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
-Data utama makalah sudah diperiksa oleh sistem.
+MakalahBrief sudah diperiksa oleh sistem dan data inti sudah cukup.
 
 Tugasmu pada tahap ini HANYA membuat ringkasan singkat dan kerangka makalah.
 Aturan:
-- gunakan bahasa Indonesia yang jelas, sederhana, dan mudah dipahami siswa/i;
-- jangan gunakan istilah teknis bila ada kata yang lebih mudah;
+- gunakan bahasa Indonesia yang jelas dan sesuai jenjang pelanggan;
 - jangan gunakan tabel Markdown;
 - ringkasan data cukup berupa bullet singkat;
+- gunakan fokus, tingkat bahasa, ketentuan sumber, hal wajib/larangan, dan pedoman resmi dari MakalahBrief bila tersedia;
+- jika fokus belum ditentukan pelanggan, boleh USULKAN fokus yang wajar di kerangka, tetapi tandai sebagai usulan dan jangan menganggap pelanggan sudah menyetujuinya;
 - jika ada arahan guru/dosen/sekolah/kampus, arahan itu lebih penting daripada template standar;
 - jangan mengarang sumber atau daftar pustaka;
 - WAJIB mengikuti policy format dokumen yang dikirim pada system message berikutnya;
@@ -67,7 +64,7 @@ Aturan:
 - jangan mengganti default Makalah menjadi BAB I -> 1.1 -> 1.1.1 atau I. -> A. -> 1. -> a. tanpa instruksi resmi;
 - jangan memakai bullet sebagai pengganti heading;
 - hormati target jumlah halaman dan jangan membuat terlalu banyak subbagian untuk dokumen pendek;
-- JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem lokal setelah kerangka disetujui;
+- JANGAN meminta data cover pada jawaban ini; data cover dikumpulkan sistem setelah kerangka disetujui;
 - JANGAN membuat isi makalah lengkap pada tahap ini;
 - selesaikan seluruh ringkasan dan kerangka; jangan sengaja memotong bagian akhir;
 - tidak perlu menulis petunjuk kata balasan pelanggan karena sistem akan menambahkannya secara lokal setelah jawaban model.
@@ -106,7 +103,10 @@ class DocumentAgent:
         self._draft_spec: MakalahSpec | None = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
-        self.requirements = MakalahRequirements()
+        self._last_intake_result: IntakeResult | None = None
+        self.brief = MakalahBrief()
+        # Alias sementara agar modul lama yang membaca `requirements` tetap kompatibel.
+        self.requirements = self.brief
         self.cover = MakalahCoverData()
         self.phase = "requirements"
         self.source_scope = os.environ.get("DOCUMENT_SOURCE_SCOPE", "DOCSRC-ADMIN-DEFAULT").strip() or "DOCSRC-ADMIN-DEFAULT"
@@ -130,8 +130,8 @@ class DocumentAgent:
     def session_active(self) -> bool:
         if self.phase != "requirements":
             return True
-        labels = getattr(self.requirements, "FIELD_LABELS", {})
-        return any(bool(getattr(self.requirements, key, "")) for key in labels)
+        labels = getattr(self.brief, "FIELD_LABELS", {})
+        return any(bool(getattr(self.brief, key, "")) for key in labels)
 
     @property
     def draft_spec(self) -> MakalahSpec | None:
@@ -146,20 +146,20 @@ class DocumentAgent:
         research_note = self.research.status_text if self.research else "Research Manager: belum tersedia"
         registry_note = "Source Registry: siap (SQLite)" if self.registry else "Source Registry: belum tersedia"
         draft_note = "Pembuat isi makalah: siap" if self.configured else "Pembuat isi makalah: menunggu provider AI"
-        intake_note = "Pemahaman pesan pelanggan: hybrid lokal + AI fallback" if self.configured else "Pemahaman pesan pelanggan: lokal"
+        intake_note = "MakalahBrief: AI-first + validasi/fallback lokal" if self.configured else "MakalahBrief: fallback lokal"
         policy_note = "Format makalah: policy Markdown aktif"
         preference_note = f"Preferensi sitasi: {self.preferences.citation_repeat_mode}"
         final_note = "Pembuat Word/PDF + catatan kaki: siap" if self.citation_engine else "Pembuat Word/PDF + catatan kaki: belum tersedia"
         if not self.configured:
             return DocumentResult(
                 "belum_dikonfigurasi",
-                "Document Agent tersedia. Data awal dan data cover diproses lokal, tetapi DeepSeek API belum dikonfigurasi.\n"
+                "Document Agent tersedia. MakalahBrief masih dapat memakai fallback lokal, tetapi provider AI belum dikonfigurasi.\n"
                 + engine_note + "\n" + research_note + "\n" + registry_note + "\n" + draft_note + "\n" + intake_note + "\n" + policy_note + "\n" + preference_note + "\n" + final_note,
             )
         return DocumentResult(
             "siap",
             f"Document Agent: siap memakai {self.model_label}.\n{engine_note}.\n{research_note}\n{registry_note}\n{draft_note}.\n{intake_note}.\n{policy_note}.\n{preference_note}.\n{final_note}.\n"
-            "Parser lokal dipakai lebih dulu; AI fallback hanya membantu memahami pesan pelanggan yang ambigu.",
+            "AI memahami bahasa pelanggan terlebih dahulu; kode deterministik memvalidasi dan menyimpan state.",
         )
 
     def engine_status(self) -> DocumentResult:
@@ -180,7 +180,7 @@ class DocumentAgent:
         parts = raw.split(maxsplit=1)
         query = parts[1].strip() if len(parts) > 1 else ""
         if not query:
-            query = (self.requirements.topic_title or "").strip()
+            query = (self.brief.topic_title or "").strip()
         if not query:
             return DocumentResult("membutuhkan_bantuan", "Tulis topik yang ingin dicari sumbernya.")
         result = self.research.search(query, limit=10)
@@ -254,7 +254,8 @@ class DocumentAgent:
         self._draft_spec = None
         self._final_docx_path = ""
         self._final_pdf_path = ""
-        self.requirements.reset()
+        self._last_intake_result = None
+        self.brief.reset()
         self.cover.reset()
         self.preference_store.reset(self.source_scope)
         self.preferences = DocumentPreferences()
@@ -263,7 +264,7 @@ class DocumentAgent:
             self.registry.clear_scope(self.source_scope)
         return DocumentResult(
             "berhasil",
-            "Sesi dokumen dimulai ulang. Saya akan meminta data yang benar-benar diperlukan saja.",
+            "Sesi dokumen dimulai ulang. Saya akan memahami kebutuhan makalah dari percakapan biasa.",
         )
 
     @staticmethod
@@ -278,13 +279,17 @@ class DocumentAgent:
     def _usage_note(cls, reply) -> str:
         return cls._usage_note_values(reply.model, reply.input_tokens, reply.output_tokens)
 
-    def _apply_intake_fallback(self, raw: str) -> None:
-        missing = self.requirements.missing_fields()
-        if not self.configured or not self.intake_interpreter.should_use(raw, missing):
-            return
-        result = self.intake_interpreter.interpret(raw, self.requirements.structured_text())
-        if result.status == "berhasil":
-            self.requirements.apply_ai_values(result.values)
+    def _apply_intake_ai_first(self, raw: str) -> IntakeResult | None:
+        """AI memahami pesan dulu; parser lokal hanya mengisi celah jika AI gagal/lewat."""
+        result: IntakeResult | None = None
+        if self.configured:
+            result = self.intake_interpreter.interpret(raw, self.brief.structured_text())
+            self._last_intake_result = result
+            if result.status == "berhasil":
+                self.brief.apply_ai_values(result.values)
+        # Fallback tidak menimpa nilai yang sudah dipahami AI.
+        self.brief.apply_local_fallback(raw)
+        return result
 
     def _apply_preferences(self, raw: str) -> PreferenceParseResult:
         updated, result = self.preference_store.apply_message(self.source_scope, raw)
@@ -310,8 +315,8 @@ class DocumentAgent:
         messages = [
             {"role": "system", "content": OUTLINE_PROMPT},
             {"role": "system", "content": "POLICY FORMAT DOKUMEN WAJIB:\n" + load_document_format_policy()},
+            {"role": "system", "content": "MAKALAHBRIEF AKTIF:\n" + self.brief.structured_text()},
         ]
-        messages.append({"role": "system", "content": "DATA MAKALAH YANG SUDAH LENGKAP:\n" + self.requirements.structured_text()})
         if revision:
             messages.extend(self._history[-self.history_limit:])
             messages.append({"role": "user", "content": "Perbaiki kerangka makalah sesuai permintaan ini:\n" + raw[:4000]})
@@ -411,7 +416,7 @@ class DocumentAgent:
 
     def generate_draft(self) -> DocumentResult:
         if self.phase not in {"ready_for_draft", "draft_ready"}:
-            return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi data utama, setujui kerangka, dan isi data cover terlebih dahulu.")
+            return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi MakalahBrief, setujui kerangka, dan isi data cover terlebih dahulu.")
         if not self.registry:
             return DocumentResult("belum_dikonfigurasi", "Daftar sumber belum tersedia.")
         sources = self.registry.list_sources(self.source_scope)
@@ -421,7 +426,7 @@ class DocumentAgent:
                 "Belum ada sumber yang disimpan. Cari sumber terlebih dahulu sebelum membuat isi makalah.",
             )
         result = self.draft_generator.generate(
-            self.requirements.structured_text(), self.cover.structured_text(), self._outline_text, sources,
+            self.brief.structured_text(), self.cover.structured_text(), self._outline_text, sources,
         )
         if result.status != "berhasil":
             return DocumentResult(result.status, (result.warning or "Isi makalah belum berhasil dibuat.") + self._usage_note_values(result.model, result.input_tokens, result.output_tokens))
@@ -440,10 +445,10 @@ class DocumentAgent:
             group_name = ""
         self._draft_spec = MakalahSpec(
             order_id="DRAFT-" + self.source_scope.replace("DOCSRC-", ""),
-            title=self.requirements.topic_title,
+            title=self.brief.topic_title,
             institution=institution,
-            class_semester=self.requirements.class_semester,
-            subject=self.requirements.subject,
+            class_semester=self.brief.class_semester,
+            subject=self.brief.subject,
             author=self.cover.author_name,
             teacher=teacher,
             year=year,
@@ -564,17 +569,12 @@ class DocumentAgent:
             extra = ""
             if preference_result.changed and self.phase == "draft_ready" and not self._final_docx_path:
                 extra = "\nPreferensi ini akan dipakai saat file Word/PDF dibuat."
-            return DocumentResult(
-                "preference_updated",
-                preference_result.message + extra,
-            )
+            return DocumentResult("preference_updated", preference_result.message + extra)
 
         if self.phase == "requirements":
-            self.requirements.update(raw)
-            if not self.requirements.complete:
-                self._apply_intake_fallback(raw)
-            if not self.requirements.complete:
-                return DocumentResult("needs_requirements", self.requirements.question_text())
+            self._apply_intake_ai_first(raw)
+            if not self.brief.complete:
+                return DocumentResult("needs_requirements", self.brief.question_text())
             return self._generate_outline(raw)
 
         if self.phase == "outline_confirmation":
@@ -597,10 +597,7 @@ class DocumentAgent:
                     self._join_cover_messages(confirmation, clarification, question),
                 )
             if not self.cover.complete:
-                return DocumentResult(
-                    "needs_cover",
-                    self._join_cover_messages(confirmation, question),
-                )
+                return DocumentResult("needs_cover", self._join_cover_messages(confirmation, question))
 
             self.phase = "ready_for_draft"
             return DocumentResult(

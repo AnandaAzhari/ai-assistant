@@ -160,7 +160,11 @@ class MakalahBrief:
         return changed
 
     def apply_local_fallback(self, message: str) -> list[str]:
-        """Isi hanya field inti yang masih kosong dengan parser deterministik lama."""
+        """Isi celah field inti dengan parser deterministik lama.
+
+        Sentinel target panjang juga boleh diperbarui ketika pelanggan menyetujui
+        rekomendasi 8–12 halaman dengan jawaban singkat seperti `boleh`.
+        """
         legacy = MakalahRequirements(
             institution_level=self.institution_level,
             class_semester=self.class_semester,
@@ -178,11 +182,13 @@ class MakalahBrief:
         ):
             current = getattr(self, key, "")
             candidate = getattr(legacy, key, "")
-            if not current and candidate:
+            can_fill = not current or (key == "target_length" and current == DEFAULT_LENGTH_SENTINEL)
+            if can_fill and candidate:
                 if key == "target_length" and candidate == "__confirm_default_8_12_pages__":
                     candidate = DEFAULT_LENGTH_SENTINEL
-                setattr(self, key, candidate)
-                changed.append(key)
+                if candidate != current:
+                    setattr(self, key, candidate)
+                    changed.append(key)
         return changed
 
     def question_text(self) -> str:

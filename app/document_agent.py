@@ -1,4 +1,4 @@
-"""Document/Makalah Agent v1.6.
+"""Document/Makalah Agent v1.7.
 
 Data awal dikumpulkan dengan pola hybrid: parser lokal tetap utama dan gratis, lalu
 AI fallback ringan hanya dipakai ketika bahasa pelanggan ambigu/typo dan ada field
@@ -39,6 +39,16 @@ OUTLINE_ACTION_HINT = (
     "Jika kerangkanya sudah sesuai, cukup balas dengan bahasa biasa seperti "
     "`lanjutkan`, `lanjut saja`, `sudah sesuai`, atau `oke lanjut`. "
     "Jika ingin diubah, tuliskan bagian yang perlu diperbaiki."
+)
+
+COVER_FIELD_LABELS = (
+    ("institution_name", "Sekolah/kampus"),
+    ("assignment_type", "Jenis tugas"),
+    ("author_name", "Nama penyusun"),
+    ("group_name", "Kelompok"),
+    ("group_members", "Anggota kelompok"),
+    ("academic_year", "Tahun ajaran"),
+    ("teacher_name", "Guru/dosen"),
 )
 
 OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
@@ -367,6 +377,34 @@ class DocumentAgent:
         parts = [item.strip() for item in re.split(r"[,;\n]+", value or "") if item.strip()]
         return tuple(parts)
 
+    @staticmethod
+    def _cover_snapshot(cover: MakalahCoverData) -> dict[str, str]:
+        return {key: str(getattr(cover, key, "") or "") for key, _ in COVER_FIELD_LABELS}
+
+    @staticmethod
+    def _cover_display_value(value: str) -> str:
+        return value.strip() if value and value.strip() else "Tidak dicantumkan"
+
+    @classmethod
+    def _cover_update_message(cls, before: dict[str, str], after: dict[str, str]) -> str:
+        changed = [
+            (key, label, after.get(key, ""))
+            for key, label in COVER_FIELD_LABELS
+            if before.get(key, "") != after.get(key, "")
+        ]
+        if not changed:
+            return ""
+        lines = ["Data cover berhasil diperbarui:"]
+        for _, label, value in changed:
+            lines.append(f"- {label}: {cls._cover_display_value(value)}")
+        lines.append(
+            "\nJika masih ada data cover yang ingin ditambahkan atau diubah, kirim saja kapan pun sebelum file final dibuat."
+        )
+        lines.append(
+            "Jika sudah cukup, lanjutkan proses dengan bahasa biasa seperti `lanjutkan` atau `sudah cukup`."
+        )
+        return "\n".join(lines)
+
     def generate_draft(self) -> DocumentResult:
         if self.phase not in {"ready_for_draft", "draft_ready"}:
             return DocumentResult("membutuhkan_bantuan", "Isi makalah belum bisa dibuat. Lengkapi data utama, setujui kerangka, dan isi data cover terlebih dahulu.")
@@ -542,22 +580,38 @@ class DocumentAgent:
             return self._generate_outline(raw, revision=True)
 
         if self.phase == "cover":
+            before = self._cover_snapshot(self.cover)
             self.cover.update(raw)
+            after = self._cover_snapshot(self.cover)
             if not self.cover.complete:
-                return DocumentResult("needs_cover", self.cover.question_text())
+                confirmation = self._cover_update_message(before, after)
+                question = self.cover.question_text()
+                if confirmation:
+                    return DocumentResult("needs_cover", confirmation + "\n\n" + question)
+                return DocumentResult("needs_cover", question)
             self.phase = "ready_for_draft"
+            confirmation = self._cover_update_message(before, after)
+            intro = confirmation + "\n\n" if confirmation else ""
             return DocumentResult(
                 "cover_complete",
-                "Data utama untuk cover sudah cukup.\n\n"
+                intro
+                + "Data utama untuk cover sudah cukup.\n\n"
                 + self.cover.structured_text()
-                + "\n\nUntuk pengujian admin saat ini, ketik `/draft` jika ingin membuat isi makalah. Pelanggan nantinya tidak perlu memakai perintah seperti ini.",
+                + "\n\nData cover tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
+                "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
             )
 
         if self.phase == "ready_for_draft":
+            before = self._cover_snapshot(self.cover)
             self.cover.update(raw)
+            after = self._cover_snapshot(self.cover)
+            confirmation = self._cover_update_message(before, after)
+            if confirmation:
+                return DocumentResult("cover_updated", confirmation)
             return DocumentResult(
                 "ready_for_draft",
-                "Semua data utama sudah siap. Untuk pengujian admin saat ini, ketik `/draft` untuk membuat isi makalah. Pelanggan nantinya cukup menjawab dengan bahasa biasa.",
+                "Semua data utama sudah siap. Data cover masih boleh ditambahkan atau diubah kapan saja sebelum file final dibuat. "
+                "Jika sudah cukup, lanjutkan proses dengan bahasa biasa. Untuk pengujian admin saat ini, `/draft` tetap tersedia.",
             )
 
         if self.phase == "draft_ready":

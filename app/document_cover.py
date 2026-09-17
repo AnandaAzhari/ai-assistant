@@ -1,4 +1,9 @@
-"""Pengumpul data cover makalah lokal tanpa token AI."""
+"""Pengumpul data cover makalah lokal tanpa token AI.
+
+Data cover boleh dilengkapi atau diubah berulang selama sesi/order masih aktif.
+Parser lokal menangani bahasa pelanggan yang umum agar informasi cover tidak perlu
+selalu dikirim dengan format `Label: Nilai` dan tidak memboroskan token AI.
+"""
 
 from __future__ import annotations
 
@@ -58,6 +63,67 @@ class MakalahCoverData:
             return False
         return all(re.fullmatch(r"[\w.'’-]+", word, flags=re.UNICODE) for word in words)
 
+    @staticmethod
+    def _clean_value(value: str) -> str:
+        value = re.sub(r"\s+", " ", (value or "").strip(" \t:-=.,"))
+        return value[:500]
+
+    def _apply_optional_value(self, key: str, value: str) -> None:
+        clean = self._clean_value(value)
+        if not clean:
+            return
+        if clean.casefold() in {
+            "tidak ada", "tidak perlu", "opsional", "-", "skip", "tidak dicantumkan"
+        }:
+            setattr(self, key, "Tidak dicantumkan")
+        else:
+            setattr(self, key, clean)
+
+    def _update_natural_optional_fields(self, raw: str) -> None:
+        """Baca data cover opsional dari bahasa biasa, tanpa AI.
+
+        Contoh yang didukung:
+        - `Nama sekolah SMK Negeri 2 Padangsidimpuan`
+        - `sekolah saya SMK Negeri 2 Padangsidimpuan`
+        - `tahun ajaran 2026/2027`
+        - `Nama Guru Purnama Sari`
+        - `dosen pengampu Budi Santoso`
+
+        Parser dijalankan setiap kali ada pesan baru, jadi nilai yang sebelumnya
+        `Tidak dicantumkan` tetap bisa ditambahkan atau diganti kemudian.
+        """
+        line_patterns = {
+            "institution_name": (
+                r"^(?:nama\s+)?(?:sekolah|kampus|universitas|instansi)\s+(?:saya\s+)?(.+)$",
+                r"^(?:sekolah|kampus|universitas)\s+saya\s+(?:adalah\s+)?(.+)$",
+            ),
+            "academic_year": (
+                r"^(?:tahun\s+ajaran|tahun\s+akademik)\s+(?:adalah\s+)?(.+)$",
+            ),
+            "teacher_name": (
+                r"^(?:nama\s+)?(?:guru|dosen)(?:\s+(?:pembimbing|pengampu))?\s+(?:saya\s+)?(.+)$",
+                r"^(?:guru|dosen)\s+saya\s+(?:adalah\s+)?(.+)$",
+            ),
+            "group_name": (
+                r"^(?:nama|nomor)\s+kelompok\s+(.+)$",
+            ),
+        }
+
+        for source_line in raw.splitlines():
+            line = re.sub(r"^\s*(?:[-*>•]\s*)?", "", source_line).strip()
+            if not line or ":" in line:
+                continue
+            for key, patterns in line_patterns.items():
+                matched = False
+                for pattern in patterns:
+                    match = re.match(pattern, line, re.IGNORECASE)
+                    if match:
+                        self._apply_optional_value(key, match.group(1))
+                        matched = True
+                        break
+                if matched:
+                    break
+
     def update(self, message: str) -> None:
         raw = (message or "").strip()
         if not raw:
@@ -68,6 +134,8 @@ class MakalahCoverData:
             "nama sekolah": "institution_name",
             "kampus": "institution_name",
             "nama kampus": "institution_name",
+            "universitas": "institution_name",
+            "nama universitas": "institution_name",
             "instansi": "institution_name",
             "jenis tugas": "assignment_type",
             "tugas": "assignment_type",
@@ -81,11 +149,13 @@ class MakalahCoverData:
             "anggota kelompok": "group_members",
             "nama anggota": "group_members",
             "tahun ajaran": "academic_year",
+            "tahun akademik": "academic_year",
             "tahun": "academic_year",
             "guru": "teacher_name",
             "guru pembimbing": "teacher_name",
             "nama guru": "teacher_name",
             "dosen": "teacher_name",
+            "dosen pengampu": "teacher_name",
             "nama dosen": "teacher_name",
         }
 
@@ -106,12 +176,14 @@ class MakalahCoverData:
                 elif "individu" in value_lower or "sendiri" in value_lower:
                     self.assignment_type = "individu"
                 continue
-            if key in {"institution_name", "group_name", "academic_year", "teacher_name"} and value_lower in {
-                "tidak ada", "tidak perlu", "opsional", "-", "skip", "tidak dicantumkan"
-            }:
-                setattr(self, key, "Tidak dicantumkan")
+            if key in {"institution_name", "group_name", "academic_year", "teacher_name"}:
+                self._apply_optional_value(key, value)
                 continue
             setattr(self, key, value[:500])
+
+        # Jalankan parser natural setiap pesan, termasuk setelah data wajib cover lengkap.
+        # Dengan begitu pelanggan boleh menambahkan data opsional belakangan tanpa reset.
+        self._update_natural_optional_fields(raw)
 
         lowered = raw.casefold()
         if not self.assignment_type:
@@ -151,15 +223,16 @@ class MakalahCoverData:
         if not missing:
             return (
                 "Data utama untuk cover sudah cukup.\n\n"
-                "Opsional kalau ingin dicantumkan: nama sekolah/kampus, nama/nomor kelompok, "
-                "tahun ajaran, dan nama guru/dosen."
+                "Data opsional tetap boleh ditambahkan atau diubah kapan saja sebelum file final dibuat, "
+                "misalnya nama sekolah/kampus, nama/nomor kelompok, tahun ajaran, dan nama guru/dosen."
             )
 
         lines = ["Sebelum saya buat isi makalah, saya masih perlu data untuk cover:"]
         for index, item in enumerate(missing, start=1):
             lines.append(f"{index}. **{item}**")
         lines.append(
-            "\nOpsional: nama sekolah/kampus, nama/nomor kelompok, tahun ajaran, dan nama guru/dosen."
+            "\nOpsional dan boleh ditambahkan belakangan: nama sekolah/kampus, nama/nomor kelompok, "
+            "tahun ajaran, dan nama guru/dosen."
         )
         return "\n".join(lines)
 

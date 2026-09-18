@@ -13,10 +13,18 @@ pelanggan" di `policies/security_policy.md`. Intent pelanggan memakai
 AI dikonfigurasi; router kata kunci di bawah ini tetap dipertahankan sebagai
 fallback fail-safe saat AI belum dikonfigurasi, gagal, atau hasilnya tidak lolos
 validasi. Router admin masih memakai aturan sederhana (belum berubah).
+
+Begitu pelanggan jelas ingin dibuatkan dokumen (makalah/KTI/skripsi), jalur pelanggan
+menyambung ke Document Agent (Nara) yang sama seperti dipakai admin — lihat
+`_customer_document_agent`/`_continue_customer_document` di bawah. Setiap pelanggan
+punya `DocumentAgent` tersendiri (scope `DOCSRC-WHATSAPP-<sender_id>`, lihat
+`document_factory`), supaya sesi/brief satu pelanggan tidak pernah tercampur dengan
+pelanggan lain (lihat "Isolasi Antar Pelanggan" di `policies/security_policy.md`).
 """
 
 import re
 from dataclasses import dataclass
+from typing import Callable
 
 from app.approval_gate import ApprovalGate
 from app.customer_intent import CustomerIntentClassifier
@@ -34,6 +42,10 @@ class LeadReply:
     target: str
     status: str
     text: str
+    # Path file lokal (Word/PDF) yang perlu dikirim ke pelanggan sebagai lampiran,
+    # kosong bila balasan ini tidak membawa file. Dipakai WhatsAppCustomerAdapter
+    # untuk tahu kapan harus mengunggah dan mengirim dokumen, bukan cuma teks.
+    attachment_path: str = ""
 
 
 class LeadAgent:
@@ -47,6 +59,7 @@ class LeadAgent:
         trust_layer: TrustLayer | None = None,
         approval_gate: ApprovalGate | None = None,
         intent_classifier: CustomerIntentClassifier | None = None,
+        document_factory: Callable[[str], DocumentAgent] | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -56,6 +69,11 @@ class LeadAgent:
         self.trust_layer = trust_layer
         self.approval_gate = approval_gate
         self.intent_classifier = intent_classifier
+        # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
+        # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
+        # kalau document_factory tidak diberikan (fitur belum diaktifkan).
+        self.document_factory = document_factory
+        self._customer_documents: dict[str, DocumentAgent] = {}
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         command = command.strip().lower()
@@ -304,6 +322,13 @@ class LeadAgent:
             "saya teruskan ke admin agar bisa dibalas dengan info harga yang akurat."
         ),
         "jawab_faq": "Pertanyaan ini akan diteruskan ke admin agar dijawab dengan informasi yang akurat.",
+        # Dipakai hanya sebagai fallback bila document_factory belum diaktifkan
+        # (lihat _classify_customer_intent/handle_customer_message); ketika aktif,
+        # balasan sungguhan datang dari Document Agent lewat _continue_customer_document.
+        "buat_dokumen_pelanggan": (
+            "Baik, saya bantu proses pembuatan dokumennya. Boleh diceritakan jenjang/kelas, "
+            "mata pelajaran atau mata kuliah, topik, dan target jumlah halamannya?"
+        ),
         "minta_detail_order": (
             "Baik, boleh diceritakan kebutuhan layanannya (jenis jasa, jumlah/ukuran, dan tenggat waktu)? "
             "Supaya saya bisa bantu lebih lanjut."
@@ -332,6 +357,21 @@ class LeadAgent:
     _CUSTOMER_FAQ_WORDS = (
         "jam buka", "jam operasional", "lokasi", "alamat", "cara pesan", "cara order", "cara pemesanan",
     )
+    # Sama seperti `document_words` di router admin (lihat handle_admin_message di atas),
+    # tapi dicek SETELAH kata harga/status supaya guardrail hallucination-prevention tetap
+    # menang saat fallback kata kunci dipakai (mis. "harga bikin makalah berapa" tetap
+    # diarahkan ke estimasi harga, bukan langsung mulai sesi dokumen). Klasifikasi AI-first
+    # (app/customer_intent.py) menangani nuansa ini lebih baik lewat prompt-nya sendiri.
+    # Sengaja tidak memasukkan frasa umum seperti "tugas sekolah"/"tugas kuliah" saja:
+    # itu bisa juga berarti pelanggan cuma minta jasa PRINT tugas yang sudah ada
+    # (bukan minta ditulis/dibuatkan) — Taqi DocuTech melayani keduanya. Kata di
+    # bawah ini dipilih karena cukup spesifik menandakan pelanggan ingin kontennya
+    # DIBUATKAN, bukan sekadar dicetak.
+    _CUSTOMER_DOCUMENT_WORDS = (
+        "makalah", "karya tulis", "paper sekolah", "paper kuliah", "laporan sekolah",
+        "laporan kuliah", "kti", "skripsi",
+        "susun dokumen", "buat dokumen", "buatkan dokumen", "bikin makalah", "bikin dokumen",
+    )
 
     @classmethod
     def _detect_customer_action(cls, text: str) -> tuple[str, str]:
@@ -355,6 +395,8 @@ class LeadAgent:
             action_type = "kirim_estimasi_harga_standar"
         elif any(word in lowered for word in cls._CUSTOMER_FAQ_WORDS):
             action_type = "jawab_faq"
+        elif any(word in lowered for word in cls._CUSTOMER_DOCUMENT_WORDS):
+            action_type = "buat_dokumen_pelanggan"
         else:
             action_type = "minta_detail_order"
         return action_type, cls._CUSTOMER_REPLY_TEXT[action_type]
@@ -372,6 +414,38 @@ class LeadAgent:
             if result.status == "berhasil" and result.action_type in self._CUSTOMER_REPLY_TEXT:
                 return result.action_type, self._CUSTOMER_REPLY_TEXT[result.action_type]
         return self._detect_customer_action(raw)
+
+    def _customer_document_agent(self, sender_id: str) -> DocumentAgent | None:
+        """DocumentAgent tersendiri per pelanggan (dibuat sekali, disimpan di memori
+        proses ini). Isolasi antar pelanggan ditegakkan lewat `source_scope` berbeda
+        yang dibuat `document_factory` untuk tiap `sender_id` (lihat
+        `whatsapp_main.py`), bukan cuma instruksi ke AI — sesuai lapis 1
+        "Isolasi Antar Pelanggan" di `policies/security_policy.md`."""
+        if self.document_factory is None:
+            return None
+        agent = self._customer_documents.get(sender_id)
+        if agent is None:
+            agent = self.document_factory(sender_id)
+            self._customer_documents[sender_id] = agent
+        return agent
+
+    def _continue_customer_document(self, document: DocumentAgent, sender_id: str, raw: str) -> LeadReply:
+        """Serahkan giliran percakapan ke Document Agent (Nara) memakai pedoman
+        penomoran/format yang sama seperti admin (`skills/document_academic/`,
+        `policies/document_format_policy.md`). Saat file Word final selesai dibuat,
+        catat `unggah_file_ke_pelanggan` ke Approval Gate (auto-send rutin, tetap
+        wajib tercatat di audit log) dan sertakan path file di `LeadReply` supaya
+        adapter channel (mis. `WhatsAppCustomerAdapter`) tahu harus mengirim lampiran."""
+        result = document.handle(raw)
+        attachment_path = ""
+        if result.status == "final_ready" and document.final_docx_path:
+            self.approval_gate.request(
+                "unggah_file_ke_pelanggan",
+                requested_by=f"customer:{sender_id}",
+                summary=f"Kirim file makalah selesai ke pelanggan {sender_id}",
+            )
+            attachment_path = document.final_docx_path
+        return LeadReply("document", result.status, result.text, attachment_path)
 
     def handle_customer_message(self, sender_id: str, message: str, *, has_attachment: bool = False) -> LeadReply:
         """Jalur pelanggan: WAJIB melalui Trust Layer lalu Approval Gate, terpisah
@@ -409,7 +483,30 @@ class LeadAgent:
                 "beserta jumlah/ukuran dan tenggat waktunya?",
             )
 
+        # Pelanggan yang sudah punya sesi dokumen aktif (brief sedang diisi, kerangka
+        # menunggu persetujuan, dst.) langsung diteruskan ke Document Agent tanpa
+        # diklasifikasikan ulang setiap giliran — sama seperti admin
+        # (`_document_session_active`), karena Trust Layer di atas sudah menjaga
+        # setiap pesan tetap tepercaya.
+        document = self._customer_document_agent(sender_id)
+        if document is not None and document.session_active:
+            return self._continue_customer_document(document, sender_id, raw)
+
         action_type, reply_text = self._classify_customer_intent(raw)
+
+        if action_type == "buat_dokumen_pelanggan":
+            if document is None:
+                return LeadReply(
+                    "document", "belum_tersedia",
+                    "Layanan pembuatan dokumen belum aktif pada runtime ini.",
+                )
+            self.approval_gate.request(
+                "buat_dokumen_pelanggan",
+                requested_by=f"customer:{sender_id}",
+                summary=f"[{trust.category}] Mulai sesi dokumen: {raw[:200]}",
+            )
+            return self._continue_customer_document(document, sender_id, raw)
+
         approval = self.approval_gate.request(
             action_type,
             requested_by=f"customer:{sender_id}",

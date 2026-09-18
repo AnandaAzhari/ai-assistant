@@ -36,6 +36,15 @@ class ApprovalGateTests(unittest.TestCase):
 
     # --- Level 3: rutin auto-send, di luar itu wajib approval ---
 
+    def test_customer_document_session_action_is_controlled_write_and_auto_runs(self):
+        # Mulai/lanjutkan sesi pembuatan dokumen pelanggan (app/lead.py
+        # `_continue_customer_document`) adalah Level 2, bukan Level 3 — jadi tidak
+        # pernah menunggu approval admin per giliran percakapan (lihat
+        # policies/permissions.md Level 2).
+        decision = self.gate.request("buat_dokumen_pelanggan", requested_by="customer:628111")
+        self.assertEqual(decision.level, LEVEL_CONTROLLED_WRITE)
+        self.assertEqual(decision.status, "auto_jalan")
+
     def test_routine_level3_business_workflow_runs_automatically(self):
         decision = self.gate.request("kirim_status_antrean", requested_by="social_media_agent")
         self.assertEqual(decision.level, LEVEL_EXTERNAL_ACTION)

@@ -105,6 +105,19 @@ class DocumentAgentTests(unittest.TestCase):
         self.assertEqual(reply.status, "berhasil")
         self.assertEqual(len(provider.calls), 2)
 
+    def test_final_paths_are_empty_until_document_is_actually_finalized(self):
+        # Properti ini dipakai pemanggil eksternal (LeadAgent/whatsapp_main.py) untuk
+        # tahu kapan ada file sungguhan yang perlu dikirim ke pelanggan — harus kosong
+        # selama dokumen belum sampai fase final_ready (lihat app/lead.py
+        # `_continue_customer_document`).
+        provider = FakeProvider()
+        agent = DocumentAgent(provider)
+        self.assertEqual(agent.final_docx_path, "")
+        self.assertEqual(agent.final_pdf_path, "")
+        agent.handle("Saya mau membuat makalah tentang pencemaran lingkungan")
+        self.assertEqual(agent.final_docx_path, "")
+        self.assertEqual(agent.final_pdf_path, "")
+
     def test_reset_clears_document_context(self):
         provider = FakeProvider()
         document = DocumentAgent(provider)

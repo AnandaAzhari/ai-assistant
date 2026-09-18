@@ -183,6 +183,17 @@ class DocumentAgent:
         return self._draft_spec
 
     @property
+    def final_docx_path(self) -> str:
+        """Path file Word final (kosong bila belum dibuat). Dipakai pemanggil eksternal
+        (misal `LeadAgent`/`whatsapp_main.py`) yang perlu path file sungguhan, bukan
+        hanya teks status untuk owner."""
+        return self._final_docx_path
+
+    @property
+    def final_pdf_path(self) -> str:
+        return self._final_pdf_path
+
+    @property
     def citation_repeat_mode(self) -> str:
         return self.preferences.citation_repeat_mode
 

@@ -28,14 +28,16 @@ from dataclasses import dataclass
 from app.providers.base import ModelProvider
 
 # Harus sama persis dengan action_type yang dikenali `LeadAgent._detect_customer_action`
-# (teks balasannya) dan `app/approval_gate.py` (`_ROUTINE_AUTO_SEND`), supaya klasifikasi
-# AI tidak pernah menghasilkan action_type yang tidak dikenal state machine approval.
+# (teks balasannya) dan `app/approval_gate.py` (`_ROUTINE_AUTO_SEND`/`_ACTION_LEVELS`),
+# supaya klasifikasi AI tidak pernah menghasilkan action_type yang tidak dikenal state
+# machine approval.
 ALLOWED_ACTIONS = (
     "kirim_salam",
     "konfirmasi_file_diterima",
     "kirim_status_antrean",
     "kirim_estimasi_harga_standar",
     "jawab_faq",
+    "buat_dokumen_pelanggan",
     "minta_detail_order",
 )
 
@@ -44,10 +46,18 @@ Tugasmu HANYA menentukan satu action_type yang paling sesuai dari daftar berikut
 - kirim_salam: pelanggan sekadar menyapa, belum menyebut kebutuhan.
 - konfirmasi_file_diterima: pelanggan bilang sudah mengirim file.
 - kirim_status_antrean: pelanggan menanyakan status/progress pesanan yang sudah ada.
-- kirim_estimasi_harga_standar: pelanggan menanyakan harga/biaya/tarif.
+- kirim_estimasi_harga_standar: pelanggan HANYA menanyakan harga/biaya/tarif, belum jelas
+  ingin memulai proses pembuatan.
 - jawab_faq: pertanyaan umum seperti jam buka, lokasi, cara pesan.
-- minta_detail_order: pelanggan menyebut kebutuhan jasa baru tetapi detailnya belum lengkap,
-  atau pesannya tidak cocok kategori lain di atas.
+- buat_dokumen_pelanggan: pelanggan jelas ingin DIBUATKAN dokumen akademik seperti
+  makalah, karya tulis, laporan, KTI, atau skripsi (Taqi DocuTech) — bukan sekadar
+  bertanya harga/status, tapi memang meminta dikerjakan.
+- minta_detail_order: pelanggan menyebut kebutuhan jasa baru tetapi detailnya belum lengkap
+  atau bukan jasa dokumen akademik, atau pesannya tidak cocok kategori lain di atas.
+
+Jika pesan menyebut harga/biaya SEKALIGUS jelas ingin memulai pembuatan dokumen, pilih
+buat_dokumen_pelanggan (proses pembuatannya yang lebih penting; harga tetap tidak pernah
+dikarang oleh sistem manapun).
 
 Balas HANYA JSON tanpa markdown, dengan schema persis:
 {"action_type": "salah satu dari daftar di atas", "evidence": "kutipan singkat persis dari pesan pelanggan yang mendasari klasifikasi ini"}

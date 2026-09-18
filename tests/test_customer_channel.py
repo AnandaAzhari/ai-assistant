@@ -4,10 +4,30 @@ from pathlib import Path
 
 from app.approval_gate import ApprovalGate
 from app.customer_intent import CustomerIntentClassifier
+from app.document_agent import DocumentResult
 from app.interaction_policy import classify_channel, route_inbound_message
 from app.lead import LeadAgent
 from app.providers.base import ModelReply
 from app.trust_layer import TrustLayer
+
+
+class FakeCustomerDocumentAgent:
+    """Meniru antarmuka DocumentAgent yang dipakai LeadAgent (`session_active`,
+    `handle`, `final_docx_path`) tanpa perlu provider AI atau Document Engine
+    sungguhan — supaya tes jembatan WA->Document Agent tetap cepat dan terisolasi
+    dari `app/document_agent.py`."""
+
+    def __init__(self, *, session_active: bool = False, responses=None, final_docx_path: str = ""):
+        self.session_active = session_active
+        self._responses = list(responses or [])
+        self.final_docx_path = final_docx_path
+        self.calls: list[str] = []
+
+    def handle(self, raw: str) -> DocumentResult:
+        self.calls.append(raw)
+        if self._responses:
+            return self._responses.pop(0)
+        return DocumentResult("needs_requirements", "Boleh diceritakan jenjang dan topiknya?")
 
 
 class CustomerChannelGatewayTests(unittest.TestCase):
@@ -135,6 +155,87 @@ class HandleCustomerMessageTests(unittest.TestCase):
         trust_history = self.trust_layer.history("628123")
         self.assertEqual(len(trust_history), 1)
         self.assertIn(trust_history[0]["decision"], {"proses"})
+
+
+class HandleCustomerMessageDocumentBridgeTests(unittest.TestCase):
+    """handle_customer_message() <-> Document Agent (app/lead.py
+    `_customer_document_agent`/`_continue_customer_document`)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        db = Path(self.temp.name) / "assistant.db"
+        self.trust_layer = TrustLayer(db)
+        self.approval_gate = ApprovalGate(db)
+
+    def _logged_action_types(self, requested_by: str) -> list[str]:
+        with self.approval_gate.connect() as db:
+            rows = db.execute(
+                "SELECT action_type FROM approval_requests WHERE requested_by = ?",
+                (requested_by,),
+            ).fetchall()
+        return [row["action_type"] if isinstance(row, dict) or hasattr(row, "keys") else row[0] for row in rows]
+
+    def test_document_intent_starts_new_session_via_document_agent(self):
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=False,
+            responses=[DocumentResult("needs_requirements", "Boleh diceritakan jenjang dan topiknya?")],
+        )
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document,
+        )
+        reply = lead.handle_customer_message("628aaa", "Saya mau bikin makalah tentang sampah plastik")
+        self.assertEqual(reply.target, "document")
+        self.assertEqual(reply.status, "needs_requirements")
+        self.assertEqual(fake_document.calls, ["Saya mau bikin makalah tentang sampah plastik"])
+        self.assertIn("buat_dokumen_pelanggan", self._logged_action_types("customer:628aaa"))
+
+    def test_active_document_session_bypasses_reclassification(self):
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=True,
+            responses=[DocumentResult("needs_requirements", "Lanjut, berapa halaman targetnya?")],
+        )
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document,
+        )
+        # Pesan ini sama sekali tidak mengandung kata kunci dokumen — bila
+        # diklasifikasikan ulang, semestinya masuk ke "minta_detail_order".
+        reply = lead.handle_customer_message("628bbb", "Sekitar 10 halaman ya kak")
+        self.assertEqual(reply.target, "document")
+        self.assertEqual(fake_document.calls, ["Sekitar 10 halaman ya kak"])
+        # Sesi aktif langsung diteruskan ke Document Agent tanpa lewat
+        # `buat_dokumen_pelanggan` lagi (itu hanya dicatat saat sesi BARU dimulai).
+        self.assertNotIn("buat_dokumen_pelanggan", self._logged_action_types("customer:628bbb"))
+
+    def test_final_ready_document_logs_upload_and_includes_attachment_path(self):
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=True,
+            responses=[DocumentResult("final_ready", "File makalah sudah tersedia.")],
+            final_docx_path="/tmp/makalah-628ccc.docx",
+        )
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document,
+        )
+        reply = lead.handle_customer_message("628ccc", "Baik kak, makalahnya lanjutkan saja sampai selesai ya")
+        self.assertEqual(reply.status, "final_ready")
+        self.assertEqual(reply.attachment_path, "/tmp/makalah-628ccc.docx")
+        self.assertIn("unggah_file_ke_pelanggan", self._logged_action_types("customer:628ccc"))
+
+    def test_price_question_wins_over_document_keyword_in_fallback_router(self):
+        lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
+        reply = lead.handle_customer_message("628ddd", "Kak, harga bikin makalah 10 halaman berapa ya?")
+        self.assertEqual(reply.target, "kirim_estimasi_harga_standar")
+        # Guardrail hallucination prevention tetap berlaku walau pesan menyebut "makalah".
+        self.assertNotRegex(reply.text, r"Rp\s?\d")
+
+    def test_document_factory_none_falls_back_to_unavailable_reply(self):
+        lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
+        reply = lead.handle_customer_message("628eee", "Saya mau bikin makalah tentang sampah plastik")
+        self.assertEqual(reply.target, "document")
+        self.assertEqual(reply.status, "belum_tersedia")
 
 
 class FakeIntentProvider:

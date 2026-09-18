@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,9 +34,14 @@ from urllib.parse import parse_qs, urlparse
 
 from app.approval_gate import ApprovalGate
 from app.customer_intent import CustomerIntentClassifier
+from app.document_agent import DocumentAgent
+from app.document_engine import DocumentEngine
+from app.document_preferences import DocumentPreferenceStore
+from app.document_session import DocumentSessionStore
 from app.env import load_env
 from app.lead import LeadAgent
 from app.providers.deepseek import DeepSeekProvider
+from app.source_registry import SourceRegistry
 from app.trust_layer import TrustLayer
 from app.whatsapp import (
     WhatsAppCustomerAdapter,
@@ -51,15 +57,43 @@ ROOT = Path(__file__).resolve().parent
 MAX_PAYLOAD_BYTES = 256 * 1024
 
 
+def _customer_scope_id(sender_id: str) -> str:
+    """`source_scope` unik per nomor pelanggan, supaya sesi/brief satu pelanggan
+    tidak pernah tercampur dengan pelanggan lain (lihat "Isolasi Antar Pelanggan"
+    di `policies/security_policy.md`)."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", sender_id or "")[:64] or "unknown"
+    return f"DOCSRC-WHATSAPP-{safe}"
+
+
 def create_customer_adapter() -> WhatsAppCustomerAdapter:
-    """Rakit jalur pelanggan (Trust Layer -> Approval Gate -> AI intent, lihat
-    `app/lead.py`) dan sambungkan ke WhatsApp. Setiap pesan tetap WAJIB melalui
-    `LeadAgent.handle_customer_message()` — tidak pernah langsung ke agent lain."""
+    """Rakit jalur pelanggan (Trust Layer -> Approval Gate -> AI intent -> Document
+    Agent, lihat `app/lead.py`) dan sambungkan ke WhatsApp. Setiap pesan tetap WAJIB
+    melalui `LeadAgent.handle_customer_message()` — tidak pernah langsung ke agent lain.
+
+    `document_factory` membuat satu `DocumentAgent` tersendiri per nomor WhatsApp
+    (dipanggil `LeadAgent` hanya saat pelanggan itu benar-benar butuh, lihat
+    `_customer_document_agent`), memakai pedoman penomoran/format yang sama seperti
+    admin (`skills/document_academic/`) — tidak ada pedoman terpisah yang perlu dibuat
+    khusus untuk WhatsApp.
+    """
     db_path = os.environ.get("DATABASE_PATH", "data/assistant.db").strip() or "data/assistant.db"
+    provider = DeepSeekProvider.from_env()
+
+    def document_factory(sender_id: str) -> DocumentAgent:
+        return DocumentAgent(
+            provider,
+            engine=DocumentEngine.from_env(),
+            registry=SourceRegistry(db_path),
+            preference_store=DocumentPreferenceStore(db_path),
+            source_scope=_customer_scope_id(sender_id),
+            session_store=DocumentSessionStore(db_path),
+        )
+
     lead = LeadAgent(
         trust_layer=TrustLayer(db_path),
         approval_gate=ApprovalGate(db_path),
-        intent_classifier=CustomerIntentClassifier(DeepSeekProvider.from_env()),
+        intent_classifier=CustomerIntentClassifier(provider),
+        document_factory=document_factory,
     )
     client = WhatsAppHTTPClient(
         os.environ.get("WHATSAPP_API_TOKEN", ""),
@@ -174,11 +208,13 @@ def main(argv: list[str] | None = None) -> int:
 
     classifier = adapter.lead.intent_classifier
     ai_note = "siap (DeepSeek)" if classifier is not None and classifier.configured else "belum dikonfigurasi, memakai fallback kata kunci"
+    document_note = "aktif (Document Agent tersambung)" if adapter.lead.document_factory is not None else "belum tersambung"
 
     if args.check:
         print("Konfigurasi WhatsApp Customer Adapter lengkap.")
         print("Trust Layer + Approval Gate: aktif.")
         print("AI intent classifier: " + ai_note + ".")
+        print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
         print(f"Server akan mendengarkan di {args.host}:{args.port}, endpoint /webhook.")
         return 0
 
@@ -188,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"WhatsApp Customer Adapter aktif di {args.host}:{args.port}/webhook.")
     print("AI intent classifier: " + ai_note + ".")
+    print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
     print("Biarkan terminal ini terbuka. Ctrl+C untuk berhenti.")
     try:
         server.serve_forever()

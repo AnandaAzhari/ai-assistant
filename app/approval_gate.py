@@ -61,6 +61,10 @@ _ACTION_LEVELS: dict[str, int] = {
     "buat_dokumen_kerja": LEVEL_CONTROLLED_WRITE,
     "edit_dokumen_kerja": LEVEL_CONTROLLED_WRITE,
     "simpan_output_folder_kerja": LEVEL_CONTROLLED_WRITE,
+    # Mulai/lanjutkan sesi pembuatan dokumen (makalah/KTI/skripsi) dari channel
+    # pelanggan (WhatsApp dst.) lewat Document Agent — lihat app/lead.py
+    # `_classify_customer_intent` dan `_continue_customer_document`.
+    "buat_dokumen_pelanggan": LEVEL_CONTROLLED_WRITE,
     # Level 3 — External Action, auto-send diizinkan (lihat approval_policy.md "Auto-Send yang Diizinkan")
     "kirim_salam": LEVEL_EXTERNAL_ACTION,
     "jawab_faq": LEVEL_EXTERNAL_ACTION,

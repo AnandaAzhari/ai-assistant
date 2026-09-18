@@ -14,7 +14,7 @@ Contoh: membuka aplikasi, membuka folder, mencari file, membuat draft lokal.
 Approval: tidak diperlukan selama target ada dalam allowlist.
 
 ### Level 2 — Controlled Write
-Contoh: membuat atau mengedit dokumen kerja, menyimpan output ke folder kerja agent.
+Contoh: membuat atau mengedit dokumen kerja, menyimpan output ke folder kerja agent, memulai/melanjutkan sesi pembuatan dokumen pelanggan (makalah/KTI/skripsi lewat Document Agent, action_type `buat_dokumen_pelanggan` — lihat `app/lead.py`).
 Approval: tidak diperlukan untuk area kerja yang diizinkan; semua aksi harus dicatat.
 
 ### Level 3 — External Action

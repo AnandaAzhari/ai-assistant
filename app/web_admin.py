@@ -15,13 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.document_agent import DocumentAgent
-from app.document_session import DocumentSessionStore
-from app.document_engine import DocumentEngine
-from app.finance import FinanceService
-from app.google_sheets_sync import GoogleSheetsSync
+from app.admin_runtime import create_admin_lead
 from app.lead import LeadAgent
-from app.providers.deepseek import DeepSeekProvider
 
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web_admin"
@@ -166,13 +161,7 @@ class WebAdminHandler(BaseHTTPRequestHandler):
 def create_server(host: str, port: int, *, admin_key: str = "") -> WebAdminHTTPServer:
     if not WEB_ROOT.is_dir():
         raise RuntimeError(f"Folder Web Admin tidak ditemukan: {WEB_ROOT}")
-    db_path = os.environ.get("DATABASE_PATH", "data/assistant.db").strip() or "data/assistant.db"
-    finance = FinanceService(db_path)
-    sheets_sync = GoogleSheetsSync.from_env(db_path)
-    deepseek = DeepSeekProvider.from_env()
-    document_engine = DocumentEngine.from_env()
-    document = DocumentAgent(deepseek, engine=document_engine, session_store=DocumentSessionStore(db_path))
-    lead = LeadAgent(finance=finance, sheets_sync=sheets_sync, document=document)
+    lead = create_admin_lead(channel="web")
     return WebAdminHTTPServer((host, port), WebAdminHandler, lead=lead, admin_key=admin_key)
 
 

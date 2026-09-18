@@ -27,7 +27,7 @@ class TelegramAdminTests(unittest.TestCase):
             "update_id": 1,
             "message": {
                 "from": {"id": user},
-                "chat": {"id": chat},
+                "chat": {"id": chat, "type": "private"},
                 "text": text,
             },
         }
@@ -55,10 +55,10 @@ class TelegramAdminTests(unittest.TestCase):
         reply = self.lead.handle_admin_message("Tampilkan antrean TaqiDesk")
         self.assertEqual(reply.target, "docutech")
 
-    def test_non_text_update_is_not_processed(self):
-        update = {"update_id": 2, "message": {"from": {"id": 12345}, "chat": {"id": 67890}, "photo": []}}
-        self.assertFalse(self.adapter.process_update(update))
-        self.assertEqual(self.client.sent, [])
+    def test_non_text_update_explains_text_only_support(self):
+        update = {"update_id": 2, "message": {"from": {"id": 12345}, "chat": {"id": 67890, "type": "private"}, "photo": []}}
+        self.assertTrue(self.adapter.process_update(update))
+        self.assertIn("pesan teks", self.client.sent[0][1])
 
     def test_handler_contract(self):
         reply = self.lead.handle_admin_message("/bantuan")
@@ -68,3 +68,4 @@ class TelegramAdminTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

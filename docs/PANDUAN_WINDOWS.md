@@ -1,5 +1,9 @@
 # Panduan Windows — AI Assistant v0.1
 
+Untuk **Telegram + Nara**, gunakan [panduan Telegram terbaru](telegram_admin_v1.md#implementasi-yang-tersedia--18-september-2026): pertahankan bot dan `.env` yang sudah ada, jalankan `CEK_TELEGRAM.bat`, kemudian `JALANKAN_TELEGRAM.bat` dan kirim `/status` ke bot.
+
+Bagian di bawah adalah panduan awal untuk `main.py` (CLI pengelolaan file), bukan penjelasan kemampuan Web Admin atau Telegram terbaru.
+
 Target pertama: ketik perintah, buat folder pesanan, buka file contoh, dan lihat laporan.
 Program bekerja lokal, belum menggunakan provider AI atau WhatsApp.
 

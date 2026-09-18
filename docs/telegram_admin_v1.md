@@ -1,5 +1,37 @@
 # Telegram Admin v1
 
+## Implementasi yang tersedia — 18 September 2026
+
+Bagian setelah panduan ini adalah rancangan target. Tidak semua fitur rancangan sudah tersedia.
+Runtime saat ini menghubungkan chat pribadi owner ke layanan yang sama dengan Web Admin:
+
+- Nara: pemahaman AI melalui provider DeepSeek dan file persona/skill yang sama, alur outline, persetujuan fokus, riset dan draft sesuai kemampuan Document Agent.
+- Pencatatan keuangan dan perintah laporan yang tersedia di `/bantuan`. Router dan parser keuangan masih memakai implementasi yang ada; integrasi ini tidak mengubahnya menjadi AI penuh.
+- Sesi dokumen disimpan di SQLite dan dipulihkan setelah program dinyalakan ulang. Sesi Telegram dibedakan berdasarkan bot, owner dan chat, serta terpisah dari sesi Web Admin. Buku keuangan tetap sama bila `DATABASE_PATH` sama.
+- Balasan panjang dipecah tanpa dipotong. Balasan yang gagal dikirim dicoba kembali tanpa mengulangi tindakan yang sudah tercatat pada update yang sama.
+- Hanya pesan dari owner dan chat pribadi yang dikonfigurasi yang diproses. Foto, suara dan lampiran diberi penjelasan bahwa pemrosesannya belum tersedia.
+
+Pengiriman file Word/PDF sebagai lampiran, pembacaan struk, tombol approval, laporan terjadwal dan alert otomatis **belum diimplementasikan** oleh adapter ini. Balasan hasil dokumen masih berupa teks/path lokal. Riset/draft tetap membutuhkan konfigurasi provider dan sumber yang memadai; koneksi Telegram saja tidak menjamin keduanya berhasil.
+
+### Menggunakan bot yang sudah ada di Windows
+
+1. Tutup runtime Telegram lama, lalu ambil kode terbaru dengan `git pull --ff-only` di folder project.
+2. Pertahankan `.env` yang sudah ada, termasuk pengaturan DeepSeek. Pastikan `TELEGRAM_BOT_TOKEN` dan `TELEGRAM_ADMIN_USER_ID` terisi. `TELEGRAM_ADMIN_CHAT_ID` boleh kosong untuk chat pribadi; runtime memakai user ID. Simpan token hanya di komputer, jangan kirim melalui chat atau commit.
+3. Jalankan `CEK_TELEGRAM.bat`. Pemeriksaan hanya memeriksa koneksi bot, webhook dan kelengkapan konfigurasi; tidak mengirim chat, menjalankan transaksi, atau menguji koneksi AI. Kecocokan akun owner diuji melalui `/status` setelah runtime aktif.
+4. Jika ID admin belum diketahui, jalankan `TEMUKAN_TELEGRAM_ID.bat`. Kirim kode `/hubungkan ...` yang tampil ke chat pribadi bot dari akun sendiri, lalu salin kedua ID hasilnya ke `.env`. Tidak perlu membuat bot baru.
+5. Jalankan `JALANKAN_TELEGRAM.bat`, buka chat bot, tekan Start bila diperlukan, lalu kirim `/status` dan `/bantuan`.
+6. Untuk mencoba Nara, kirim `/makalah_baru`, lalu kebutuhan makalah seperti di Web Admin. Gunakan `/dokumen_status` untuk memeriksa sesi. Outline tetap memerlukan persetujuan sebelum dilanjutkan.
+
+Komputer perlu menyala, internet tersedia, dan terminal runtime tetap terbuka. Tutup dengan Ctrl+C. Jangan menjalankan dua runtime untuk bot yang sama, termasuk dari komputer lain. Pengunci lokal mencegah dua runtime/penemuan ID dari folder project yang sama; bentrok polling di tempat lain dilaporkan saat Telegram menolaknya.
+
+Jika bot masih menggunakan webhook, program menjelaskan bentroknya dan tidak menghapus webhook otomatis. Hanya bila memang ingin memindahkan bot tersebut ke polling komputer ini, jalankan `python telegram_main.py --remove-webhook --check`; opsi ini mempertahankan pesan tertunda.
+
+### Pemulihan dan batas pengujian
+
+Jurnal update menyimpan penanda tindakan sebelum menjalankan layanan. Setelah crash di tengah tindakan, hasil bisa belum pasti: bot meminta owner mengecek `/hari_ini` atau `/dokumen_status`, bukan menjalankan tindakan itu lagi secara otomatis. Timeout saat pengiriman dapat menghasilkan balasan duplikat; tidak ada klaim pengiriman tepat satu kali. Pesan baru yang diketik ulang oleh pengguna memiliki update ID baru dan dapat menjalankan tindakan baru.
+
+Pengujian simulasi: `python -m unittest discover -s tests -p "test_telegram*.py"`. Mencakup pembatasan akun/chat, pemulihan offset, pesan berulang, kegagalan kirim, pemecahan teks/emoji, kerahasiaan error, integrasi ledger, persistensi sesi dan pemanggilan Nara. Hasil saat perubahan dibuat: 33 tes Telegram lulus. Suite keseluruhan menjalankan 209 tes dengan 4 kegagalan lama pada ekspektasi status Document Agent dan parsing judul "belum"; suite keseluruhan belum hijau. Koneksi bot nyata dan runtime Windows tetap perlu diuji di komputer owner.
+
 ## Tujuan
 Menjadikan Telegram sebagai control plane utama milik owner untuk berinteraksi dengan Lead Agent, Finance Agent, agent bisnis lain, menerima laporan, memberi approval, dan menerima alert keamanan.
 

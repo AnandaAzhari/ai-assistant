@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 where py >nul 2>nul
 if not errorlevel 1 (
-  py -3 telegram_main.py
+  py -3 telegram_main.py --check
 ) else (
   where python >nul 2>nul
   if errorlevel 1 (
@@ -11,12 +11,9 @@ if not errorlevel 1 (
     pause
     exit /b 1
   )
-  python telegram_main.py
+  python telegram_main.py --check
 )
 set TELEGRAM_EXIT_CODE=%ERRORLEVEL%
-if not "%TELEGRAM_EXIT_CODE%"=="0" (
-  echo.
-  echo Telegram berhenti dengan kode %TELEGRAM_EXIT_CODE%.
-  pause
-)
+echo.
+pause
 exit /b %TELEGRAM_EXIT_CODE%

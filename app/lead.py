@@ -28,11 +28,13 @@ class LeadAgent:
         finance: FinanceService | None = None,
         sheets_sync: GoogleSheetsSync | None = None,
         document: DocumentAgent | None = None,
+        admin_channel: str = "web",
     ):
         self.desktop = desktop
         self.finance = finance
         self.sheets_sync = sheets_sync
         self.document = document
+        self.admin_channel = admin_channel
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         command = command.strip().lower()
@@ -153,7 +155,8 @@ class LeadAgent:
             return LeadReply(
                 "lead",
                 "berhasil",
-                "Lead Agent: aktif\nWeb Admin: terhubung\nTelegram Admin: belum diaktifkan (opsional)\n"
+                "Lead Agent: aktif\n"
+                + ("Telegram Admin: terhubung\n" if self.admin_channel == "telegram" else "Web Admin: terhubung\nTelegram: jalankan runtime terpisah untuk terhubung\n") +
                 "Router Lead: aturan minimum\nLead AI model: belum dihubungkan\n"
                 f"Document Agent: {document_status}\n"
                 f"Document Engine: {engine_status}\n"

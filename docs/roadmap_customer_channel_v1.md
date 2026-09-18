@@ -6,6 +6,18 @@ Urutan implementasi yang aman sebelum Lead Agent dibuka ke pelanggan asli lewat 
 ## Kenapa Urutan Ini
 Security & Trust Layer dan Approval Gate saat ini baru berupa dokumen kebijakan (`policies/trust_spam_policy.md`, `policies/approval_policy.md`) — belum ada satu baris kode yang benar-benar menjalankannya. Menyambungkan WhatsApp sebelum dua lapisan ini ada di kode berarti pesan dari publik (termasuk spam/scam/percobaan prompt injection) langsung masuk ke Lead Agent tanpa penyaringan apa pun. Urutan di bawah memastikan pagar keamanan berdiri dulu sebelum pintunya dibuka ke publik.
 
+## Temuan dari Riset Eksternal (2026)
+Dicek ke sumber industri terkini soal praktik AI agent produksi, dibandingkan dengan desain yang sudah ada di repo ini.
+
+### Yang sudah benar arahnya
+- **Pola orkestrasi Lead Agent + Specialist Agents** ("orchestrator-worker") sudah sesuai rekomendasi industri untuk sistem berskala kecil-menengah — riset Princeton NLP menemukan satu agent tunggal justru menyamai/mengalahkan sistem multi-agent pada 64% tugas yang diuji, dan 40% pilot multi-agent gagal dalam 6 bulan pertama produksi karena kompleksitas berlebihan. Jangan tergoda menambah jumlah agent lebih dari yang benar-benar dibutuhkan.
+- **Brand Profile per usaha dan skema transaksi Finance Agent yang terstruktur** sudah sejalan dengan temuan Gartner bahwa banyak proyek AI enterprise gagal karena data tidak "siap dipakai AI" (tidak terstruktur/tidak bersih). Ini justru pekerjaan rumah yang sudah kamu selesaikan lebih dulu.
+- **Prinsip Approval Gate (manusia tetap mengambil keputusan akhir untuk aksi sensitif)** sejalan dengan temuan bahwa tim gabungan manusia+agent mengungguli agent yang sepenuhnya otonom pada 68,7% kasus. Jangan buru-buru menghilangkan approval manusia meski nanti sistemnya sudah terasa "pintar".
+
+### Yang masih jadi celah nyata (belum ada di dokumen manapun sebelumnya)
+1. **Guardrails runtime belum konkret sebagai kategori.** Security & Trust Layer di Fase 1 sudah menyasar sebagian (spam/scam, isolasi data), tapi riset industri membagi guardrails jadi 6 kategori: prompt injection detection, data/PII protection, **hallucination prevention**, topic restriction, policy enforcement, dan audit trail. Dua yang belum tersentuh sama sekali di dokumenmu: **hallucination prevention** (mencegah AI mengarang info di luar Document Agent — `document_agent.md` sudah larang "mengarang referensi" tapi itu baru untuk Nara, belum jadi aturan lintas semua agent) dan **topic restriction** (agent tetap dalam batas topik usahanya, tidak menjawab di luar konteks yang seharusnya).
+2. **Belum ada Evaluasi & Observability untuk output AI-nya sendiri.** `tests/` yang ada sekarang menguji logika Python yang deterministik (parsing, kategori, dsb) — bagus, tapi begitu model AI beneran tersambung ke Lead Agent/Nara/Social Media Agent, kamu butuh cara terpisah untuk tahu **apakah jawaban AI-nya sendiri bagus atau tidak**, bukan cuma "apakah kodenya jalan tanpa error". Lihat Fase 5 di bawah.
+
 ## Fase 1: Security & Trust Layer (minimum)
 Tujuan: setiap pesan pelanggan mendapat skor/keputusan sebelum diproses lebih lanjut.
 
@@ -25,6 +37,12 @@ Lihat aturan lengkap di `policies/security_policy.md` bagian "Isolasi Antar Pela
 - Query lintas pelanggan (rekap/laporan semua order) hanya boleh dari channel admin terautentikasi (Telegram Admin/Web Admin owner), tidak pernah dari channel pelanggan.
 
 Kriteria selesai (tambahan untuk Fase 1): skenario uji "pelanggan A tanya data pelanggan B" dan "pelanggan menyamar minta rekap semua order" keduanya ditolak dan tercatat sebagai sinyal mencurigakan, bukan diproses.
+
+### Guardrail Tambahan yang Perlu Masuk Fase 1
+Dua kategori guardrail dari riset di atas yang belum tercakup:
+
+- **Hallucination prevention (lintas agent, bukan cuma Nara).** Setiap agent yang memberi jawaban ke pelanggan (harga, ketersediaan, status order, estimasi waktu) wajib mengambil datanya dari sumber yang benar (database/price list), bukan dikarang oleh model AI. Kalau data tidak tersedia, agent menjawab "belum bisa dipastikan" daripada menebak.
+- **Topic restriction.** Agent pelanggan (misal WhatsApp untuk Taqi DocuTech) menjawab hanya dalam batas layanan usaha itu; pertanyaan di luar topik (curhat, topik sensitif, hal tidak berkaitan dengan layanan) dialihkan sopan, bukan dijawab bebas oleh model.
 
 ## Fase 2: Approval Gate (minimum)
 Tujuan: tindakan sensitif berhenti otomatis menunggu persetujuan owner, bukan cuma tertulis di kebijakan.
@@ -49,21 +67,41 @@ Kriteria selesai: pesan pelanggan simulasi bisa diproses end-to-end (trust check
 ## Fase 4: WhatsApp Adapter
 Tujuan: channel WhatsApp benar-benar tersambung, sesudah tiga fase di atas siap.
 
+### Keputusan provider
+**WhatsApp Business Platform Cloud API resmi dari Meta, langsung — bukan BSP pihak ketiga** (Qiscus/Wati/360dialog/dst). Alasannya (riset Sept 2026):
+- Sejak Juli 2025 Meta memakai skema per-pesan (bukan lagi per-percakapan). Pesan balasan dalam jendela sesi 24 jam ("service"/non-template — yaitu hampir semua balasan reaktif ke pelanggan yang baru saja menghubungi kita) saat ini **gratis** di Cloud API resmi.
+- Tidak ada biaya langganan bulanan tambahan dari BSP; sejalan dengan prinsip pay-as-you-go yang sudah dipakai untuk provider AI.
+- BSP tetap layak dipertimbangkan nanti kalau volume pesan marketing/broadcast (kategori yang selalu berbayar, tanpa jendela gratis) membesar dan onboarding non-teknis jadi prioritas — bukan kebutuhan sekarang.
+
+Deliverables (status):
+- [x] Modul `app/whatsapp.py`: `WhatsAppHTTPClient` (kirim pesan lewat Cloud API), `verify_webhook_challenge`/`verify_webhook_signature` (handshake GET + verifikasi `X-Hub-Signature-256` — webhook tanpa tanda tangan valid selalu ditolak), `extract_inbound_messages` (parse payload Meta), `WhatsAppCustomerAdapter.process_webhook_event()` yang memanggil `LeadAgent.handle_customer_message()` untuk setiap pesan lalu mengirim balasannya. Semua pesan WhatsApp wajib lewat Fase 1-3 dulu — tidak ada jalur pintas ke agent lain.
+- [x] Slot `.env` lengkap: `WHATSAPP_PROVIDER`, `WHATSAPP_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`.
+- [x] Test: `tests/test_whatsapp.py` (verifikasi webhook, parsing payload, alur trust->intent->approval->balasan, pemotongan teks panjang).
+- [ ] **Belum**: endpoint publik sungguhan (`whatsapp_main.py`, mengikuti pola `http.server` stdlib di `app/web_admin.py` — WhatsApp Cloud API bersifat webhook/push, beda dari polling Telegram) yang menerima POST asli dari Meta dan memanggil `WhatsAppCustomerAdapter`. Ini menunggu keputusan hosting (server mana yang akan diberi URL publik/HTTPS).
+- [ ] **Belum**: verifikasi bisnis di Meta Business Manager, nomor WhatsApp bisnis, dan pengisian token asli ke `.env` — langkah ini dilakukan Ananda sendiri (tidak pernah lewat sesi ini, sesuai aturan credential).
+- [ ] Rollout bertahap: mulai dari nomor uji terbatas (owner + beberapa orang terpercaya) dulu, baru nomor bisnis utama ke seluruh pelanggan setelah stabil — menyusul setelah endpoint publik dan verifikasi bisnis siap.
+
+## Fase 5: Evaluasi & Observability (paralel, mulai bareng Fase 1)
+Tujuan: tahu apakah jawaban AI dari tiap agent benar-benar bagus, bukan cuma "kodenya jalan tanpa error". Ini beda dari `tests/` yang sudah ada (itu menguji logika Python deterministik).
+
 Deliverables:
-- Pilih provider WhatsApp Business API (API resmi Meta Cloud API, atau provider pihak ketiga) — perlu riset terpisah soal syarat verifikasi bisnis dan biaya, di luar cakupan dokumen ini.
-- Modul baru `app/whatsapp.py` mengikuti pola `app/telegram.py` yang sudah berjalan (terima pesan masuk, kirim balasan), token diisi di `.env` lokal (`WHATSAPP_PROVIDER`, `WHATSAPP_API_TOKEN` sudah punya slotnya).
-- Semua pesan WhatsApp wajib masuk lewat Fase 1-3 dulu, tidak pernah langsung ke agent.
-- Rollout bertahap: mulai dari nomor uji terbatas (owner + beberapa orang terpercaya) dulu, baru nomor bisnis utama ke seluruh pelanggan setelah stabil.
+- Kumpulan skenario uji per agent (misalnya 15-20 contoh percakapan nyata/realistis untuk Nara, Finance Agent, Social Media Agent) yang jawabannya dicek manual dulu oleh kamu sebagai patokan "baik/tidak baik".
+- Simpan setiap interaksi produksi (setelah live) sebagai data yang bisa ditinjau ulang — bukan cuma respons berhasil dikirim lalu dilupakan. Ini nyambung ke `docs/agent_memory_v1.md` (Long-Term Feedback Memory) yang sudah dirancang.
+- Evaluasi percakapan penuh (multi-turn), bukan cuma satu pertanyaan-satu jawaban — agent yang bertanya klarifikasi, menjaga konteks, dan pulih dari kesalahan itu baru kelihatan bagus/tidaknya di percakapan penuh, bukan potongan tunggal.
+- Tinjauan berkala (mingguan/bulanan) atas sampel percakapan asli untuk menangkap penurunan kualitas lebih awal, terutama setelah ganti model atau update prompt.
+
+Kriteria selesai: ada kumpulan skenario uji minimum untuk tiap agent yang sudah live dengan model AI sungguhan, dan proses (walau manual dulu) untuk meninjau sampel percakapan produksi secara berkala.
 
 ## Ukuran Relatif Tiap Fase
 Perkiraan kasar berdasarkan cakupan kerja, bukan estimasi waktu pasti (kecepatan tergantung waktu yang bisa dialokasikan):
 
 | Fase | Ukuran | Ketergantungan |
 | --- | --- | --- |
-| 1. Security & Trust Layer | Sedang | Tidak ada, bisa mulai sekarang |
+| 1. Security & Trust Layer (+ guardrails) | Sedang | Tidak ada, bisa mulai sekarang |
 | 2. Approval Gate | Sedang | Tidak ada, bisa paralel dengan Fase 1 |
 | 3. Input Gateway + Lead Agent Pelanggan | Sedang-Besar | Fase 1 dan 2 selesai |
 | 4. WhatsApp Adapter | Kecil-Sedang (di luar riset provider) | Fase 1-3 selesai |
+| 5. Evaluasi & Observability | Kecil di awal, berkelanjutan | Paralel dengan Fase 1, terus berjalan setelah live |
 
 ## Yang Tidak Perlu Menunggu Roadmap Ini
 Finance Agent, Document Agent (Nara), Desktop Agent, Web Admin, dan Telegram Admin tetap aman dilanjutkan sekarang karena semuanya jalur owner-only, bukan publik.

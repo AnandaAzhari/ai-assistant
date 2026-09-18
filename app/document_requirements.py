@@ -305,9 +305,12 @@ class MakalahRequirements:
             if match:
                 value = match.group(1).strip(" \t\"”'")
                 # Pelanggan sering menaruh banyak data dalam satu kalimat. Potong
-                # judul saat setelah koma mulai bagian profil/kelas/mapel/target lain.
+                # judul saat setelah koma mulai bagian profil/kelas/mapel/target lain,
+                # termasuk saat target panjang ditulis langsung sebagai angka+satuan
+                # tanpa kata "jumlah"/"target" di depannya (mis. "judul belum, 8 halaman").
                 value = re.split(
-                    r"\s*,\s*(?:saya|aku|anak|jenjang|smk|sma|smp|mts|man|sd|mi|jumlah|target|kelas|semester|mata\s+pelajaran|mata\s+kuliah|arahan|instruksi)\b",
+                    r"\s*,\s*(?:saya|aku|anak|jenjang|smk|sma|smp|mts|man|sd|mi|jumlah|target|kelas|semester|mata\s+pelajaran|mata\s+kuliah|arahan|instruksi)\b"
+                    r"|\s*,\s*(?=\d+\s*(?:halaman|page|pages|hal|hlm|kata)\b)",
                     value,
                     maxsplit=1,
                     flags=re.IGNORECASE,

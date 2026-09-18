@@ -6,7 +6,7 @@ Membangun AI Assistant modular yang aman, mudah dikembangkan, tidak terikat satu
 ## Dua Jalur Utama
 
 ### A. Jalur Pelanggan
-WhatsApp / channel pelanggan lain
+WhatsApp / Web App & APK Pelanggan (rencana rilis ke Play Store)
 → Input Gateway
 → Security & Trust Layer
 → Lead Agent
@@ -29,16 +29,28 @@ Telegram Admin / Web Admin / Desktop
 → Hasil / Laporan / Alert kembali ke owner
 → Audit Log + Memory + ML Feedback
 
-Telegram diposisikan sebagai control plane utama milik owner untuk tahap awal, bukan sebagai channel pelanggan utama.
+Telegram diposisikan sebagai control plane khusus owner (Ananda), bukan channel pelanggan. Ini keputusan tetap, bukan hanya untuk tahap awal.
+
+### Pemetaan Channel ke Audiens (keputusan tetap)
+Setiap channel hanya boleh melayani satu audiens; tidak ada channel yang dipakai ganda untuk owner dan pelanggan sekaligus. Lihat `app/interaction_policy.py` (`ADMIN_CHANNELS`/`CUSTOMER_CHANNELS`) untuk penegakan di kode — channel yang belum didaftarkan di salah satu daftar itu ditolak secara default (fail-safe), bukan otomatis dianggap aman.
+
+| Channel | Audiens | Status |
+| --- | --- | --- |
+| Telegram Admin | Owner (Ananda) saja | Aktif |
+| Web Admin (`web_admin/`) | Owner (Ananda) saja | Aktif |
+| Desktop (`main.py`) | Owner (Ananda) saja | Aktif |
+| WhatsApp | Pelanggan | Fase 4 (`docs/roadmap_customer_channel_v1.md`), belum tersambung |
+| Web App Pelanggan | Pelanggan | Direncanakan; akan memakai Jalur Pelanggan yang sama dengan WhatsApp |
+| APK Pelanggan (Play Store) | Pelanggan | Direncanakan; wrapper/client dari Web App Pelanggan yang sama, backend dan gateway tetap satu |
 
 ## Komponen Inti
 
 ### 1. Input Gateway
-Menerima input dari channel seperti WhatsApp, Telegram Admin, Web UI, Desktop, dan channel lain di masa depan.
+Menerima input dari channel seperti WhatsApp, Web App/APK Pelanggan, Telegram Admin, Web Admin, Desktop, dan channel lain di masa depan.
 
 Input dibedakan berdasarkan asal:
-- Customer channel: tidak tepercaya dan wajib melewati Security & Trust Layer.
-- Owner/admin channel: wajib melewati authentication dan authorization.
+- Customer channel (WhatsApp, Web App/APK Pelanggan): tidak tepercaya dan wajib melewati Security & Trust Layer (`app/trust_layer.py`) lalu Approval Gate (`app/approval_gate.py`) lewat `LeadAgent.handle_customer_message()`.
+- Owner/admin channel (Telegram Admin, Web Admin, Desktop): wajib melewati authentication dan authorization, memakai `LeadAgent.handle_admin_message()`.
 
 ### 2. Telegram Admin Control Plane
 Telegram menjadi jalur cepat antara owner dan Lead Agent.

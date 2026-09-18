@@ -60,7 +60,7 @@ Tujuan: Lead Agent punya jalur khusus pesan pelanggan yang wajib melalui Fase 1 
 Deliverables:
 - Tambah method baru di `app/lead.py`, misal `handle_customer_message()`, terpisah dari `handle_admin_message()` yang sudah ada — wajib memanggil Trust Layer dan Approval Gate sebelum memproses isi pesan.
 - Kembangkan `app/interaction_policy.py` dari sekadar helper istilah menjadi gateway sungguhan yang memutuskan asal channel dan rute pesan.
-- Sambungkan model AI (lihat pemetaan di `docs/core_architecture.md` bagian Model Router) ke Lead Agent untuk memahami intent pesan bebas pelanggan — saat ini router admin masih murni keyword/regex.
+- ~~Sambungkan model AI ke Lead Agent untuk memahami intent pesan bebas pelanggan.~~ **Selesai**: `app/customer_intent.py` (`CustomerIntentClassifier`) memakai provider AI (DeepSeek) untuk mengklasifikasikan action_type dari bahasa natural pelanggan, dengan validasi kutipan bukti (meniru pola `IntakeInterpreter`). AI hanya menentukan *action_type*; teks balasan tetap deterministik (`LeadAgent._CUSTOMER_REPLY_TEXT`) supaya guardrail hallucination-prevention tidak pernah dilewati. Fail-safe: kalau AI belum dikonfigurasi/gagal/hasilnya tidak valid, `LeadAgent._classify_customer_intent()` otomatis jatuh ke router kata kunci lama (`_detect_customer_action`). Router admin (`handle_admin_message`) masih murni keyword/regex — belum termasuk cakupan ini.
 
 Kriteria selesai: pesan pelanggan simulasi bisa diproses end-to-end (trust check -> intent -> agent yang tepat -> approval bila perlu -> balasan), semuanya tercatat di audit log.
 

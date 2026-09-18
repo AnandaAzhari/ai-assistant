@@ -8,15 +8,18 @@ Jalur pelanggan (`handle_customer_message`, Fase 3 di
 (`handle_admin_message`): setiap pesan pelanggan WAJIB melalui Security & Trust
 Layer (`app/trust_layer.py`) dan Approval Gate (`app/approval_gate.py`) dulu
 sebelum diproses lebih lanjut, konsisten dengan prinsip "Zero trust untuk input
-pelanggan" di `policies/security_policy.md`. Intent pelanggan memakai router
-aturan sederhana juga (kata kunci) untuk saat ini — sama seperti router admin —
-sampai model AI benar-benar disambungkan pada iterasi berikutnya.
+pelanggan" di `policies/security_policy.md`. Intent pelanggan memakai
+`app/customer_intent.py` (AI-first, lihat modul itu untuk detail) begitu provider
+AI dikonfigurasi; router kata kunci di bawah ini tetap dipertahankan sebagai
+fallback fail-safe saat AI belum dikonfigurasi, gagal, atau hasilnya tidak lolos
+validasi. Router admin masih memakai aturan sederhana (belum berubah).
 """
 
 import re
 from dataclasses import dataclass
 
 from app.approval_gate import ApprovalGate
+from app.customer_intent import CustomerIntentClassifier
 from app.desktop import DesktopAgent, Result
 from app.document_agent import DocumentAgent
 from app.finance import FinanceService
@@ -43,6 +46,7 @@ class LeadAgent:
         admin_channel: str = "web",
         trust_layer: TrustLayer | None = None,
         approval_gate: ApprovalGate | None = None,
+        intent_classifier: CustomerIntentClassifier | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -51,6 +55,7 @@ class LeadAgent:
         self.admin_channel = admin_channel
         self.trust_layer = trust_layer
         self.approval_gate = approval_gate
+        self.intent_classifier = intent_classifier
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         command = command.strip().lower()
@@ -282,9 +287,34 @@ class LeadAgent:
             "Nanti Claude Lead Agent akan menggantikan routing aturan ini."
         )
 
-    # --- Kata kunci intent pelanggan (Fase 3, router aturan sederhana) ---
-    # action_type harus sama persis dengan yang dikenali app/approval_gate.py agar
-    # klasifikasi Level 0-4 dan daftar auto-send rutin tetap konsisten satu sumber.
+    # --- Teks balasan deterministik per action_type pelanggan ---
+    # Dipakai baik oleh hasil klasifikasi AI (app/customer_intent.py) maupun router
+    # kata kunci fallback di bawah, supaya teks yang benar-benar dikirim ke pelanggan
+    # SELALU deterministik (guardrail hallucination-prevention tidak pernah dilewati
+    # oleh keluaran model, lihat docstring app/customer_intent.py).
+    _CUSTOMER_REPLY_TEXT = {
+        "kirim_salam": "Halo, terima kasih sudah menghubungi kami! Ada yang bisa saya bantu?",
+        "konfirmasi_file_diterima": "Baik, file sudah kami terima dan akan segera diperiksa. Terima kasih.",
+        "kirim_status_antrean": (
+            "Status pesanan Anda belum bisa saya pastikan otomatis saat ini; "
+            "saya teruskan ke admin agar dicek dan dibalas langsung."
+        ),
+        "kirim_estimasi_harga_standar": (
+            "Harga pastinya belum bisa saya pastikan otomatis saat ini; "
+            "saya teruskan ke admin agar bisa dibalas dengan info harga yang akurat."
+        ),
+        "jawab_faq": "Pertanyaan ini akan diteruskan ke admin agar dijawab dengan informasi yang akurat.",
+        "minta_detail_order": (
+            "Baik, boleh diceritakan kebutuhan layanannya (jenis jasa, jumlah/ukuran, dan tenggat waktu)? "
+            "Supaya saya bisa bantu lebih lanjut."
+        ),
+    }
+
+    # --- Kata kunci intent pelanggan (fallback fail-safe, dipakai saat AI-first di
+    # app/customer_intent.py belum dikonfigurasi, gagal, atau hasilnya tidak valid) ---
+    # action_type harus sama persis dengan yang dikenali app/approval_gate.py dan
+    # app/customer_intent.py agar klasifikasi Level 0-4 dan daftar auto-send rutin
+    # tetap konsisten satu sumber.
     _CUSTOMER_GREETING_WORDS = (
         "halo", "hai", "hi", "hy", "permisi", "assalamualaikum",
         "selamat pagi", "selamat siang", "selamat sore", "selamat malam",
@@ -305,34 +335,43 @@ class LeadAgent:
 
     @classmethod
     def _detect_customer_action(cls, text: str) -> tuple[str, str]:
-        """Router aturan sederhana untuk intent pelanggan (bukan AI, dulu).
+        """Router kata kunci untuk intent pelanggan — fallback fail-safe.
 
-        Balasan untuk harga/status pesanan sengaja tidak mengarang angka: data
-        price list/status order real belum tersambung ke jalur pelanggan, jadi
-        balasannya jujur "belum bisa dipastikan otomatis" (hallucination prevention,
-        lihat docs/roadmap_customer_channel_v1.md bagian "Guardrail Tambahan").
+        Dipakai saat AI-first (`app/customer_intent.py`) belum dikonfigurasi, gagal,
+        atau hasilnya tidak lolos validasi kutipan bukti, supaya jalur pelanggan tidak
+        pernah macet menunggu AI. Balasan untuk harga/status pesanan sengaja tidak
+        mengarang angka: data price list/status order real belum tersambung ke jalur
+        pelanggan, jadi balasannya jujur "belum bisa dipastikan otomatis" (hallucination
+        prevention, lihat docs/roadmap_customer_channel_v1.md bagian "Guardrail Tambahan").
         """
         lowered = text.casefold()
         if any(word in lowered for word in cls._CUSTOMER_GREETING_WORDS):
-            return "kirim_salam", "Halo, terima kasih sudah menghubungi kami! Ada yang bisa saya bantu?"
-        if any(word in lowered for word in cls._CUSTOMER_FILE_CONFIRM_WORDS):
-            return "konfirmasi_file_diterima", "Baik, file sudah kami terima dan akan segera diperiksa. Terima kasih."
-        if any(word in lowered for word in cls._CUSTOMER_STATUS_WORDS):
-            return "kirim_status_antrean", (
-                "Status pesanan Anda belum bisa saya pastikan otomatis saat ini; "
-                "saya teruskan ke admin agar dicek dan dibalas langsung."
-            )
-        if any(word in lowered for word in cls._CUSTOMER_PRICE_WORDS):
-            return "kirim_estimasi_harga_standar", (
-                "Harga pastinya belum bisa saya pastikan otomatis saat ini; "
-                "saya teruskan ke admin agar bisa dibalas dengan info harga yang akurat."
-            )
-        if any(word in lowered for word in cls._CUSTOMER_FAQ_WORDS):
-            return "jawab_faq", "Pertanyaan ini akan diteruskan ke admin agar dijawab dengan informasi yang akurat."
-        return "minta_detail_order", (
-            "Baik, boleh diceritakan kebutuhan layanannya (jenis jasa, jumlah/ukuran, dan tenggat waktu)? "
-            "Supaya saya bisa bantu lebih lanjut."
-        )
+            action_type = "kirim_salam"
+        elif any(word in lowered for word in cls._CUSTOMER_FILE_CONFIRM_WORDS):
+            action_type = "konfirmasi_file_diterima"
+        elif any(word in lowered for word in cls._CUSTOMER_STATUS_WORDS):
+            action_type = "kirim_status_antrean"
+        elif any(word in lowered for word in cls._CUSTOMER_PRICE_WORDS):
+            action_type = "kirim_estimasi_harga_standar"
+        elif any(word in lowered for word in cls._CUSTOMER_FAQ_WORDS):
+            action_type = "jawab_faq"
+        else:
+            action_type = "minta_detail_order"
+        return action_type, cls._CUSTOMER_REPLY_TEXT[action_type]
+
+    def _classify_customer_intent(self, raw: str) -> tuple[str, str]:
+        """AI-first dulu (`app/customer_intent.py`), fallback ke router kata kunci.
+
+        AI hanya dipakai untuk menentukan action_type (dengan kutipan bukti yang
+        tervalidasi terhadap pesan asli); teks balasan yang benar-benar dikirim tetap
+        deterministik dari `_CUSTOMER_REPLY_TEXT`, sehingga AI tidak pernah punya
+        kesempatan mengarang harga/status pesanan.
+        """
+        if self.intent_classifier is not None and self.intent_classifier.configured:
+            result = self.intent_classifier.classify(raw)
+            if result.status == "berhasil" and result.action_type in self._CUSTOMER_REPLY_TEXT:
+                return result.action_type, self._CUSTOMER_REPLY_TEXT[result.action_type]
+        return self._detect_customer_action(raw)
 
     def handle_customer_message(self, sender_id: str, message: str, *, has_attachment: bool = False) -> LeadReply:
         """Jalur pelanggan: WAJIB melalui Trust Layer lalu Approval Gate, terpisah
@@ -370,7 +409,7 @@ class LeadAgent:
                 "beserta jumlah/ukuran dan tenggat waktunya?",
             )
 
-        action_type, reply_text = self._detect_customer_action(raw)
+        action_type, reply_text = self._classify_customer_intent(raw)
         approval = self.approval_gate.request(
             action_type,
             requested_by=f"customer:{sender_id}",

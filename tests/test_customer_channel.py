@@ -3,8 +3,10 @@ import unittest
 from pathlib import Path
 
 from app.approval_gate import ApprovalGate
+from app.customer_intent import CustomerIntentClassifier
 from app.interaction_policy import classify_channel, route_inbound_message
 from app.lead import LeadAgent
+from app.providers.base import ModelReply
 from app.trust_layer import TrustLayer
 
 
@@ -133,6 +135,98 @@ class HandleCustomerMessageTests(unittest.TestCase):
         trust_history = self.trust_layer.history("628123")
         self.assertEqual(len(trust_history), 1)
         self.assertIn(trust_history[0]["decision"], {"proses"})
+
+
+class FakeIntentProvider:
+    def __init__(self, reply: ModelReply):
+        self._reply = reply
+        self.calls = 0
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    @property
+    def provider_name(self) -> str:
+        return "Fake"
+
+    @property
+    def model_name(self) -> str:
+        return "fake-model"
+
+    def generate(self, messages, *, max_tokens=300, temperature=0.0, timeout=20):
+        self.calls += 1
+        return self._reply
+
+
+class HandleCustomerMessageWithAiIntentTests(unittest.TestCase):
+    """handle_customer_message() memakai app/customer_intent.py saat provider AI siap."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        db = Path(self.temp.name) / "assistant.db"
+        self.trust_layer = TrustLayer(db)
+        self.approval_gate = ApprovalGate(db)
+
+    def _lead_with_provider(self, reply: ModelReply) -> tuple[LeadAgent, FakeIntentProvider]:
+        provider = FakeIntentProvider(reply)
+        classifier = CustomerIntentClassifier(provider)
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            intent_classifier=classifier,
+        )
+        return lead, provider
+
+    def test_ai_classification_is_used_when_provider_is_configured(self):
+        # Pesan ini sengaja ditulis dengan gaya bebas yang tidak persis cocok dengan
+        # kata kunci router lokal, supaya hasilnya benar-benar berasal dari AI.
+        raw = "Kak, kira-kira cetak skripsi 50 lembar itu kena biaya berapaan ya?"
+        reply = ModelReply(
+            "berhasil",
+            '{"action_type": "kirim_estimasi_harga_standar", "evidence": "kena biaya berapaan"}',
+            "Fake", "fake-model", 10, 5,
+        )
+        lead, provider = self._lead_with_provider(reply)
+        result = lead.handle_customer_message("628001", raw)
+        self.assertEqual(result.target, "kirim_estimasi_harga_standar")
+        self.assertEqual(result.status, "berhasil")
+        self.assertEqual(provider.calls, 1)
+        # Guardrail hallucination prevention tetap berlaku walau lewat AI.
+        self.assertNotRegex(result.text, r"Rp\s?\d")
+
+    def test_falls_back_to_keyword_router_when_ai_result_is_invalid(self):
+        raw = "Halo kak, mau pesan jasa cetak makalah 50 lembar"
+        reply = ModelReply(
+            "berhasil",
+            '{"action_type": "action_type_tidak_dikenal", "evidence": "mau pesan"}',
+            "Fake", "fake-model", 10, 5,
+        )
+        lead, provider = self._lead_with_provider(reply)
+        result = lead.handle_customer_message("628002", raw)
+        self.assertEqual(provider.calls, 1)
+        # Fallback ke router kata kunci lokal, hasilnya tetap benar.
+        self.assertEqual(result.target, "kirim_salam")
+        self.assertEqual(result.status, "berhasil")
+
+    def test_falls_back_to_keyword_router_when_provider_fails(self):
+        raw = "Halo kak, mau pesan jasa cetak makalah 50 lembar"
+        reply = ModelReply("gagal", "Tidak dapat terhubung.", "Fake", "fake-model")
+        lead, provider = self._lead_with_provider(reply)
+        result = lead.handle_customer_message("628003", raw)
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(result.target, "kirim_salam")
+        self.assertEqual(result.status, "berhasil")
+
+    def test_unconfigured_classifier_skips_ai_call_and_uses_keyword_router(self):
+        classifier = CustomerIntentClassifier(None)
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            intent_classifier=classifier,
+        )
+        result = lead.handle_customer_message("628004", "Halo kak, mau pesan jasa cetak makalah 50 lembar")
+        self.assertEqual(result.target, "kirim_salam")
+        self.assertEqual(result.status, "berhasil")
 
 
 if __name__ == "__main__":

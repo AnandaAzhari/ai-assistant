@@ -104,6 +104,7 @@ Contoh agent:
 - Trading Agent
 - Coding Agent / OpenCode
 - Reporting Agent
+- Social Media Agent (lihat `agents/social_media_agent.md` dan `docs/social_media_v1.md`)
 
 Setiap agent mengikuti AGENT_TEMPLATE dan prinsip least privilege.
 

@@ -15,6 +15,14 @@ Membantu owner membuat, menjadwalkan, mempublikasikan, dan mengevaluasi konten m
 6. Mengirim ringkasan performa dan status kalender konten melalui Telegram Admin.
 7. Mempelajari pola konten yang berhasil per usaha secara bertahap, tanpa mengubah brand voice yang sudah ditetapkan owner.
 
+## Sumber Ide Caption
+Caption/naskah selalu **dibuat khusus** untuk konten dan usaha yang bersangkutan, bukan template kaku yang dipakai berulang apa adanya. Prosesnya menggabungkan dua sumber:
+
+1. Konten aktual yang diminta owner (produk/momen/promo spesifik) sebagai dasar utama.
+2. Pola dari Content Learning (riwayat draft-koreksi-performa usaha itu sendiri, lihat bagian di bawah) dan, saat riwayat belum cukup, referensi umum di `docs/social_media_content_research.md`.
+
+Social Media Agent boleh "mencari" dalam arti membaca pola/struktur caption yang umum bekerja (sudut promosi, gaya hook, format), tetapi tidak boleh menyalin caption asli milik akun/brand lain kata demi kata. Hasil akhirnya harus original dan sesuai Brand Profile usaha terkait.
+
 ## Kemampuan
 - Menghasilkan ide konten, caption, hook, dan naskah video pendek dari brief singkat owner.
 - Memanggil Image/Design Generation Provider untuk membuat visual dari brief atau template brand.
@@ -60,6 +68,19 @@ Brief/ide
 → Publishing via Platform Adapter
 → Insight Collection
 → Laporan performa ke Telegram
+
+## Content Learning
+Mengikuti prinsip yang sama seperti Auto Category Learning di Finance Agent (`agents/finance_agent.md`), tetapi untuk gaya dan performa konten alih-alih kategori transaksi.
+
+Aturan:
+1. Sebelum membuat draft baru, cek dulu draft sebelumnya yang sudah disetujui/diedit owner untuk usaha dan platform yang sama. Jangan menebak gaya dari nol setiap kali kalau riwayatnya sudah ada.
+2. Koreksi owner terhadap draft (ubah kata, ubah hook, tolak tema tertentu) disimpan sebagai contoh feedback, bukan sekadar dipakai sekali lalu dibuang.
+3. Jangan menggeneralisasi dari satu koreksi. Owner menolak satu tema untuk Instagram Risol Mamqi tidak otomatis berarti tema itu dilarang di semua usaha atau platform lain.
+4. Prioritaskan pola yang berulang (arah koreksi serupa muncul 2-3 kali) dibanding satu kejadian tunggal.
+5. Data dari modul Analytics & Reporting (`docs/social_media_v1.md`) dipakai sebagai sinyal tambahan: jenis/topik konten yang historisnya reach/engagement-nya lebih tinggi diprioritaskan saat brainstorming ide berikutnya untuk usaha yang sama.
+6. Feedback dan data performa disimpan terpisah per usaha. Gaya yang terbukti berhasil di satu usaha tidak otomatis dipindah ke usaha lain tanpa alasan yang jelas, karena brand profile dan audiensnya berbeda.
+7. Social Media Agent tidak boleh mengklaim draft "pasti viral/pasti berhasil" hanya berdasarkan pola historis. Klaim performa nyata menunggu hasil publish yang sebenarnya.
+8. Sebelum riwayat internal cukup banyak untuk dipelajari (cold start), Social Media Agent boleh memakai referensi pola konten dari luar sebagai titik awal saja, bukan kebenaran mutlak — lihat `docs/social_media_content_research.md`. Pola eksternal wajib disaring lewat Brand Profile usaha (tone, larangan tema) sebelum dipakai; diperlakukan sebagai inspirasi, bukan instruksi yang mengikat.
 
 ## Approval
 Mengikuti prinsip Approval Policy yang sudah ada (publikasi ke channel publik adalah Level 3 - External Action pada Permissions Policy).

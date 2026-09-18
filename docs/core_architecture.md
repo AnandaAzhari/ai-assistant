@@ -82,12 +82,39 @@ Perintah dari Telegram Admin dapat memiliki prioritas lebih tinggi daripada tuga
 ### 5. Model Router
 Memilih model AI berdasarkan jenis tugas, biaya, performa, privasi, dan ketersediaan provider.
 
-Contoh strategi awal:
-- DeepSeek V4.1 Flash: default murah/cepat.
-- GPT/Gemini: fallback atau tugas tertentu.
-- Model lokal: tugas ringan atau privacy-sensitive.
+Model dapat diganti tanpa mengubah agent atau tools (lihat `app/providers/`).
 
-Model dapat diganti tanpa mengubah agent atau tools.
+#### Prinsip Cascade untuk Lead Agent
+Lead Agent dipanggil di setiap pesan masuk sehingga menjadi titik dengan volume tertinggi di seluruh sistem. Default-nya memakai model murah/cepat untuk klasifikasi intent rutin.
+
+Eskalasi ke model yang lebih mahal/pintar hanya dilakukan untuk kasus tertentu, bukan semua pesan:
+- trust/spam scoring pada pesan pelanggan yang ambigu (indikasi scam/prompt injection tidak boleh diputuskan model murah saja),
+- perintah admin bebas dari Telegram yang bukan slash command tetap,
+- kasus confidence rendah dari router aturan/model default.
+
+Pola ini konsisten dengan `needs_review` yang sudah dipakai Finance Agent untuk confidence rendah.
+
+#### Pemetaan Model per Agent (v1, per September 2026)
+Harga berubah dari waktu ke waktu; cek halaman resmi tiap provider secara berkala sebelum mengisi budget di `.env`.
+
+| Agent/Tugas | Model default | Model eskalasi/kualitas |
+| --- | --- | --- |
+| Lead Agent (routing rutin) | DeepSeek V4-Flash | Claude Haiku 4.5 (trust/spam ambigu, command admin bebas) |
+| Finance Agent (parsing teks transaksi) | DeepSeek V4-Flash | DeepSeek V4-Pro |
+| Finance Agent (vision baca struk) | Gemini 3.5 Flash-Lite | Gemini 3.6 Flash (struk buram/tulisan tangan) |
+| Document Agent (Nara) | Claude Sonnet 5 | DeepSeek V4-Pro (fallback saat budget API ketat) |
+| Social Media Agent (brainstorm ide/caption) | Kimi K2.5 atau DeepSeek V4-Flash | Claude Sonnet 5 (polish versi final sebelum approval) |
+
+Referensi harga per 1 juta token (indikatif, September 2026):
+- DeepSeek V4-Flash: $0.14 input (cache miss) / $0.28 output.
+- DeepSeek V4-Pro: $0.435 input / $0.87 output.
+- Claude Haiku 4.5: $1 input / $5 output.
+- Claude Sonnet 5: $2 input / $10 output.
+- Gemini 3.5 Flash-Lite: $0.30 input / $2.50 output.
+- Gemini 3.6 Flash: $1.50 input / $7.50 output.
+- Kimi K2.5 (Moonshot): $0.60 input / $3.00 output.
+
+Model lokal (Ollama dkk.) tetap opsi untuk tugas ringan/privacy-sensitive di masa depan, tetapi bukan prioritas tahap ini karena selisih biaya ke provider cloud termurah (DeepSeek) masih kecil dibanding effort setup dan kebutuhan hardware.
 
 ### 6. Agent Registry
 Daftar semua agent aktif beserta kemampuan, izin, versi, tool yang boleh digunakan, dan batasannya.
@@ -129,7 +156,7 @@ Tindakan sensitif harus meminta approval user sesuai approval_policy.md.
 Untuk tahap awal, Telegram Admin menjadi channel utama approval karena owner dapat menerima permintaan dan merespons dari HP/tablet.
 
 ### 10. Memory & Database
-SQLite digunakan untuk tahap awal.
+SQLite digunakan untuk tahap awal. Lihat `docs/agent_memory_v1.md` untuk pembagian Working Memory (per sesi), Long-Term Feedback Memory (riwayat koreksi/performa lintas sesi), dan Reference/Static Knowledge (file agent/policy/brand profile).
 
 Jenis data:
 - conversation state

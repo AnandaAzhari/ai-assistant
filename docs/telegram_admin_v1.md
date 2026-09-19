@@ -10,6 +10,7 @@ Runtime saat ini menghubungkan chat pribadi owner ke layanan yang sama dengan We
 - Sesi dokumen disimpan di SQLite dan dipulihkan setelah program dinyalakan ulang. Sesi Telegram dibedakan berdasarkan bot, owner dan chat, serta terpisah dari sesi Web Admin. Buku keuangan tetap sama bila `DATABASE_PATH` sama.
 - Balasan panjang dipecah tanpa dipotong. Balasan yang gagal dikirim dicoba kembali tanpa mengulangi tindakan yang sudah tercatat pada update yang sama.
 - Hanya pesan dari owner dan chat pribadi yang dikonfigurasi yang diproses. Foto, suara dan lampiran diberi penjelasan bahwa pemrosesannya belum tersedia.
+- **Menu perintah "/" bawaan Telegram (BARU, 19 September 2026):** setiap kali runtime dijalankan, daftar perintah didaftarkan otomatis ke Telegram lewat `setMyCommands` (`app/lead.py::TELEGRAM_COMMAND_MENU`, dipanggil dari `telegram_main.py`), termasuk `/help`. Ketuk "/" di kolom chat untuk melihat semua perintah beserta keterangan singkatnya, tanpa perlu hafal atau ketik `/bantuan` dulu. Ini murni kosmetik (autocomplete Telegram) — semua perintah tetap berfungsi normal walau pendaftaran ini gagal (mis. tidak ada internet saat startup); runtime tetap jalan, hanya menu "/"-nya yang belum terisi sampai runtime berikutnya dinyalakan.
 
 Pengiriman file Word/PDF sebagai lampiran, pembacaan struk, tombol approval, laporan terjadwal dan alert otomatis **belum diimplementasikan** oleh adapter ini. Balasan hasil dokumen masih berupa teks/path lokal. Riset/draft tetap membutuhkan konfigurasi provider dan sumber yang memadai; koneksi Telegram saja tidak menjamin keduanya berhasil.
 
@@ -60,7 +61,7 @@ Owner Telegram
 
 ### 1. Natural Language Command
 Owner boleh memberi perintah dengan bahasa biasa, misalnya:
-- "Catat pengeluaran 80 ribu beli tinta untuk DocuTech pakai BCA."
+- "Catat pengeluaran 80 ribu beli tinta untuk Taqi Desk pakai BCA."
 - "Berapa pemasukan Pixiva bulan ini?"
 - "Tampilkan order yang masih menunggu review."
 - "Pause WhatsApp Agent."

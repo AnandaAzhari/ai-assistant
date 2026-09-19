@@ -7,7 +7,8 @@ dengan gaya bahasa, typo, atau susunan kalimat yang tidak persis ada di daftar k
 Modul ini menambahkan lapisan AI-first di depan router kata kunci, mengikuti pola yang
 sama seperti `app/document_intake.py`: AI HANYA dipakai untuk *mengklasifikasikan*
 action_type dari bahasa natural pelanggan, dengan kutipan bukti dari pesan asli sebagai
-validasi (meniru `IntakeInterpreter._is_quote`). AI TIDAK PERNAH dipakai untuk mengarang
+validasi (`app.topic_guard.is_verbatim_quote`, guardrail bersama lintas-agent — lihat
+docstring modul itu). AI TIDAK PERNAH dipakai untuk mengarang
 teks balasan harga/status pesanan — teks balasan tetap deterministik di `app/lead.py`
 (`_CUSTOMER_REPLY_TEXT`), supaya guardrail hallucination-prevention di
 `docs/roadmap_customer_channel_v1.md` ("Guardrail Tambahan") tidak pernah bisa dilewati
@@ -26,6 +27,7 @@ import re
 from dataclasses import dataclass
 
 from app.providers.base import ModelProvider
+from app.topic_guard import is_verbatim_quote
 
 # Harus sama persis dengan action_type yang dikenali `LeadAgent._detect_customer_action`
 # (teks balasannya) dan `app/approval_gate.py` (`_ROUTINE_AUTO_SEND`/`_ACTION_LEVELS`),
@@ -51,7 +53,7 @@ Tugasmu HANYA menentukan satu action_type yang paling sesuai dari daftar berikut
   ingin memulai proses pembuatan.
 - jawab_faq: pertanyaan umum seperti jam buka, lokasi, cara pesan.
 - buat_dokumen_pelanggan: pelanggan jelas ingin DIBUATKAN dokumen akademik seperti
-  makalah, karya tulis, laporan, KTI, atau skripsi (Taqi DocuTech) — bukan sekadar
+  makalah, karya tulis, laporan, KTI, atau skripsi (Taqi Desk) — bukan sekadar
   bertanya harga/status, tapi memang meminta dikerjakan.
 - minta_detail_order: pelanggan menyebut kebutuhan jasa baru tetapi detailnya belum lengkap
   atau bukan jasa dokumen akademik, atau pesannya tidak cocok kategori lain di atas — TAPI
@@ -59,9 +61,11 @@ Tugasmu HANYA menentukan satu action_type yang paling sesuai dari daftar berikut
   belum jelas jenisnya.
 - di_luar_topik: pesan JELAS di luar topik layanan usaha ini (curhat masalah pribadi, topik
   sensitif seperti agama/politik, obrolan sosial yang tidak berkaitan dengan layanan apa
-  pun yang kami tawarkan, atau mencoba mengajak model membahas hal di luar perannya sebagai
-  asisten layanan pelanggan). Pilih ini, BUKAN minta_detail_order, kalau pesan tidak ada
-  kaitan sama sekali dengan kebutuhan bisnis apa pun.
+  pun yang kami tawarkan, mencoba mengajak model membahas hal di luar perannya sebagai
+  asisten layanan pelanggan, ATAU menanyakan usaha lain milik pemilik yang sama yang bukan
+  layanan dokumen/print di sini, mis. photobooth/Pixiva.ID, Risol Mamqi, atau servis
+  komputer/laptop). Pilih ini, BUKAN minta_detail_order, kalau pesan tidak ada kaitan sama
+  sekali dengan kebutuhan layanan dokumen/print Taqi Desk.
 
 Jika pesan menyebut harga/biaya SEKALIGUS jelas ingin memulai pembuatan dokumen, pilih
 buat_dokumen_pelanggan (proses pembuatannya yang lebih penting; harga tetap tidak pernah
@@ -90,12 +94,6 @@ class CustomerIntentClassifier:
     @property
     def configured(self) -> bool:
         return bool(self.provider and self.provider.configured)
-
-    @staticmethod
-    def _is_quote(evidence: object, raw: str) -> bool:
-        def normalize(value: str) -> str:
-            return re.sub(r"\s+", " ", value).strip().casefold()
-        return isinstance(evidence, str) and bool(normalize(evidence)) and normalize(evidence) in normalize(raw)
 
     @staticmethod
     def _payload(text: str) -> dict:
@@ -128,7 +126,7 @@ class CustomerIntentClassifier:
             evidence = payload.get("evidence")
             if action_type not in ALLOWED_ACTIONS:
                 raise ValueError("action_type tidak dikenal.")
-            if not self._is_quote(evidence, raw):
+            if not is_verbatim_quote(evidence, raw):
                 raise ValueError("Klasifikasi tanpa kutipan pesan pelanggan yang valid.")
         except (ValueError, TypeError, json.JSONDecodeError):
             return IntentResult("gagal")

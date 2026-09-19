@@ -9,6 +9,7 @@ import sqlite3
 
 from app.admin_runtime import create_admin_lead
 from app.env import load_env
+from app.lead import TELEGRAM_COMMAND_MENU
 from app.telegram import AdminIdentity, TelegramAdminAdapter, TelegramHTTPClient, TelegramError
 from app.telegram_store import TelegramUpdateStore
 from app.telegram_lock import TelegramAlreadyRunning, telegram_process_lock
@@ -114,6 +115,14 @@ def main(argv: list[str] | None = None) -> int:
             db_path = os.environ.get('DATABASE_PATH', 'data/assistant.db').strip() or 'data/assistant.db'
             store = TelegramUpdateStore(db_path, bot['id'])
             adapter = TelegramAdminAdapter(client, identity, lead.handle_admin_message, store=store)
+            try:
+                client.set_my_commands(list(TELEGRAM_COMMAND_MENU))
+                print('Menu perintah "/" Telegram terdaftar (termasuk /help).')
+            except TelegramError as exc:
+                # Kosmetik saja (autocomplete menu Telegram) — semua perintah tetap
+                # berfungsi normal walau pendaftaran menu ini gagal, jadi jangan
+                # menghentikan runtime hanya karena ini.
+                print(f'Menu perintah "/" Telegram belum bisa didaftarkan ({exc}); perintah tetap bisa diketik manual.')
             print('Telegram Admin aktif untuk akun Anda. Kirim /status atau /bantuan ke bot.')
             print('Nara dan pencatatan keuangan terhubung. Sesi makalah Telegram terpisah dari Web Admin.')
             print('Biarkan terminal ini terbuka. Ctrl+C untuk berhenti; data sesi tersimpan di komputer.')

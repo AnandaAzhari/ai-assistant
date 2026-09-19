@@ -6,13 +6,13 @@ Kumpulan pola konten dari sumber publik per jenis usaha, dipakai Social Media Ag
 ## Cara Pakai
 Pola di bawah ini adalah **inspirasi umum**, bukan instruksi mengikat dan bukan data spesifik usaha Ananda. Setiap pola wajib disaring dulu lewat Brand Profile usaha terkait (`brand_profiles/`) — tone, larangan tema, dan identitas visual — sebelum dipakai jadi draft. Begitu riwayat internal (draft yang disetujui, koreksi, data performa) sudah cukup banyak per usaha, itu yang jadi acuan utama; referensi di file ini bobotnya turun otomatis secara praktik (dipakai hanya saat riwayat internal belum ada/sedikit).
 
-## Taqi DocuTech (Jasa Dokumen/Print/Akademik)
+## Taqi Desk (Jasa Dokumen/Print/Akademik)
 Pola dari riset promosi jasa print/fotocopy/percetakan dokumen:
 - Sudut pesan kecepatan: highlight waktu pengerjaan cepat ("selesai dalam hitungan jam") — relevan untuk mahasiswa/pelajar yang deadline mepet.
 - Sudut spesialisasi: sebut jenis layanan spesifik (skripsi, banner, poster, dokumen kantor) daripada "jasa print" generik, supaya menyasar segmen yang tepat.
 - Before/after atau contoh hasil cetak untuk menunjukkan kualitas.
 - Testimoni pelanggan sebagai bentuk kepercayaan.
-- Konten edukatif (bukan cuma promosi): tips format dokumen, panduan sitasi, dsb — sesuai arahan tone edukatif di Brand Profile Taqi DocuTech.
+- Konten edukatif (bukan cuma promosi): tips format dokumen, panduan sitasi, dsb — sesuai arahan tone edukatif di Brand Profile Taqi Desk.
 
 Sumber: [Contoh Iklan Jasa Print - Kiriminaja](https://kiriminaja.com/blog/contoh-iklan-jasa-print)
 

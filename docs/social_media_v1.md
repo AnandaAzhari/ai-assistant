@@ -7,7 +7,7 @@ Taqi ContentDesk (working title; dapat diganti nanti, mengikuti pola Taqi Financ
 Membuat sistem konten media sosial yang terhubung ke Social Media Agent, Telegram Admin, Web Admin, dan beberapa usaha sekaligus, sehingga owner cukup memberi brief singkat dan sistem membantu dari ide sampai laporan performa.
 
 ## Usaha Tercakup V1
-- Taqi DocuTech
+- Taqi Desk
 - Pixiva.ID
 - Risol Mamqi
 

@@ -40,6 +40,7 @@ from app.document_engine import DocumentEngine
 from app.document_preferences import DocumentPreferenceStore
 from app.document_session import DocumentSessionStore
 from app.env import load_env
+from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
@@ -107,6 +108,11 @@ def create_customer_adapter() -> WhatsAppCustomerAdapter:
         # pelanggan dari data asli (lihat app/price_list.py, app/order_status.py).
         price_list=PriceListStore(db_path),
         order_status=OrderStatusStore(db_path),
+        # Fase 5 (Evaluasi & Observability, docs/roadmap_customer_channel_v1.md): setiap
+        # interaksi pelanggan sungguhan tersimpan untuk ditinjau berkala oleh admin lewat
+        # Telegram (/eval_sample dst. di app/lead.py), database yang sama dengan
+        # admin_runtime.py supaya bisa ditinjau dari satu tempat.
+        interaction_log=InteractionLogStore(db_path),
     )
     client = WhatsAppHTTPClient(
         os.environ.get("WHATSAPP_API_TOKEN", ""),

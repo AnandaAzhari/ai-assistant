@@ -60,7 +60,7 @@ def demo_spec() -> MakalahSpec:
     return MakalahSpec(
         order_id="DEMO-FOOTNOTE",
         title="Pencemaran Lingkungan",
-        institution="Taqi DocuTech - Dokumen Uji",
+        institution="Taqi Desk - Dokumen Uji",
         class_semester="XI",
         subject="Biologi",
         author="Contoh Siswa",

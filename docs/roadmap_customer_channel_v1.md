@@ -15,7 +15,18 @@ Dicek ke sumber industri terkini soal praktik AI agent produksi, dibandingkan de
 - **Prinsip Approval Gate (manusia tetap mengambil keputusan akhir untuk aksi sensitif)** sejalan dengan temuan bahwa tim gabungan manusia+agent mengungguli agent yang sepenuhnya otonom pada 68,7% kasus. Jangan buru-buru menghilangkan approval manusia meski nanti sistemnya sudah terasa "pintar".
 
 ### Yang masih jadi celah nyata (belum ada di dokumen manapun sebelumnya)
-1. **Guardrails runtime belum konkret sebagai kategori.** Security & Trust Layer di Fase 1 sudah menyasar sebagian (spam/scam, isolasi data), tapi riset industri membagi guardrails jadi 6 kategori: prompt injection detection, data/PII protection, **hallucination prevention**, topic restriction, policy enforcement, dan audit trail. Dua yang belum tersentuh sama sekali di dokumenmu: **hallucination prevention** (mencegah AI mengarang info di luar Document Agent — `document_agent.md` sudah larang "mengarang referensi" tapi itu baru untuk Nara, belum jadi aturan lintas semua agent) dan **topic restriction** (agent tetap dalam batas topik usahanya, tidak menjawab di luar konteks yang seharusnya).
+1. ~~**Guardrails runtime belum konkret sebagai kategori.**~~ **Selesai (19 September
+   2026):** catatan riset asli di bawah ini ditulis SEBELUM Fase 3/4 (lihat checklist di
+   bawah) menutup sebagian besar gap ini untuk jalur pelanggan, dan sebelum
+   `app/topic_guard.py` menyatukan keduanya jadi guardrail lintas-agent yang eksplisit —
+   lihat `policies/security_policy.md` bagian "Hallucination Prevention & Topic
+   Restriction (Lintas Agent)" untuk kebijakan lengkap yang sekarang berlaku, dan bagian
+   "Guardrail Tambahan yang Perlu Masuk Fase 1" di bawah untuk status implementasi
+   per-agent. Sisa yang masih terbuka: router admin (`handle_admin_message`) masih murni
+   keyword tanpa AI (lihat Fase 3 di bawah), dan belum ada guardrail serupa untuk Laras
+   (belum ada trafik AI produksi) atau Dimas (belum ada AI sama sekali).
+
+   Catatan riset asli (untuk konteks historis): Security & Trust Layer di Fase 1 sudah menyasar sebagian (spam/scam, isolasi data), tapi riset industri membagi guardrails jadi 6 kategori: prompt injection detection, data/PII protection, **hallucination prevention**, topic restriction, policy enforcement, dan audit trail. Dua yang belum tersentuh sama sekali di dokumenmu: **hallucination prevention** (mencegah AI mengarang info di luar Document Agent — `document_agent.md` sudah larang "mengarang referensi" tapi itu baru untuk Nara, belum jadi aturan lintas semua agent) dan **topic restriction** (agent tetap dalam batas topik usahanya, tidak menjawab di luar konteks yang seharusnya).
 2. **Belum ada Evaluasi & Observability untuk output AI-nya sendiri.** `tests/` yang ada sekarang menguji logika Python yang deterministik (parsing, kategori, dsb) — bagus, tapi begitu model AI beneran tersambung ke Lead Agent/Nara/Social Media Agent, kamu butuh cara terpisah untuk tahu **apakah jawaban AI-nya sendiri bagus atau tidak**, bukan cuma "apakah kodenya jalan tanpa error". Lihat Fase 5 di bawah.
 
 ## Fase 1: Security & Trust Layer (minimum)
@@ -39,10 +50,29 @@ Lihat aturan lengkap di `policies/security_policy.md` bagian "Isolasi Antar Pela
 Kriteria selesai (tambahan untuk Fase 1): skenario uji "pelanggan A tanya data pelanggan B" dan "pelanggan menyamar minta rekap semua order" keduanya ditolak dan tercatat sebagai sinyal mencurigakan, bukan diproses.
 
 ### Guardrail Tambahan yang Perlu Masuk Fase 1
-Dua kategori guardrail dari riset di atas yang belum tercakup:
 
-- **Hallucination prevention (lintas agent, bukan cuma Nara).** Setiap agent yang memberi jawaban ke pelanggan (harga, ketersediaan, status order, estimasi waktu) wajib mengambil datanya dari sumber yang benar (database/price list), bukan dikarang oleh model AI. Kalau data tidak tersedia, agent menjawab "belum bisa dipastikan" daripada menebak.
-- **Topic restriction.** Agent pelanggan (misal WhatsApp untuk Taqi DocuTech) menjawab hanya dalam batas layanan usaha itu; pertanyaan di luar topik (curhat, topik sensitif, hal tidak berkaitan dengan layanan) dialihkan sopan, bukan dijawab bebas oleh model.
+- [x] **Hallucination prevention (lintas agent, bukan cuma Nara).** Diimplementasikan
+  (19 September 2026) via `app/topic_guard.py::is_verbatim_quote()` (kutipan-bukti,
+  dipakai `app/customer_intent.py`/Taqi dan `app/document_intake.py`/Nara),
+  `app/document_draft.py::_validate()` (sitasi Nara hanya boleh dari Source Registry
+  terdaftar), `LeadAgent._augment_reply_with_real_data()` (harga/status pelanggan
+  SELALU dari data asli atau jujur "belum bisa dipastikan", tidak pernah ditebak), dan
+  `app/content_studio.py` (Kirana, guard harga karangan di draf caption). Detail
+  kebijakan lengkap di `policies/security_policy.md`. Test:
+  `tests/test_topic_guard.py`, `tests/test_customer_intent.py`,
+  `tests/test_document_agent.py` (`DocumentAgentTopicRestrictionTests`),
+  `tests/test_content_studio.py`.
+- [x] **Topic restriction.** Diimplementasikan dua tempat dengan SATU daftar kata kunci
+  bersama (`app/topic_guard.py::is_off_topic()`, tidak ada dua salinan yang bisa
+  berbeda): (1) Taqi di kontak pertama pelanggan (`action_type` `di_luar_topik`,
+  `app/lead.py`/`app/customer_intent.py`, selesai lebih dulu — lihat checklist Fase 4 di
+  bawah), dan (2) **baru (19 September 2026)** Nara DI TENGAH sesi dokumen yang sudah
+  berjalan (`app/document_agent.py`, backstop deterministik yang berjalan SEBELUM
+  memanggil AI intake untuk pesan yang jelas di luar topik — menutup gap di
+  `eval/scenarios/nara.md` Skenario 7 yang sebelumnya hanya mengandalkan persona AI
+  tanpa validasi kode). Test: `tests/test_topic_guard.py`,
+  `tests/test_customer_channel.py`, `tests/test_document_agent.py`
+  (`DocumentAgentTopicRestrictionTests`).
 
 ## Fase 2: Approval Gate (minimum)
 Tujuan: tindakan sensitif berhenti otomatis menunggu persetujuan owner, bukan cuma tertulis di kebijakan.
@@ -91,12 +121,12 @@ Deliverables (status):
 Tujuan: tahu apakah jawaban AI dari tiap agent benar-benar bagus, bukan cuma "kodenya jalan tanpa error". Ini beda dari `tests/` yang sudah ada (itu menguji logika Python deterministik).
 
 Deliverables:
-- Kumpulan skenario uji per agent (misalnya 15-20 contoh percakapan nyata/realistis untuk Nara, Finance Agent, Social Media Agent) yang jawabannya dicek manual dulu oleh kamu sebagai patokan "baik/tidak baik".
-- Simpan setiap interaksi produksi (setelah live) sebagai data yang bisa ditinjau ulang — bukan cuma respons berhasil dikirim lalu dilupakan. Ini nyambung ke `docs/agent_memory_v1.md` (Long-Term Feedback Memory) yang sudah dirancang.
-- Evaluasi percakapan penuh (multi-turn), bukan cuma satu pertanyaan-satu jawaban — agent yang bertanya klarifikasi, menjaga konteks, dan pulih dari kesalahan itu baru kelihatan bagus/tidaknya di percakapan penuh, bukan potongan tunggal.
-- Tinjauan berkala (mingguan/bulanan) atas sampel percakapan asli untuk menangkap penurunan kualitas lebih awal, terutama setelah ganti model atau update prompt.
+- Kumpulan skenario uji per agent (misalnya 15-20 contoh percakapan nyata/realistis untuk Nara, Finance Agent, Social Media Agent) yang jawabannya dicek manual dulu oleh kamu sebagai patokan "baik/tidak baik". **Diimplementasikan (draft awal, ~8 skenario per agent, menuju target 15-20):** `eval/scenarios/nara.md`, `eval/scenarios/finance_agent.md`, `eval/scenarios/social_media_agent.md` — lihat `eval/scenarios/README.md` untuk status dan cara pakai. Ini draft AI, bukan standar tervalidasi — perlu ditinjau/disesuaikan owner.
+- Simpan setiap interaksi produksi (setelah live) sebagai data yang bisa ditinjau ulang — bukan cuma respons berhasil dikirim lalu dilupakan. Ini nyambung ke `docs/agent_memory_v1.md` (Long-Term Feedback Memory) yang sudah dirancang. **Diimplementasikan:** `app/interaction_log.py` (`InteractionLogStore`), tersambung ke jalur pelanggan (`LeadAgent.handle_customer_message`, agent "taqi"/"nara") dan Content Studio (`ContentStudio.generate_draft`, agent "kirana").
+- Evaluasi percakapan penuh (multi-turn), bukan cuma satu pertanyaan-satu jawaban — agent yang bertanya klarifikasi, menjaga konteks, dan pulih dari kesalahan itu baru kelihatan bagus/tidaknya di percakapan penuh, bukan potongan tunggal. Skenario di `eval/scenarios/` sudah ditulis dalam bentuk multi-turn (percakapan lanjutan), bukan satu pertanyaan tunggal.
+- Tinjauan berkala (mingguan/bulanan) atas sampel percakapan asli untuk menangkap penurunan kualitas lebih awal, terutama setelah ganti model atau update prompt. **Diimplementasikan:** perintah Telegram Admin `/eval_sample [agent] [n]` (ambil sampel belum ditinjau), `/eval_tandai <id> | baik/perlu_perbaikan/tidak_baik | <catatan>` (catat hasil tinjauan), `/eval_status [agent]` (ringkasan tren kualitas) — lihat `app/lead.py`.
 
-Kriteria selesai: ada kumpulan skenario uji minimum untuk tiap agent yang sudah live dengan model AI sungguhan, dan proses (walau manual dulu) untuk meninjau sampel percakapan produksi secara berkala.
+Kriteria selesai: ada kumpulan skenario uji minimum untuk tiap agent yang sudah live dengan model AI sungguhan, dan proses (walau manual dulu) untuk meninjau sampel percakapan produksi secara berkala. **Infrastruktur dan draft awal sudah ada** (per catatan di atas); yang masih perlu dilakukan owner: (1) benar-benar menjalankan tinjauan berkala secara rutin begitu ada trafik produksi sungguhan, (2) menambah skenario menuju 15-20 per agent, terutama dari interaksi nyata yang ditandai `tidak_baik`/`perlu_perbaikan`. Finance Agent (Laras) belum memakai AI sungguhan di produksi (masih parsing deterministik), jadi belum ada trafik nyata untuk ditinjau lewat Interaction Log untuk agent ini — skenarionya tetap disiapkan untuk dipakai begitu bagian AI-nya (parsing teks/vision struk, lihat `docs/core_architecture.md`) diaktifkan.
 
 ## Ukuran Relatif Tiap Fase
 Perkiraan kasar berdasarkan cakupan kerja, bukan estimasi waktu pasti (kecepatan tergantung waktu yang bisa dialokasikan):
@@ -113,4 +143,4 @@ Perkiraan kasar berdasarkan cakupan kerja, bukan estimasi waktu pasti (kecepatan
 Finance Agent, Document Agent (Nara), Desktop Agent, Web Admin, dan Telegram Admin tetap aman dilanjutkan sekarang karena semuanya jalur owner-only, bukan publik.
 
 ## Status
-- v0.1-draft
+- v0.3. Fase 1-4 sudah diimplementasikan (lihat checklist di masing-masing bagian fase di atas). Fase 5 (Evaluasi & Observability) infrastrukturnya sudah diimplementasikan (`app/interaction_log.py` + perintah Telegram `/eval_sample`, `/eval_tandai`, `/eval_status`) dan draft awal skenario uji sudah ada di `eval/scenarios/` — lihat detail status di bagian Fase 5 di atas. Guardrail hallucination prevention & topic restriction lintas-agent (`app/topic_guard.py`) diimplementasikan 19 September 2026 — lihat bagian "Guardrail Tambahan yang Perlu Masuk Fase 1" di atas dan `policies/security_policy.md`.

@@ -84,6 +84,15 @@ Tugas utama:
 
 Security layer tidak boleh menjalankan file, macro, script, executable, atau membuka link asing secara otomatis.
 
+**Hallucination prevention & topic restriction (lintas semua agent yang tersambung AI):**
+guardrail ini disatukan di `app/topic_guard.py` dan berlaku untuk Taqi, Nara, Kirana, dan
+sejak 19 September 2026 juga Laras (`app/finance_query.py`, khusus pertanyaan laporan
+bebas — pencatatan transaksi baru tetap deterministik) — kutipan-bukti untuk setiap
+nilai yang diusulkan AI dari pesan pengguna, dan kata kunci topik-restriction yang sama
+dipakai Taqi (kontak pertama) maupun Nara (sepanjang sesi dokumen). Detail lengkap di
+`policies/security_policy.md` bagian "Hallucination Prevention & Topic Restriction
+(Lintas Agent)".
+
 ### 4. Lead Agent
 Menerima input yang sudah melalui pemeriksaan yang sesuai dan menentukan intent serta agent yang paling tepat.
 
@@ -111,11 +120,12 @@ Harga berubah dari waktu ke waktu; cek halaman resmi tiap provider secara berkal
 
 | Agent/Tugas | Model default | Model eskalasi/kualitas |
 | --- | --- | --- |
-| Lead Agent (routing rutin) | DeepSeek V4-Flash | Claude Haiku 4.5 (trust/spam ambigu, command admin bebas) |
-| Finance Agent (parsing teks transaksi) | DeepSeek V4-Flash | DeepSeek V4-Pro |
-| Finance Agent (vision baca struk) | Gemini 3.5 Flash-Lite | Gemini 3.6 Flash (struk buram/tulisan tangan) |
+| Lead Agent (Taqi, routing rutin) | DeepSeek V4-Flash | Claude Haiku 4.5 (trust/spam ambigu, command admin bebas) |
+| Finance Agent (Laras, parsing teks transaksi) | Deterministik (regex, bukan AI) | - |
+| Finance Agent (Laras, pertanyaan laporan bebas — AKTIF 19 Sep 2026) | DeepSeek V4-Flash | DeepSeek V4-Pro |
+| Finance Agent (Laras, vision baca struk) | Gemini 3.5 Flash-Lite | Gemini 3.6 Flash (struk buram/tulisan tangan) |
 | Document Agent (Nara) | Claude Sonnet 5 | DeepSeek V4-Pro (fallback saat budget API ketat) |
-| Social Media Agent (brainstorm ide/caption) | Kimi K2.5 atau DeepSeek V4-Flash | Claude Sonnet 5 (polish versi final sebelum approval) |
+| Social Media Agent (Kirana, brainstorm ide/caption) | Kimi K2.5 atau DeepSeek V4-Flash | Claude Sonnet 5 (polish versi final sebelum approval) |
 
 Referensi harga per 1 juta token (indikatif, September 2026):
 - DeepSeek V4-Flash: $0.14 input (cache miss) / $0.28 output.
@@ -128,6 +138,8 @@ Referensi harga per 1 juta token (indikatif, September 2026):
 
 Model lokal (Ollama dkk.) tetap opsi untuk tugas ringan/privacy-sensitive di masa depan, tetapi bukan prioritas tahap ini karena selisih biaya ke provider cloud termurah (DeepSeek) masih kecil dibanding effort setup dan kebutuhan hardware.
 
+**Catatan (19 September 2026):** tabel di atas adalah target/rekomendasi arsitektur, BUKAN status implementasi saat ini — lihat catatan "Status kode saat ini" di tiap `docs/providers/<nama_agent>.md` untuk apa yang benar-benar sudah berjalan (saat ini hanya `app/providers/deepseek.py` yang ada; Claude/Gemini/Kimi belum punya adapter kode). Harga di atas juga sudah agak lawas (mis. nama model Kimi sudah berganti dari K2.5 ke K2.6/K2.7 dengan harga lebih tinggi, dan DeepSeek kini punya skema peak/off-peak). Harga terkini + sumber per tanggal ada di `docs/providers/*.md`; jadikan itu acuan saat menganggarkan, bukan angka di atas.
+
 ### 6. Agent Registry
 Daftar semua agent aktif beserta kemampuan, izin, versi, tool yang boleh digunakan, dan batasannya.
 
@@ -135,7 +147,7 @@ Lead Agent membaca registry untuk memilih agent, bukan mengandalkan hard-code.
 
 ### 7. Specialist Agents
 Contoh agent:
-- Desktop Agent
+- Desktop Agent (Dimas)
 - WhatsApp Agent
 - DocuTech Agent
 - Photobooth Agent
@@ -143,7 +155,7 @@ Contoh agent:
 - Trading Agent
 - Coding Agent / OpenCode
 - Reporting Agent
-- Social Media Agent (lihat `agents/social_media_agent.md` dan `docs/social_media_v1.md`)
+- Social Media Agent (Kirana; lihat `agents/social_media_agent.md` dan `docs/social_media_v1.md`)
 
 Setiap agent mengikuti AGENT_TEMPLATE dan prinsip least privilege.
 
@@ -182,6 +194,12 @@ Jenis data:
 - admin command history
 
 Memory tidak boleh menyimpan secret/API key secara plain text.
+
+Terkait: `app/interaction_log.py` menyimpan interaksi produksi (input+jawaban AI)
+untuk ditinjau kualitasnya secara berkala — lihat Fase 5 di
+`docs/roadmap_customer_channel_v1.md`. Ini berbeda dari Long-Term Feedback Memory
+di atas: yang ini menilai "apakah jawaban AI-nya bagus" (dinilai manual owner),
+bukan menyimpan koreksi untuk dipakai ulang sebagai konteks keputusan berikutnya.
 
 ### 11. Audit Log
 Setiap aksi agent yang menghasilkan efek nyata harus memiliki audit trail.

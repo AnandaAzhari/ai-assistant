@@ -34,10 +34,12 @@ from app.document_agent import DocumentAgent
 from app.finance import FinanceService
 from app.finance_corrections import correct_latest_account
 from app.google_sheets_sync import GoogleSheetsSync
+from app.interaction_log import ALLOWED_REVIEW_LABELS, InteractionLogStore
 from app.interaction_policy import is_admin_command
 from app.kill_switch import CUSTOMER_NOTICE_TEXT, GLOBAL_SCOPE, KillSwitch
 from app.order_status import OrderStatusStore
 from app.price_list import PriceListStore
+from app.topic_guard import is_off_topic
 from app.trust_layer import TrustLayer
 
 # Scope kill switch yang dikenal untuk command admin `/matikan_otomatis <scope> ...` —
@@ -45,6 +47,50 @@ from app.trust_layer import TrustLayer
 # admin/testing), tapi command Telegram/Web Admin hanya mengenali nama-nama ini supaya
 # admin tidak salah ketik scope yang tidak pernah dicek kode mana pun.
 _KNOWN_KILL_SWITCH_SCOPES = {"whatsapp"}
+
+# Daftar perintah untuk menu "/" bawaan Telegram (BotFather `setMyCommands`), supaya
+# owner bisa mengetuk "/" di chat dan langsung melihat daftar perintah dengan
+# keterangannya — tanpa ini, perintah tetap berfungsi kalau diketik manual (lihat
+# `handle_admin_message` di bawah), tapi tidak muncul di menu bawaan Telegram.
+# Dipisah jadi satu sumber di sini (bukan ditulis ulang di `telegram_main.py`) supaya
+# tidak ada dua salinan daftar perintah yang bisa diam-diam berbeda dari teks
+# `/bantuan` di bawah. Nama perintah HARUS huruf kecil/angka/underscore saja (aturan
+# Telegram), keterangan singkat karena tampilannya dipotong di layar sempit.
+TELEGRAM_COMMAND_MENU: tuple[tuple[str, str], ...] = (
+    ("help", "Tampilkan daftar perintah"),
+    ("status", "Cek status sistem"),
+    ("saldo", "Saldo ledger per akun"),
+    ("akun", "Daftar akun dan saldo awal"),
+    ("kategori", "Kategori transaksi yang sudah dipelajari"),
+    ("hari_ini", "Ringkasan transaksi hari ini"),
+    ("minggu_ini", "Ringkasan minggu ini (Senin-Minggu)"),
+    ("bulan_ini", "Ringkasan transaksi bulan ini"),
+    ("laba_rugi", "Laba/rugi bulan ini per kategori"),
+    ("arus_kas", "Saldo awal/masuk/keluar per akun"),
+    ("sync_status", "Status Google Sheets Sync"),
+    ("sync", "Sinkronkan ledger ke Google Sheets"),
+    ("dokumen_status", "Cek Document Agent (Nara)"),
+    ("dokumen_engine_status", "Cek mesin pembuat DOCX/PDF"),
+    ("dokumen_demo", "Buat DOCX/PDF demo tanpa token AI"),
+    ("research", "Cari sumber akademik tanpa token AI"),
+    ("research_status", "Cek Research Manager"),
+    ("research_save", "Simpan hasil riset sebagai referensi"),
+    ("sources", "Lihat Source Registry sesi ini"),
+    ("makalah", "Bicara langsung dengan Document Agent"),
+    ("dokumen_baru", "Reset sesi percakapan dokumen"),
+    ("matikan_otomatis", "Kill switch: hentikan proses otomatis"),
+    ("nyalakan_otomatis", "Nyalakan kembali proses otomatis"),
+    ("status_otomatis", "Cek status kill switch"),
+    ("harga_set", "Simpan/ubah harga layanan"),
+    ("harga_hapus", "Hapus harga layanan"),
+    ("harga_list", "Lihat semua harga tersimpan"),
+    ("status_set", "Catat status pesanan pelanggan"),
+    ("status_lihat", "Lihat riwayat status order pelanggan"),
+    ("konten_baru", "Kirana: buat draft ide dan caption"),
+    ("eval_sample", "Ambil sampel interaksi untuk ditinjau"),
+    ("eval_tandai", "Catat hasil tinjauan satu interaksi"),
+    ("eval_status", "Ringkasan tren kualitas dari tinjauan"),
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +120,7 @@ class LeadAgent:
         price_list: PriceListStore | None = None,
         order_status: OrderStatusStore | None = None,
         content_studio: ContentStudio | None = None,
+        interaction_log: InteractionLogStore | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -87,6 +134,7 @@ class LeadAgent:
         self.price_list = price_list
         self.order_status = order_status
         self.content_studio = content_studio
+        self.interaction_log = interaction_log
         # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
         # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
         # kalau document_factory tidak diberikan (fitur belum diaktifkan).
@@ -193,8 +241,11 @@ class LeadAgent:
                 "/saldo - saldo ledger per akun\n"
                 "/akun - akun dan saldo awal\n"
                 "/kategori - kategori yang sudah dipelajari\n"
-                "/hari_ini - ringkasan hari ini\n"
-                "/bulan_ini - ringkasan bulan ini\n"
+                "/hari_ini [usaha] - ringkasan hari ini (opsional filter usaha)\n"
+                "/minggu_ini [usaha] - ringkasan minggu ini (Senin-Minggu)\n"
+                "/bulan_ini [usaha] - ringkasan bulan ini (opsional filter usaha)\n"
+                "/laba_rugi [usaha] - laba/rugi bulan ini, rincian per kategori pengeluaran\n"
+                "/arus_kas [akun] - saldo awal/masuk/keluar/saldo akhir per akun bulan ini\n"
                 "/sync_status - status Google Sheets Sync\n"
                 "/sync - sinkronkan ledger ke Google Sheets secara manual\n"
                 "/dokumen_status - cek Document Agent\n"
@@ -216,6 +267,9 @@ class LeadAgent:
                 "/status_set <nomor_wa> <order_id> | <status> - catat status pesanan pelanggan\n"
                 "/status_lihat <nomor_wa> - lihat riwayat status order pelanggan tsb\n"
                 "/konten_baru <usaha> | <platform> | <brief> - Content Studio: buat draft caption\n"
+                "/eval_sample [agent] [n] - Fase 5: ambil sampel interaksi produksi untuk ditinjau\n"
+                "/eval_tandai <id> | <baik/perlu_perbaikan/tidak_baik> | <catatan opsional> - catat hasil tinjauan\n"
+                "/eval_status [agent] - ringkasan tren kualitas dari tinjauan yang sudah dicatat\n"
                 "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n\n"
                 f"Finance runtime: {finance_note}.\n"
                 f"Google Sheets Sync: {sync_note}.\n"
@@ -224,7 +278,8 @@ class LeadAgent:
                 f"Kill switch: {'siap' if self.kill_switch is not None else 'belum tersedia'}.\n"
                 f"Price list: {'siap' if self.price_list is not None else 'belum tersedia'}.\n"
                 f"Order status: {'siap' if self.order_status is not None else 'belum tersedia'}.\n"
-                f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}."
+                f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}.\n"
+                f"Interaction Log (Fase 5): {'siap' if self.interaction_log is not None else 'belum tersedia'}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
@@ -412,6 +467,68 @@ class LeadAgent:
                 text += f"\nCatatan: {result.note}"
             return LeadReply("content_studio", "berhasil", text)
 
+        if command in {"/eval_sample", "/eval_contoh"}:
+            if self.interaction_log is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Interaction Log belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            args = (parts[1].split() if len(parts) > 1 else [])
+            agent = args[0] if args else None
+            try:
+                limit = int(args[1]) if len(args) > 1 else 5
+            except ValueError:
+                return LeadReply("lead", "format_salah", "Format: /eval_sample [agent] [jumlah]")
+            entries = self.interaction_log.sample_for_review(agent, limit=limit)
+            if not entries:
+                return LeadReply(
+                    "interaction_log", "berhasil",
+                    "Tidak ada interaksi yang belum ditinjau" + (f" untuk agent '{agent}'." if agent else "."),
+                )
+            lines = []
+            for entry in entries:
+                lines.append(
+                    f"id: {entry.id}\nagent: {entry.agent} | channel: {entry.channel} | {entry.created_at}\n"
+                    f"input: {entry.input_text[:300]}\noutput: {entry.output_text[:300]}\n"
+                    f"-> tandai: /eval_tandai {entry.id} | baik/perlu_perbaikan/tidak_baik | catatan"
+                )
+            return LeadReply("interaction_log", "berhasil", "\n\n".join(lines))
+
+        if command in {"/eval_tandai", "/eval_review"}:
+            if self.interaction_log is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Interaction Log belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            if len(fields) < 2 or not fields[0] or fields[1] not in ALLOWED_REVIEW_LABELS:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /eval_tandai <id> | <baik/perlu_perbaikan/tidak_baik> | <catatan opsional>",
+                )
+            entry_id, label = fields[0], fields[1]
+            note = fields[2] if len(fields) > 2 else ""
+            try:
+                updated = self.interaction_log.mark_reviewed(
+                    entry_id, label, note=note, reviewed_by=f"admin:{self.admin_channel}",
+                )
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply("interaction_log", "berhasil", f"Interaksi {updated.id} ditandai '{updated.review_label}'.")
+
+        if command in {"/eval_status", "/eval_ringkasan"}:
+            if self.interaction_log is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Interaction Log belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            agent = parts[1].strip() if len(parts) > 1 else None
+            summary = self.interaction_log.review_summary(agent)
+            label = f" untuk agent '{agent}'" if agent else " (semua agent)"
+            return LeadReply(
+                "interaction_log", "berhasil",
+                f"Ringkasan tinjauan{label}:\n"
+                f"Total interaksi: {summary['total']}\n"
+                f"Sudah ditinjau: {summary['reviewed']} (baik: {summary['baik']}, "
+                f"perlu perbaikan: {summary['perlu_perbaikan']}, tidak baik: {summary['tidak_baik']})\n"
+                f"Belum ditinjau: {summary['unreviewed']}",
+            )
+
         document_utility_commands = {
             "/dokumen_engine_status", "/dokumen_demo",
             "/research_status", "/riset_status", "/research", "/riset",
@@ -465,13 +582,13 @@ class LeadAgent:
             return LeadReply("finance", result.status, result.text + sync_note)
 
         finance_commands = {
-            "/saldo", "/akun", "/kategori", "/hari_ini", "/bulan_ini",
-            "/pemasukan", "/pengeluaran", "/piutang", "/utang"
+            "/saldo", "/akun", "/kategori", "/hari_ini", "/minggu_ini", "/bulan_ini",
+            "/laba_rugi", "/arus_kas", "/pemasukan", "/pengeluaran", "/piutang", "/utang"
         }
         finance_words = (
             "pengeluaran", "pemasukan", "saldo", "saldo awal", "kategori", "cashflow", "arus kas",
-            "laba", "rugi", "piutang", "utang", "catat keluar", "catat masuk", "beli", "bayar pakai",
-            "top up", "transfer", "kirim"
+            "laba", "rugi", "untung", "keuntungan", "profit", "piutang", "utang", "catat keluar",
+            "catat masuk", "beli", "bayar pakai", "top up", "transfer", "kirim"
         )
         if command in finance_commands or any(word in text for word in finance_words):
             if self.finance is None:
@@ -576,7 +693,7 @@ class LeadAgent:
     # (app/customer_intent.py) menangani nuansa ini lebih baik lewat prompt-nya sendiri.
     # Sengaja tidak memasukkan frasa umum seperti "tugas sekolah"/"tugas kuliah" saja:
     # itu bisa juga berarti pelanggan cuma minta jasa PRINT tugas yang sudah ada
-    # (bukan minta ditulis/dibuatkan) — Taqi DocuTech melayani keduanya. Kata di
+    # (bukan minta ditulis/dibuatkan) — Taqi Desk melayani keduanya. Kata di
     # bawah ini dipilih karena cukup spesifik menandakan pelanggan ingin kontennya
     # DIBUATKAN, bukan sekadar dicetak.
     _CUSTOMER_DOCUMENT_WORDS = (
@@ -585,15 +702,12 @@ class LeadAgent:
         "susun dokumen", "buat dokumen", "buatkan dokumen", "bikin makalah", "bikin dokumen",
     )
     # Topic restriction (fallback kata kunci, dipakai saat AI-first belum dikonfigurasi/
-    # gagal/hasilnya tidak valid — sama seperti daftar kata kunci lain di atas). Sengaja
-    # dijaga PENDEK dan hanya berisi sinyal yang cukup jelas di luar topik layanan usaha
-    # (curhat pribadi, topik sensitif) — kata kunci yang longgar berisiko salah menahan
-    # pesan pelanggan yang sebenarnya masih terkait bisnis. AI-first di
-    # app/customer_intent.py menangani nuansa yang lebih halus lewat prompt-nya sendiri.
-    _OFF_TOPIC_WORDS = (
-        "curhat", "galau", "putus sama pacar", "putus cinta", "masalah pribadi",
-        "cerita pribadi", "gosip artis", "ramalan zodiak", "horoskop",
-    )
+    # gagal/hasilnya tidak valid — sama seperti daftar kata kunci lain di atas). Daftar
+    # kata kuncinya sekarang tinggal di `app/topic_guard.py` (guardrail bersama lintas
+    # agent, dipakai juga oleh `app/document_agent.py`/Nara di tengah sesi dokumen —
+    # lihat docstring modul itu), supaya Taqi dan Nara tidak punya dua daftar yang bisa
+    # diam-diam berbeda. AI-first di app/customer_intent.py menangani nuansa yang lebih
+    # halus lewat prompt-nya sendiri.
 
     @classmethod
     def _detect_customer_action(cls, text: str) -> tuple[str, str]:
@@ -619,7 +733,7 @@ class LeadAgent:
             action_type = "jawab_faq"
         elif any(word in lowered for word in cls._CUSTOMER_DOCUMENT_WORDS):
             action_type = "buat_dokumen_pelanggan"
-        elif any(word in lowered for word in cls._OFF_TOPIC_WORDS):
+        elif is_off_topic(lowered):
             action_type = "di_luar_topik"
         else:
             action_type = "minta_detail_order"
@@ -692,6 +806,24 @@ class LeadAgent:
         return reply_text
 
     def handle_customer_message(
+        self, sender_id: str, message: str, *, has_attachment: bool = False, channel: str = "whatsapp",
+    ) -> LeadReply:
+        """Bungkus `_handle_customer_message_inner` dengan Interaction Log (Fase 5 —
+        Evaluasi & Observability, `docs/roadmap_customer_channel_v1.md`), supaya setiap
+        interaksi produksi dengan pelanggan tersimpan untuk ditinjau ulang, tanpa
+        mengubah alur/hasil balasan itu sendiri. Hanya jalan kalau `interaction_log`
+        diisi (opsional, default nonaktif)."""
+        reply = self._handle_customer_message_inner(
+            sender_id, message, has_attachment=has_attachment, channel=channel,
+        )
+        if self.interaction_log is not None:
+            agent = "nara" if reply.target == "document" else "taqi"
+            self.interaction_log.log(
+                agent, sender_id, channel, message or "", reply.text, status=reply.status,
+            )
+        return reply
+
+    def _handle_customer_message_inner(
         self, sender_id: str, message: str, *, has_attachment: bool = False, channel: str = "whatsapp",
     ) -> LeadReply:
         """Jalur pelanggan: WAJIB melalui Kill Switch, lalu Trust Layer, lalu Approval

@@ -18,7 +18,7 @@ class BrandProfileStoreTests(unittest.TestCase):
     def test_slug_normalizes_business_name(self):
         self.assertEqual(BrandProfileStore.slug("Pixiva.ID"), "pixiva_id")
         self.assertEqual(BrandProfileStore.slug("Risol Mamqi"), "risol_mamqi")
-        self.assertEqual(BrandProfileStore.slug("  Taqi   DocuTech  "), "taqi_docutech")
+        self.assertEqual(BrandProfileStore.slug("  Taqi   Desk  "), "taqi_desk")
 
     def test_load_returns_none_when_file_missing(self):
         self.assertIsNone(self.store.load("Usaha Belum Ada"))
@@ -95,14 +95,14 @@ Kreatif dan fun.
         self.assertFalse(self.store.is_ready("Usaha Tidak Ada"))
 
     def test_example_captions_skip_placeholder_lines(self):
-        self._write("taqi_docutech.md", """## Usaha
-Taqi DocuTech
+        self._write("taqi_desk.md", """## Usaha
+Taqi Desk
 
 ## Contoh Caption Favorit
 - [ISI: contoh caption yang owner suka, sementara kosong]
 - Deadline mepet? Serahkan ke kami.
 """)
-        profile = self.store.load("Taqi DocuTech")
+        profile = self.store.load("Taqi Desk")
         self.assertEqual(profile.example_captions, ("Deadline mepet? Serahkan ke kami.",))
 
     def test_list_known_businesses_excludes_template(self):

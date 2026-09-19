@@ -127,5 +127,49 @@ class DocumentAgentTests(unittest.TestCase):
         self.assertEqual(document._history, [])
 
 
+class DocumentAgentTopicRestrictionTests(unittest.TestCase):
+    """Topic restriction lintas-agent (guardrail bersama `app/topic_guard.py`) untuk
+    pertanyaan di luar topik yang muncul DI TENGAH sesi dokumen — menutup gap di
+    `eval/scenarios/nara.md` Skenario 7 dengan guardrail kode, bukan cuma persona AI."""
+
+    def test_off_topic_message_is_redirected_without_calling_provider(self):
+        provider = FakeProvider()
+        agent = DocumentAgent(provider)
+        agent.handle("Saya mau membuat makalah tentang fotosintesis untuk kelas 8")
+        calls_before = len(provider.calls)
+        result = agent.handle("Eh iya kak, sekalian tanya, kalau print foto buat photobooth bisa juga gak di sini?")
+        self.assertEqual(result.status, "di_luar_topik")
+        self.assertNotIn("photobooth", result.text.casefold())
+        # Backstop deterministik: AI sama sekali tidak dipanggil untuk pesan ini.
+        self.assertEqual(len(provider.calls), calls_before)
+
+    def test_off_topic_message_does_not_change_brief_or_phase(self):
+        provider = FakeProvider()
+        agent = DocumentAgent(provider)
+        agent.handle("Saya mau membuat makalah tentang fotosintesis untuk kelas 8")
+        phase_before = agent.phase
+        brief_before = agent.brief.structured_text()
+        agent.handle("Btw ada servis laptop juga gak di sini?")
+        self.assertEqual(agent.phase, phase_before)
+        self.assertEqual(agent.brief.structured_text(), brief_before)
+
+    def test_document_session_continues_normally_after_redirect(self):
+        provider = FakeProvider()
+        agent = DocumentAgent(provider)
+        agent.handle("Saya mau membuat makalah tentang fotosintesis untuk kelas 8")
+        agent.handle("Ada servis komputer juga gak?")
+        calls_before = len(provider.calls)
+        agent.handle("Oke lanjut aja, targetnya 10 halaman")
+        # Pesan berikutnya yang relevan tetap diproses AI seperti biasa (guardrail
+        # tidak "menyangkut" sesi ke status di_luar_topik selamanya).
+        self.assertGreater(len(provider.calls), calls_before)
+
+    def test_off_topic_check_does_not_block_slash_commands(self):
+        provider = FakeProvider()
+        agent = DocumentAgent(provider)
+        result = agent.handle("/dokumen_engine_status")
+        self.assertNotEqual(result.status, "di_luar_topik")
+
+
 if __name__ == "__main__":
     unittest.main()

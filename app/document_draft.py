@@ -20,7 +20,7 @@ from app.providers.base import ModelProvider
 from app.source_registry import RegisteredSource
 
 
-DRAFT_PROMPT = """Kamu adalah penulis Makalah Taqi DocuTech.
+DRAFT_PROMPT = """Kamu adalah penulis Makalah Taqi Desk.
 Buat isi makalah berdasarkan data dan kerangka yang SUDAH DISETUJUI.
 
 ATURAN SUMBER WAJIB:

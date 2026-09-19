@@ -209,6 +209,17 @@ class TelegramHTTPTests(unittest.TestCase):
                 self.client.get_me()
         self.assertFalse(raised.exception.retryable)
 
+    def test_set_my_commands_sends_command_and_description_pairs(self):
+        from urllib.parse import parse_qs
+        with patch('urllib.request.urlopen', return_value=self.response({'ok': True, 'result': True})) as call:
+            self.client.set_my_commands([('help', 'Tampilkan daftar perintah'), ('saldo', 'Saldo ledger per akun')])
+        body = parse_qs(call.call_args.args[0].data.decode())
+        sent = json.loads(body['commands'][0])
+        self.assertEqual(sent, [
+            {'command': 'help', 'description': 'Tampilkan daftar perintah'},
+            {'command': 'saldo', 'description': 'Saldo ledger per akun'},
+        ])
+
     def test_send_message_preserves_text_and_does_not_enable_markdown_parsing(self):
         from urllib.parse import parse_qs
         with patch('urllib.request.urlopen', return_value=self.response({'ok': True, 'result': {}})) as call:
@@ -286,7 +297,7 @@ class TelegramRuntimeTests(unittest.TestCase):
             client = Client()
             adapter = TelegramAdminAdapter(client, AdminIdentity(123), telegram.handle_admin_message,
                 store=TelegramUpdateStore(Path(tmp) / 'assistant.db', 9))
-            event = update(text='Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA')
+            event = update(text='Catat pengeluaran 80 ribu beli tinta untuk Taqi Desk pakai BCA')
             adapter.process_update(event)
             adapter.process_update(event)
             self.assertEqual(telegram.finance.balances()['BCA'], -80000)

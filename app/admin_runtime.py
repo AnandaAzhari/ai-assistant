@@ -11,7 +11,9 @@ from app.document_engine import DocumentEngine
 from app.document_preferences import DocumentPreferenceStore
 from app.document_session import DocumentSessionStore
 from app.finance import FinanceService
+from app.finance_query import FinanceQueryInterpreter
 from app.google_sheets_sync import GoogleSheetsSync
+from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
@@ -28,7 +30,13 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         source_scope=document_scope, session_store=DocumentSessionStore(db_path),
     )
     return LeadAgent(
-        finance=FinanceService(db_path), sheets_sync=GoogleSheetsSync.from_env(db_path),
+        # Laras (Finance Agent) sekarang bisa menjawab pertanyaan keuangan bebas lewat AI
+        # (mis. "pemasukan bulan lalu Risol Mamqi berapa?"), bukan cuma command tetap
+        # (/hari_ini dkk) — lihat app/finance_query.py. AI HANYA mengklasifikasikan
+        # pertanyaan; angka jawaban tetap dihitung FinanceService dari database asli,
+        # tidak pernah dikarang model, sama seperti agent lain.
+        finance=FinanceService(db_path, query_interpreter=FinanceQueryInterpreter(DeepSeekProvider.from_env())),
+        sheets_sync=GoogleSheetsSync.from_env(db_path),
         document=document, admin_channel=channel,
         # Database yang sama dengan yang dipakai whatsapp_main.py, supaya kill switch
         # yang diaktifkan admin lewat Telegram/Web Admin langsung berlaku di runtime
@@ -47,5 +55,10 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         content_studio=ContentStudio(
             DeepSeekProvider.from_env(), brand_profiles=BrandProfileStore("brand_profiles"),
             content_learning=ContentLearningStore(db_path), content_session=ContentSessionStore(db_path),
+            interaction_log=InteractionLogStore(db_path),
         ),
+        # Fase 5 (Evaluasi & Observability): setiap interaksi pelanggan (Taqi/Nara) dan
+        # draft Kirana tersimpan ke database yang sama, ditinjau berkala lewat
+        # /eval_sample, /eval_tandai, /eval_status (lihat app/interaction_log.py).
+        interaction_log=InteractionLogStore(db_path),
     )

@@ -36,7 +36,7 @@ class AutoSyncTests(unittest.TestCase):
         sync = FakeSheetsSync()
         lead = LeadAgent(finance=self.finance, sheets_sync=sync)
         reply = lead.handle_admin_message(
-            "Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA"
+            "Catat pengeluaran 80 ribu beli tinta untuk Taqi Desk pakai BCA"
         )
         self.assertEqual(reply.status, "berhasil")
         self.assertEqual(sync.calls, 1)
@@ -62,7 +62,7 @@ class AutoSyncTests(unittest.TestCase):
         sync = FakeSheetsSync(succeed=False)
         lead = LeadAgent(finance=self.finance, sheets_sync=sync)
         reply = lead.handle_admin_message(
-            "Catat pemasukan 100 ribu jasa print untuk Taqi DocuTech pakai Cash"
+            "Catat pemasukan 100 ribu jasa print untuk Taqi Desk pakai Cash"
         )
         self.assertEqual(reply.status, "berhasil")
         self.assertEqual(sync.calls, 1)
@@ -73,7 +73,7 @@ class AutoSyncTests(unittest.TestCase):
         sync = FakeSheetsSync(configured=False)
         lead = LeadAgent(finance=self.finance, sheets_sync=sync)
         reply = lead.handle_admin_message(
-            "Catat pemasukan 100 ribu jasa print untuk Taqi DocuTech pakai Cash"
+            "Catat pemasukan 100 ribu jasa print untuk Taqi Desk pakai Cash"
         )
         self.assertEqual(reply.status, "berhasil")
         self.assertEqual(sync.calls, 0)

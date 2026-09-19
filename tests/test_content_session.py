@@ -37,8 +37,8 @@ class ContentSessionStoreTests(unittest.TestCase):
         self.assertEqual(loaded["note"], "revisi hook")
 
     def test_build_scope_joins_business_platform_content_id(self):
-        scope = self.store.build_scope("taqi_docutech", "whatsapp_status", "content-9")
-        self.assertEqual(scope, "taqi_docutech:whatsapp_status:content-9")
+        scope = self.store.build_scope("taqi_desk", "whatsapp_status", "content-9")
+        self.assertEqual(scope, "taqi_desk:whatsapp_status:content-9")
 
     def test_build_scope_rejects_empty_parts(self):
         with self.assertRaises(ValueError):

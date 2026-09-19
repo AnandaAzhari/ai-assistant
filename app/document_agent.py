@@ -37,7 +37,20 @@ from app.nara_context import load_nara_identity
 from app.providers.base import ModelProvider
 from app.research_manager import ResearchManager, ResearchResult
 from app.source_registry import SourceRegistry
+from app.topic_guard import is_off_topic
 
+
+# Topic restriction (guardrail lintas-agent, lihat docstring `app/topic_guard.py`):
+# balasan pengalihan sopan yang deterministik, dipakai saat `is_off_topic()` mendeteksi
+# pesan pelanggan DI TENGAH sesi dokumen yang sudah berjalan (menutup gap di
+# `eval/scenarios/nara.md` Skenario 7 — sebelumnya hanya mengandalkan instruksi persona
+# AI di `agents/document_agent.md`, tanpa validasi kode). Tidak membahas isi topiknya
+# sama sekali dan tidak mengubah brief/cover/phase, supaya sesi dokumen tetap lanjut
+# normal setelahnya.
+OFF_TOPIC_REDIRECT_TEXT = (
+    "Maaf, itu di luar cakupan saya di sini — saya khusus membantu penyusunan dan "
+    "pencetakan dokumen akademik. Kita lanjutkan dokumennya, ya."
+)
 
 OUTLINE_MAX_TOKENS = 8000
 OUTLINE_FOCUS_MARKER = "TAQI_PROPOSED_FOCUS"
@@ -62,7 +75,7 @@ COVER_FIELD_LABELS = (
     ("teacher_name", "Guru/dosen"),
 )
 
-OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi DocuTech.
+OUTLINE_PROMPT = """Kamu adalah Document/Makalah Agent Taqi Desk.
 MakalahBrief sudah diperiksa sistem dan data inti sudah cukup.
 
 Tugasmu pada tahap ini HANYA membuat bagian customer-facing berikut:
@@ -982,6 +995,16 @@ class DocumentAgent:
             if preference_result.changed and self.phase == "draft_ready" and not self._final_docx_path:
                 extra = "\nPreferensi ini akan dipakai saat file Word/PDF dibuat."
             return DocumentResult("preference_updated", preference_result.message + extra)
+
+        # Topic restriction (guardrail lintas-agent, lihat docstring `app/topic_guard.py`
+        # dan komentar `OFF_TOPIC_REDIRECT_TEXT` di atas): dicek SETELAH command dan
+        # preferensi (supaya keduanya tidak pernah salah tertahan), TAPI SEBELUM
+        # memanggil AI intake — backstop deterministik yang tetap berjalan walau AI
+        # belum dikonfigurasi/gagal, dan tidak pernah memanggil AI sama sekali untuk
+        # pesan yang jelas di luar topik (lebih murah dan lebih pasti daripada berharap
+        # AI selalu menolak dengan benar).
+        if is_off_topic(raw):
+            return DocumentResult("di_luar_topik", OFF_TOPIC_REDIRECT_TEXT)
 
         if not raw.startswith("/") and self.configured:
             self._turn_intake = self.intake_interpreter.interpret(

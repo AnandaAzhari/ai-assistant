@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from app.makalah_brief import MakalahBrief
 from app.nara_context import load_nara_identity, load_nara_conversation
 from app.providers.base import ModelProvider
+from app.topic_guard import is_verbatim_quote
 
 BRIEF_FIELDS = set(MakalahBrief.FIELD_LABELS)
 COVER_FIELDS = {
@@ -71,12 +72,6 @@ class IntakeInterpreter:
             raise ValueError("Nilai MakalahBrief harus teks atau null.")
         return payload
 
-    @staticmethod
-    def _is_quote(quote: object, raw: str) -> bool:
-        def normalize(value):
-            return re.sub(r"\s+", " ", value).strip().casefold()
-        return isinstance(quote, str) and bool(normalize(quote)) and normalize(quote) in normalize(raw)
-
     @classmethod
     def _patch(cls, payload: dict, section: str, allowed: set, raw: str) -> dict:
         patch = payload.get(section)
@@ -91,7 +86,7 @@ class IntakeInterpreter:
                 continue
             if not isinstance(value, str) or len(value) > 2000:
                 raise ValueError("Nilai field tidak valid.")
-            if not cls._is_quote(evidence.get(section + "." + key), raw):
+            if not is_verbatim_quote(evidence.get(section + "." + key), raw):
                 raise ValueError("Perubahan tanpa kutipan pesan terbaru.")
             value = re.sub(r"\s+", " ", value).strip()
             if key == "assignment_type" and value not in {"", "individu", "kelompok"}:
@@ -137,7 +132,7 @@ class IntakeInterpreter:
             brief = self._patch(payload, "brief", BRIEF_FIELDS, raw)
             cover = self._patch(payload, "cover", COVER_FIELDS, raw)
             if intent in {"approve", "continue", "revise", "pause"}:
-                if not self._is_quote(payload.get("intent_evidence"), raw):
+                if not is_verbatim_quote(payload.get("intent_evidence"), raw):
                     raise ValueError("Intent tindakan tanpa kutipan pesan.")
             answer = payload.get("reply", "")
             clarification = payload.get("clarification", "")

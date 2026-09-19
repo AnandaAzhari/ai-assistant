@@ -101,6 +101,15 @@ class TelegramHTTPClient:
     def delete_webhook(self):
         return self._post('deleteWebhook', {'drop_pending_updates': 'false'}, timeout=20)
 
+    def set_my_commands(self, commands: list[tuple[str, str]]):
+        """Daftarkan menu "/" bawaan Telegram lewat `setMyCommands`. Murni kosmetik
+        (autocomplete di client Telegram) — pesan tetap diproses normal lewat
+        `get_updates`/`send_message` di atas walau method ini tidak pernah dipanggil
+        atau gagal, jadi caller sebaiknya memperlakukan kegagalan ini sebagai
+        best-effort, bukan fatal (lihat `telegram_main.py`)."""
+        payload = [{'command': command, 'description': description} for command, description in commands]
+        return self._post('setMyCommands', {'commands': json.dumps(payload)}, timeout=20)
+
     def get_updates(self, *, offset: int | None = None, timeout: int = 30):
         data = {'timeout': timeout, 'allowed_updates': json.dumps(['message'])}
         if offset is not None:

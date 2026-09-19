@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from app.brand_profile import BrandProfile, BrandProfileStore
 from app.content_learning import ContentLearningStore, FeedbackPattern
 from app.content_session import ContentSessionStore
+from app.interaction_log import InteractionLogStore
 from app.providers.base import ModelProvider
 
 DEFAULT_ALTERNATIVES = 3
@@ -109,11 +110,16 @@ class ContentStudio:
         brand_profiles: BrandProfileStore,
         content_learning: ContentLearningStore | None = None,
         content_session: ContentSessionStore | None = None,
+        interaction_log: InteractionLogStore | None = None,
     ):
         self.provider = provider
         self.brand_profiles = brand_profiles
         self.content_learning = content_learning
         self.content_session = content_session
+        # Fase 5 (Evaluasi & Observability, docs/roadmap_customer_channel_v1.md): catat
+        # setiap draft yang dihasilkan AI supaya bisa ditinjau berkala lewat
+        # /eval_sample di Telegram Admin (app/lead.py). Opsional, default nonaktif.
+        self.interaction_log = interaction_log
 
     @property
     def configured(self) -> bool:
@@ -226,6 +232,12 @@ class ContentStudio:
             })
 
         note = f"{dropped} alternatif dibuang karena menyebut harga yang tidak ada di brief." if dropped else ""
+        if self.interaction_log is not None:
+            self.interaction_log.log(
+                "kirana", f"{business}:{platform}", "content_studio", brief,
+                "\n".join(f"{i}. {c}" for i, c in enumerate(safe_captions, start=1)),
+                status="draft", model=reply.model,
+            )
         return ContentDraftResult(
             "draft", business=business, platform=platform, content_id=resolved_content_id,
             scope=scope, captions=tuple(safe_captions), note=note,

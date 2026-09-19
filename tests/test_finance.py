@@ -29,14 +29,14 @@ class FinanceTests(unittest.TestCase):
     def test_opening_balance_locked_after_transaction(self):
         self.lead.handle_admin_message("Set saldo awal BCA 500 ribu")
         self.lead.handle_admin_message(
-            "Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA"
+            "Catat pengeluaran 80 ribu beli tinta untuk Taqi Desk pakai BCA"
         )
         with self.assertRaises(ValueError):
             self.finance.handle("Set saldo awal BCA 600 ribu")
 
     def test_record_expense_from_natural_language(self):
         reply = self.lead.handle_admin_message(
-            "Catat pengeluaran 80 ribu beli tinta untuk Taqi DocuTech pakai BCA"
+            "Catat pengeluaran 80 ribu beli tinta untuk Taqi Desk pakai BCA"
         )
         self.assertEqual(reply.target, "finance")
         self.assertEqual(reply.status, "berhasil")
@@ -46,7 +46,7 @@ class FinanceTests(unittest.TestCase):
 
     def test_dynamic_category_is_created(self):
         reply = self.lead.handle_admin_message(
-            "Catat pengeluaran 45 ribu beli kabel USB untuk Taqi DocuTech pakai Cash"
+            "Catat pengeluaran 45 ribu beli kabel USB untuk Taqi Desk pakai Cash"
         )
         self.assertEqual(reply.status, "berhasil")
         self.assertIn("Kabel USB", reply.text)
@@ -55,7 +55,7 @@ class FinanceTests(unittest.TestCase):
 
     def test_explicit_category_override(self):
         reply = self.lead.handle_admin_message(
-            "Catat pengeluaran 70 ribu beli rak kecil kategori Perlengkapan untuk Taqi DocuTech pakai Cash"
+            "Catat pengeluaran 70 ribu beli rak kecil kategori Perlengkapan untuk Taqi Desk pakai Cash"
         )
         self.assertEqual(reply.status, "berhasil")
         self.assertIn("Perlengkapan", reply.text)
@@ -67,17 +67,17 @@ class FinanceTests(unittest.TestCase):
         self.assertEqual(self.finance.today_summary()["count"], 0)
 
     def test_duplicate_guard(self):
-        text = "Catat pemasukan 20 ribu jasa print untuk Taqi DocuTech pakai Cash"
+        text = "Catat pemasukan 20 ribu jasa print untuk Taqi Desk pakai Cash"
         self.assertEqual(self.lead.handle_admin_message(text).status, "berhasil")
         with self.assertRaises(ValueError):
             self.finance.handle(text)
 
     def test_reports(self):
         self.lead.handle_admin_message(
-            "Catat pemasukan 100 ribu jasa print untuk Taqi DocuTech pakai Cash"
+            "Catat pemasukan 100 ribu jasa print untuk Taqi Desk pakai Cash"
         )
         self.lead.handle_admin_message(
-            "Catat pengeluaran 25 ribu beli kertas untuk Taqi DocuTech pakai Cash"
+            "Catat pengeluaran 25 ribu beli kertas untuk Taqi Desk pakai Cash"
         )
         reply = self.lead.handle_admin_message("/hari_ini")
         self.assertIn("Pemasukan: Rp100.000", reply.text)

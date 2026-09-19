@@ -231,6 +231,26 @@ class HandleCustomerMessageDocumentBridgeTests(unittest.TestCase):
         # Guardrail hallucination prevention tetap berlaku walau pesan menyebut "makalah".
         self.assertNotRegex(reply.text, r"Rp\s?\d")
 
+    def test_off_topic_message_is_redirected_politely_via_keyword_fallback(self):
+        lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
+        reply = lead.handle_customer_message(
+            "628fff",
+            "Ini bukan soal produk kalian ya kak, aku lagi galau banget abis putus sama pacar, boleh curhat gak?",
+        )
+        self.assertEqual(reply.target, "di_luar_topik")
+        self.assertEqual(reply.status, "berhasil")
+        # Balasan tidak membahas isi topiknya sama sekali, hanya pengalihan sopan.
+        self.assertNotIn("pacar", reply.text.casefold())
+
+    def test_document_keyword_still_wins_when_message_also_mentions_off_topic_word(self):
+        # Kata kunci dokumen dicek lebih dulu dari kata kunci di luar topik (lihat urutan
+        # elif di _detect_customer_action), jadi kebutuhan bisnis yang jelas tetap menang.
+        lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
+        reply = lead.handle_customer_message(
+            "628ggg", "Lagi galau nih kak, tapi mau bikin makalah juga tentang psikologi remaja"
+        )
+        self.assertEqual(reply.target, "document")
+
     def test_document_factory_none_falls_back_to_unavailable_reply(self):
         lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
         reply = lead.handle_customer_message("628eee", "Saya mau bikin makalah tentang sampah plastik")

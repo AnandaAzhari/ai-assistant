@@ -8,10 +8,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app.approval_gate import ApprovalGate
+from app.attachment_guard import AttachmentGuard
 from app.document_agent import DocumentResult
 from app.lead import LeadAgent
 from app.trust_layer import TrustLayer
 from app.whatsapp import (
+    ATTACHMENT_HOLD_TEXT,
     WHATSAPP_TEXT_LIMIT,
     WhatsAppCustomerAdapter,
     WhatsAppError,
@@ -20,6 +22,21 @@ from app.whatsapp import (
     verify_webhook_challenge,
     verify_webhook_signature,
 )
+
+
+def _document_message_payload(sender: str, *, filename: str, media_id: str = "media-doc-1", message_id: str = "wamid.doc") -> dict:
+    return {
+        "entry": [{
+            "changes": [{
+                "value": {
+                    "messages": [{
+                        "from": sender, "id": message_id, "type": "document",
+                        "document": {"id": media_id, "filename": filename, "mime_type": "application/octet-stream"},
+                    }],
+                },
+            }],
+        }],
+    }
 
 
 def _text_message_payload(sender: str, body: str, *, message_id: str = "wamid.1") -> dict:
@@ -94,6 +111,15 @@ class ExtractInboundMessagesTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertTrue(messages[0].has_attachment)
         self.assertEqual(messages[0].text, "ini buktinya")
+        self.assertEqual(messages[0].media_id, "media123")
+        self.assertEqual(messages[0].media_type, "image")
+
+    def test_document_message_captures_media_metadata(self):
+        payload = _document_message_payload("628999", filename="tugas.pdf")
+        messages = extract_inbound_messages(payload)
+        self.assertEqual(messages[0].media_id, "media-doc-1")
+        self.assertEqual(messages[0].media_filename, "tugas.pdf")
+        self.assertEqual(messages[0].media_mime_type, "application/octet-stream")
 
     def test_status_callback_without_messages_is_ignored(self):
         payload = {"entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]}
@@ -120,10 +146,15 @@ class WhatsAppHTTPClientTests(unittest.TestCase):
 
 
 class FakeWhatsAppClient:
-    def __init__(self):
+    def __init__(self, *, media_content: bytes = b"%PDF-1.4 isi dummy", media_mime_type: str = "application/pdf",
+                 download_error: Exception | None = None):
         self.sent: list[tuple[str, str]] = []
         self.uploaded: list[str] = []
         self.documents_sent: list[tuple[str, str, str]] = []
+        self.downloaded_media_ids: list[str] = []
+        self._media_content = media_content
+        self._media_mime_type = media_mime_type
+        self._download_error = download_error
 
     def send_text(self, to: str, text: str) -> None:
         self.sent.append((to, text))
@@ -134,6 +165,12 @@ class FakeWhatsAppClient:
 
     def send_document(self, to: str, media_id: str, *, filename: str) -> None:
         self.documents_sent.append((to, media_id, filename))
+
+    def download_media(self, media_id: str) -> tuple[bytes, str]:
+        self.downloaded_media_ids.append(media_id)
+        if self._download_error is not None:
+            raise self._download_error
+        return self._media_content, self._media_mime_type
 
 
 class FakeCustomerDocumentAgent:
@@ -279,6 +316,51 @@ class WhatsAppHTTPClientMediaTests(unittest.TestCase):
         self.assertEqual(body["document"], {"id": "media-123", "filename": "hasil.docx"})
         self.assertEqual(body["to"], "628111")
 
+    def _raw_response(self, data: bytes):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = data
+        return response
+
+    def test_download_media_fetches_metadata_then_file_content(self):
+        meta_response = self._response({"url": "https://cdn.example/media-123", "mime_type": "application/pdf"})
+        file_response = self._raw_response(b"%PDF-1.4 isi file pelanggan")
+        with patch("urllib.request.urlopen", side_effect=[meta_response, file_response]) as call:
+            data, mime_type = self.client.download_media("media-123")
+        self.assertEqual(data, b"%PDF-1.4 isi file pelanggan")
+        self.assertEqual(mime_type, "application/pdf")
+        first_request, second_request = call.call_args_list[0].args[0], call.call_args_list[1].args[0]
+        self.assertIn("media-123", first_request.full_url)
+        self.assertEqual(second_request.full_url, "https://cdn.example/media-123")
+        self.assertEqual(second_request.headers["Authorization"], "Bearer token-uji")
+
+    def test_download_media_empty_media_id_raises_without_network_call(self):
+        with patch("urllib.request.urlopen") as network:
+            with self.assertRaises(WhatsAppError):
+                self.client.download_media("")
+        network.assert_not_called()
+
+    def test_download_media_missing_url_in_metadata_is_rejected(self):
+        with patch("urllib.request.urlopen", return_value=self._response({"mime_type": "application/pdf"})):
+            with self.assertRaises(WhatsAppError):
+                self.client.download_media("media-123")
+
+    def test_download_media_metadata_http_error_is_wrapped(self):
+        error = urllib.error.HTTPError("https://graph.facebook.com/media-123", 404, "not found", {}, None)
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(WhatsAppError) as raised:
+                self.client.download_media("media-123")
+        self.assertFalse(raised.exception.retryable)
+
+    def test_download_media_file_fetch_http_error_is_wrapped(self):
+        meta_response = self._response({"url": "https://cdn.example/media-123", "mime_type": "application/pdf"})
+        error = urllib.error.HTTPError("https://cdn.example/media-123", 500, "server error", {}, None)
+        with patch("urllib.request.urlopen", side_effect=[meta_response, error]):
+            with self.assertRaises(WhatsAppError) as raised:
+                self.client.download_media("media-123")
+        self.assertTrue(raised.exception.retryable)
+
 
 class WhatsAppAttachmentDeliveryTests(unittest.TestCase):
     """WhatsAppCustomerAdapter mengunggah lalu mengirim file saat LeadReply membawa
@@ -329,6 +411,72 @@ class WhatsAppAttachmentDeliveryTests(unittest.TestCase):
         replies = adapter.process_webhook_event(payload)
         self.assertEqual(len(failing_client.sent), 1)
         self.assertEqual(replies[0].status, "final_ready")
+
+
+class WhatsAppAttachmentGuardIntegrationTests(unittest.TestCase):
+    """WhatsAppCustomerAdapter <-> app/attachment_guard.py: file pelanggan diunduh dan
+    diperiksa SEBELUM handle_customer_message() disentuh sama sekali."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        db = Path(self.temp.name) / "assistant.db"
+        self.trust_layer = TrustLayer(db)
+        self.approval_gate = ApprovalGate(db)
+        self.lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)
+        self.attachment_guard = AttachmentGuard(Path(self.temp.name) / "quarantine", db)
+
+    def test_safe_document_is_downloaded_inspected_and_processed_normally(self):
+        client = FakeWhatsAppClient(media_content=b"%PDF-1.4 isi dummy", media_mime_type="application/pdf")
+        adapter = WhatsAppCustomerAdapter(client, self.lead, attachment_guard=self.attachment_guard)
+        payload = _document_message_payload("628111", filename="tugas.pdf", media_id="media-aman")
+        replies = adapter.process_webhook_event(payload)
+        self.assertEqual(client.downloaded_media_ids, ["media-aman"])
+        self.assertNotEqual(replies[0].target, "attachment_guard")
+        # Pesan tetap masuk Trust Layer seperti biasa (has_attachment=True sebagai sinyal).
+        self.assertEqual(len(self.trust_layer.history("628111")), 1)
+
+    def test_risky_executable_is_blocked_before_reaching_trust_layer(self):
+        client = FakeWhatsAppClient(media_content=b"MZ\x90\x00", media_mime_type="application/octet-stream")
+        adapter = WhatsAppCustomerAdapter(client, self.lead, attachment_guard=self.attachment_guard)
+        payload = _document_message_payload("628222", filename="invoice.exe", media_id="media-jahat")
+        replies = adapter.process_webhook_event(payload)
+        self.assertEqual(replies[0].target, "attachment_guard")
+        self.assertEqual(replies[0].status, "ditahan_keamanan")
+        self.assertEqual(replies[0].text, ATTACHMENT_HOLD_TEXT)
+        # Tidak pernah sampai ke Trust Layer sama sekali untuk pesan ini.
+        self.assertEqual(self.trust_layer.history("628222"), [])
+        # Eskalasi otomatis ke admin (Level 4, selalu wajib approval).
+        pending = self.approval_gate.pending_for_admin()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["action_type"], "tinjau_attachment_pelanggan")
+
+    def test_download_failure_holds_message_and_escalates(self):
+        client = FakeWhatsAppClient(download_error=WhatsAppError("Koneksi terputus"))
+        adapter = WhatsAppCustomerAdapter(client, self.lead, attachment_guard=self.attachment_guard)
+        payload = _document_message_payload("628333", filename="tugas.pdf", media_id="media-gagal")
+        replies = adapter.process_webhook_event(payload)
+        self.assertEqual(replies[0].status, "tidak_dapat_diverifikasi")
+        self.assertEqual(self.trust_layer.history("628333"), [])
+        pending = self.approval_gate.pending_for_admin()
+        self.assertEqual(len(pending), 1)
+
+    def test_without_attachment_guard_configured_falls_back_to_old_behavior(self):
+        client = FakeWhatsAppClient()
+        adapter = WhatsAppCustomerAdapter(client, self.lead)  # attachment_guard tidak diberikan
+        payload = _document_message_payload("628444", filename="invoice.exe", media_id="media-apa-saja")
+        replies = adapter.process_webhook_event(payload)
+        # Tanpa attachment_guard, media_id tidak pernah diunduh — perilaku lama tetap
+        # jalan (has_attachment jadi sinyal Trust Layer saja).
+        self.assertEqual(client.downloaded_media_ids, [])
+        self.assertNotEqual(replies[0].target, "attachment_guard")
+
+    def test_text_only_messages_never_trigger_download(self):
+        client = FakeWhatsAppClient()
+        adapter = WhatsAppCustomerAdapter(client, self.lead, attachment_guard=self.attachment_guard)
+        payload = _text_message_payload("628555", "Halo kak, mau tanya harga cetak skripsi")
+        adapter.process_webhook_event(payload)
+        self.assertEqual(client.downloaded_media_ids, [])
 
 
 if __name__ == "__main__":

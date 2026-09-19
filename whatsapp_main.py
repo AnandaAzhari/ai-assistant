@@ -33,13 +33,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from app.approval_gate import ApprovalGate
+from app.attachment_guard import AttachmentGuard
 from app.customer_intent import CustomerIntentClassifier
 from app.document_agent import DocumentAgent
 from app.document_engine import DocumentEngine
 from app.document_preferences import DocumentPreferenceStore
 from app.document_session import DocumentSessionStore
 from app.env import load_env
+from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
+from app.order_status import OrderStatusStore
+from app.price_list import PriceListStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
 from app.trust_layer import TrustLayer
@@ -94,12 +98,26 @@ def create_customer_adapter() -> WhatsAppCustomerAdapter:
         approval_gate=ApprovalGate(db_path),
         intent_classifier=CustomerIntentClassifier(provider),
         document_factory=document_factory,
+        # Database yang sama dengan admin_runtime.py (Telegram/Web Admin) — admin
+        # mematikan kill switch dari Telegram, runtime WhatsApp ini (proses terpisah)
+        # langsung ikut berhenti memproses pesan pelanggan otomatis.
+        kill_switch=KillSwitch(db_path),
+        # Harga/status order diisi admin lewat Telegram/Web Admin (app/admin_runtime.py);
+        # WhatsApp di sini hanya MEMBACA dari database yang sama untuk menjawab
+        # pelanggan dari data asli (lihat app/price_list.py, app/order_status.py).
+        price_list=PriceListStore(db_path),
+        order_status=OrderStatusStore(db_path),
     )
     client = WhatsAppHTTPClient(
         os.environ.get("WHATSAPP_API_TOKEN", ""),
         os.environ.get("WHATSAPP_PHONE_NUMBER_ID", ""),
     )
-    return WhatsAppCustomerAdapter(client, lead)
+    # File yang dikirim pelanggan diunduh, divalidasi, dan disimpan ke folder
+    # quarantine (bukan folder kerja) SEBELUM disentuh sama sekali — lihat
+    # app/attachment_guard.py dan policies/attachment_link_security.md.
+    quarantine_dir = os.environ.get("ATTACHMENT_QUARANTINE_DIR", "data/quarantine").strip() or "data/quarantine"
+    attachment_guard = AttachmentGuard(quarantine_dir, db_path)
+    return WhatsAppCustomerAdapter(client, lead, attachment_guard=attachment_guard)
 
 
 class WhatsAppHTTPServer(ThreadingHTTPServer):
@@ -209,12 +227,20 @@ def main(argv: list[str] | None = None) -> int:
     classifier = adapter.lead.intent_classifier
     ai_note = "siap (DeepSeek)" if classifier is not None and classifier.configured else "belum dikonfigurasi, memakai fallback kata kunci"
     document_note = "aktif (Document Agent tersambung)" if adapter.lead.document_factory is not None else "belum tersambung"
+    kill_switch_active = adapter.lead.kill_switch is not None and adapter.lead.kill_switch.is_active("whatsapp")
+    kill_switch_note = "AKTIF — pesan pelanggan TIDAK diproses sampai dinyalakan admin" if kill_switch_active else "nonaktif (proses normal)"
+    attachment_guard_note = (
+        f"aktif (quarantine: {adapter.attachment_guard.quarantine_dir})"
+        if adapter.attachment_guard is not None else "belum tersambung"
+    )
 
     if args.check:
         print("Konfigurasi WhatsApp Customer Adapter lengkap.")
         print("Trust Layer + Approval Gate: aktif.")
         print("AI intent classifier: " + ai_note + ".")
         print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
+        print("Kill switch: " + kill_switch_note + ".")
+        print("Attachment guard: " + attachment_guard_note + ".")
         print(f"Server akan mendengarkan di {args.host}:{args.port}, endpoint /webhook.")
         return 0
 
@@ -225,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"WhatsApp Customer Adapter aktif di {args.host}:{args.port}/webhook.")
     print("AI intent classifier: " + ai_note + ".")
     print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
+    print("Kill switch: " + kill_switch_note + ".")
+    print("Attachment guard: " + attachment_guard_note + ".")
     print("Biarkan terminal ini terbuka. Ctrl+C untuk berhenti.")
     try:
         server.serve_forever()

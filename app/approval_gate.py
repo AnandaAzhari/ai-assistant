@@ -74,6 +74,10 @@ _ACTION_LEVELS: dict[str, int] = {
     "kirim_status_antrean": LEVEL_EXTERNAL_ACTION,
     "kirim_pengingat_status": LEVEL_EXTERNAL_ACTION,
     "tolak_spam_sopan": LEVEL_EXTERNAL_ACTION,
+    # Topic restriction (app/customer_intent.py, app/lead.py `_detect_customer_action`):
+    # balasan pengalihan sopan saat pesan di luar topik layanan usaha — bukan aksi
+    # berisiko, cukup auto-send rutin seperti jawab_faq/kirim_salam.
+    "di_luar_topik": LEVEL_EXTERNAL_ACTION,
     "ubah_status_order": LEVEL_EXTERNAL_ACTION,
     "unggah_file_ke_pelanggan": LEVEL_EXTERNAL_ACTION,
     # Level 3 — External Action, wajib approval (lihat approval_policy.md "Wajib Approval Admin")
@@ -84,6 +88,10 @@ _ACTION_LEVELS: dict[str, int] = {
     "balas_pesan_konflik_atau_ancaman": LEVEL_EXTERNAL_ACTION,
     "balas_komplain_berat": LEVEL_EXTERNAL_ACTION,
     # Level 4 — High Risk, selalu wajib approval admin
+    # File dari pelanggan yang ditahan app/attachment_guard.py (risk HIGH/CRITICAL) —
+    # lihat policies/attachment_link_security.md "HIGH dan CRITICAL tidak boleh
+    # diproses otomatis" dan WhatsAppCustomerAdapter._handle_attachment_message.
+    "tinjau_attachment_pelanggan": LEVEL_HIGH_RISK,
     "hapus_data_permanen": LEVEL_HIGH_RISK,
     "command_administrator": LEVEL_HIGH_RISK,
     "instal_software": LEVEL_HIGH_RISK,
@@ -98,6 +106,7 @@ _ACTION_LEVELS: dict[str, int] = {
 # selalu berhenti dan minta approval meski policy-nya sama-sama "External Action".
 _ROUTINE_AUTO_SEND = {
     "kirim_salam", "jawab_faq", "minta_detail_order", "konfirmasi_file_diterima",
+    "di_luar_topik",
     "kirim_estimasi_harga_standar", "kirim_status_antrean", "kirim_pengingat_status",
     "tolak_spam_sopan", "ubah_status_order", "unggah_file_ke_pelanggan",
 }

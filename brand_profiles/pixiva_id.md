@@ -12,10 +12,10 @@ Catatan: owner juga punya aplikasi bernama **Kilau** untuk operasional photoboot
 Kreatif & fun. Konten photobooth secara alami sudah punya bahan visual yang menarik (foto/video momen seru di acara), jadi caption cukup singkat, energik, dan mengundang orang membayangkan acara mereka sendiri seru seperti itu. Hindari bahasa terlalu formal/kaku.
 
 ## Identitas Visual
-- Warna utama: [ISI]
-- Warna sekunder: [ISI]
-- Gaya visual: draft sementara — foto/video momen candid di acara, warna cerah/pop, feed dengan mood "seru & colorful"
-- Logo/aset: [ISI]
+- Warna utama: Magenta/Pink cerah (#E91E8C) — energik, mudah dikenali di antara foto acara.
+- Warna sekunder: Turquoise/Teal (#00C2CB) sebagai kontras, aksen Kuning cerah (#FFD23F) untuk elemen playful (stiker, bingkai foto).
+- Gaya visual: foto/video momen candid di acara, warna cerah/pop, feed dengan mood "seru & colorful"
+- Logo/aset: belum ada aset resmi — pakai wordmark teks "Pixiva.ID" sebagai placeholder sampai logo final tersedia.
 
 ## Target Audiens
 Calon penyewa jasa photobooth: calon pengantin/wedding organizer, panitia acara ulang tahun/kantor/sekolah, event organizer bazaar/mall.
@@ -27,8 +27,10 @@ Calon penyewa jasa photobooth: calon pengantin/wedding organizer, panitia acara 
 - Tidak mengklaim harga/paket tanpa konfirmasi price list terbaru.
 
 ## Contoh Caption Favorit
-- [ISI]
+- "Momen sekali seumur hidup, sayang kalau cuma difoto sekali klik 📸✨ Pixiva.ID siap bikin acaramu makin seru dengan photobooth kece. Booking dari sekarang, yuk!"
+- "Foto strip, boomerang, sampai GIF — semua ada di satu booth! Cocok buat nikahan, ulang tahun, sampai acara kantor. DM kami buat cek jadwal ya 💌"
+- "Wefie bareng teman-teman jadi makin berkesan kalau ada Pixiva.ID di acaramu 🎉"
 
 ## Status
-- Draft/Final: **Draft** — perlu dikonfirmasi owner: warna brand asli, dan status relasi dengan brand/app "Kilau".
-- Terakhir diperbarui: 2026-09-18
+- Draft/Final: **Draft** — rekomendasi awal dari AI, silakan diganti/disesuaikan owner kapan saja. Masih perlu dikonfirmasi: warna brand asli, dan status relasi dengan brand/app "Kilau".
+- Terakhir diperbarui: 2026-09-19

@@ -14,10 +14,10 @@ Campurkan dua jenis konten:
 2. Promosi layanan: jasa print, jilid, penyusunan makalah, dengan CTA yang jelas tapi tidak memaksa.
 
 ## Identitas Visual
-- Warna utama: [ISI: warna brand Taqi DocuTech, draft sementara biru tua/navy untuk kesan profesional/terpercaya]
-- Warna sekunder: [ISI: draft sementara putih/abu terang]
+- Warna utama: Navy/Biru Tua (#1E3A5F) — kesan profesional, terpercaya, akademik.
+- Warna sekunder: Putih (#FFFFFF) dan Abu terang (#E8EAED); aksen Kuning Emas (#D4A017) untuk CTA/highlight supaya tidak monoton biru-putih.
 - Gaya visual: rapi, banyak white space, foto dokumen/kertas/laptop yang bersih, hindari visual ramai
-- Logo/aset: [ISI: lokasi file logo bila ada]
+- Logo/aset: belum ada aset resmi — pakai wordmark teks "Taqi DocuTech" (font tegas, warna navy) sebagai placeholder sampai logo final tersedia.
 
 ## Target Audiens
 Mahasiswa dan pelajar (kira-kira usia 17-25) di area layanan Taqi DocuTech, plus staf/karyawan yang butuh jasa print/dokumen kantor sesekali.
@@ -30,9 +30,10 @@ Mahasiswa dan pelajar (kira-kira usia 17-25) di area layanan Taqi DocuTech, plus
 - Tidak mengklaim harga tanpa konfirmasi price list terbaru.
 
 ## Contoh Caption Favorit
-- [ISI: contoh caption yang owner suka, sementara kosong]
-- [ISI]
+- (Edukatif) "Struktur BAB 1 skripsimu udah sesuai belum? Ini 3 bagian yang paling sering kelewat 👇 [isi tips]. Butuh bantuan susun atau print? Taqi DocuTech siap bantu, kak 📄"
+- (Promosi) "Deadline mepet, revisi belum kelar, print belum dijilid? Tenang, serahkan ke Taqi DocuTech — cepat, rapi, dan kami bantu sampai selesai. Chat kami sekarang, kak 💬"
+- (Apresiasi pelanggan) "Makasih kak sudah percaya Taqi DocuTech buat cetak & jilid laporan PKL-nya! Semoga lancar terus urusan akademiknya 🙌"
 
 ## Status
-- Draft/Final: **Draft** — perlu dikonfirmasi owner, terutama soal batasan layanan (bantu susun vs kerjakan penuh) dan warna brand asli.
-- Terakhir diperbarui: 2026-09-18
+- Draft/Final: **Draft** — rekomendasi awal dari AI, silakan diganti/disesuaikan owner kapan saja, terutama soal batasan layanan (bantu susun vs kerjakan penuh) dan warna brand asli.
+- Terakhir diperbarui: 2026-09-19

@@ -93,6 +93,18 @@ class CustomerIntentClassifierTests(unittest.TestCase):
         self.assertEqual(result.status, "berhasil")
         self.assertEqual(result.action_type, "jawab_faq")
 
+    def test_off_topic_message_is_classified_via_ai(self):
+        # Topic restriction (docs/roadmap_customer_channel_v1.md "Guardrail Tambahan"):
+        # pesan curhat pribadi yang tidak berkaitan dengan layanan usaha sama sekali.
+        raw = "Kak aku lagi galau banget abis putus sama pacar, boleh curhat gak?"
+        provider = FakeProvider(_reply(
+            '{"action_type": "di_luar_topik", "evidence": "lagi galau banget abis putus sama pacar"}'
+        ))
+        classifier = CustomerIntentClassifier(provider)
+        result = classifier.classify(raw)
+        self.assertEqual(result.status, "berhasil")
+        self.assertEqual(result.action_type, "di_luar_topik")
+
     def test_provider_failure_status_is_passed_through(self):
         provider = FakeProvider(_reply("gagal menghubungi API", status="gagal"))
         classifier = CustomerIntentClassifier(provider)

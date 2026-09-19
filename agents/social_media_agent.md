@@ -106,5 +106,10 @@ Kembalikan tugas ke Lead Agent jika:
 - ditemukan indikasi konten berisiko (klaim palsu, pelanggaran hak cipta, konten sensitif).
 
 ## Versi
-- v0.1-draft
-- Status: dokumen peran awal; belum ada implementasi kode. Mengikuti pola dokumentasi-dulu seperti Finance Agent sebelum diimplementasikan.
+- v0.3
+- Status: dokumen peran; sebagian sudah diimplementasikan:
+  - Memory (Working + Long-Term Feedback): `app/content_session.py`, `app/content_learning.py` — lihat `docs/agent_memory_v1.md`.
+  - Brand Profile reader terstruktur: `app/brand_profile.py` (`BrandProfileStore`) — membaca `brand_profiles/*.md` tanpa mengubah formatnya.
+  - Content Studio tahap "Ide & Naskah" (bukan Visual Studio): `app/content_studio.py` (`ContentStudio.generate_draft()`), AI-first + validasi deterministik (brand profile wajib lengkap, harga karangan dibuang), hasil selalu draft menunggu review — lihat `docs/social_media_v1.md` bagian "Content Studio". Bisa dipanggil dari Telegram Admin lewat `/konten_baru <usaha> | <platform> | <brief>` (`app/lead.py`).
+  - Belum diimplementasikan: Visual Studio, Content Calendar, Scheduling & Publishing (perlu Platform Publishing Adapter + Meta Business verification), Analytics & Reporting otomatis (saat ini `record_performance()` di `app/content_learning.py` masih dipanggil manual, belum ada Insight Collector), dan perintah Telegram lain (`/jadwal_konten`, `/approve_konten`, `/performa_konten`).
+  - Mengikuti pola dokumentasi-dulu seperti Finance Agent sebelum diimplementasikan.

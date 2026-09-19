@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from app.approval_gate import ApprovalGate
+from app.content_studio import ContentStudio
 from app.customer_intent import CustomerIntentClassifier
 from app.desktop import DesktopAgent, Result
 from app.document_agent import DocumentAgent
@@ -34,7 +35,16 @@ from app.finance import FinanceService
 from app.finance_corrections import correct_latest_account
 from app.google_sheets_sync import GoogleSheetsSync
 from app.interaction_policy import is_admin_command
+from app.kill_switch import CUSTOMER_NOTICE_TEXT, GLOBAL_SCOPE, KillSwitch
+from app.order_status import OrderStatusStore
+from app.price_list import PriceListStore
 from app.trust_layer import TrustLayer
+
+# Scope kill switch yang dikenal untuk command admin `/matikan_otomatis <scope> ...` —
+# scope lain di luar daftar ini tetap bisa dipakai lewat KillSwitch langsung (mis. skrip
+# admin/testing), tapi command Telegram/Web Admin hanya mengenali nama-nama ini supaya
+# admin tidak salah ketik scope yang tidak pernah dicek kode mana pun.
+_KNOWN_KILL_SWITCH_SCOPES = {"whatsapp"}
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,10 @@ class LeadAgent:
         approval_gate: ApprovalGate | None = None,
         intent_classifier: CustomerIntentClassifier | None = None,
         document_factory: Callable[[str], DocumentAgent] | None = None,
+        kill_switch: KillSwitch | None = None,
+        price_list: PriceListStore | None = None,
+        order_status: OrderStatusStore | None = None,
+        content_studio: ContentStudio | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -69,6 +83,10 @@ class LeadAgent:
         self.trust_layer = trust_layer
         self.approval_gate = approval_gate
         self.intent_classifier = intent_classifier
+        self.kill_switch = kill_switch
+        self.price_list = price_list
+        self.order_status = order_status
+        self.content_studio = content_studio
         # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
         # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
         # kalau document_factory tidak diberikan (fitur belum diaktifkan).
@@ -107,6 +125,21 @@ class LeadAgent:
             return False
         source_marker = r"\b(?:pakai|menggunakan|via|dari|bayar\s+pakai|dibayar\s+dengan)\b"
         return re.search(source_marker, lowered) is None
+
+    @staticmethod
+    def _parse_kill_switch_args(rest: str) -> tuple[str, str]:
+        """Pisahkan scope opsional (kata pertama, harus persis salah satu nama di
+        `_KNOWN_KILL_SWITCH_SCOPES`) dari sisa teks sebagai alasan. Tanpa kata pertama
+        yang cocok, seluruh teks dianggap alasan dan scope default "global" (mematikan
+        SEMUA channel pelanggan sekaligus) — supaya admin yang buru-buru cukup ketik
+        `/matikan_otomatis kena serangan spam masif` tanpa perlu ingat nama scope."""
+        rest = (rest or "").strip()
+        if not rest:
+            return GLOBAL_SCOPE, ""
+        first, _, remainder = rest.partition(" ")
+        if first.casefold() in _KNOWN_KILL_SWITCH_SCOPES:
+            return first.casefold(), remainder.strip()
+        return GLOBAL_SCOPE, rest
 
     def _document_session_active(self) -> bool:
         if self.document is None:
@@ -174,11 +207,24 @@ class LeadAgent:
                 "/sources - lihat Source Registry sesi saat ini\n"
                 "/makalah <permintaan> - bicara dengan Document Agent\n"
                 "/dokumen_baru - reset konteks percakapan dokumen\n"
+                "/matikan_otomatis [whatsapp] <alasan> - kill switch: hentikan proses otomatis pesan pelanggan\n"
+                "/nyalakan_otomatis [whatsapp] - nyalakan kembali proses otomatis pesan pelanggan\n"
+                "/status_otomatis - cek status kill switch\n"
+                "/harga_set <layanan> | <harga> | <catatan opsional> - simpan/ubah harga layanan\n"
+                "/harga_hapus <layanan> - hapus harga layanan\n"
+                "/harga_list - lihat semua harga tersimpan\n"
+                "/status_set <nomor_wa> <order_id> | <status> - catat status pesanan pelanggan\n"
+                "/status_lihat <nomor_wa> - lihat riwayat status order pelanggan tsb\n"
+                "/konten_baru <usaha> | <platform> | <brief> - Content Studio: buat draft caption\n"
                 "Koreksi akun transaksi terakhir: `Koreksi transaksi terakhir, akun seharusnya BNI`.\n\n"
                 f"Finance runtime: {finance_note}.\n"
                 f"Google Sheets Sync: {sync_note}.\n"
                 f"Document Agent: {document_note}.\n"
-                f"Document Engine: {engine_note}."
+                f"Document Engine: {engine_note}.\n"
+                f"Kill switch: {'siap' if self.kill_switch is not None else 'belum tersedia'}.\n"
+                f"Price list: {'siap' if self.price_list is not None else 'belum tersedia'}.\n"
+                f"Order status: {'siap' if self.order_status is not None else 'belum tersedia'}.\n"
+                f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
@@ -199,7 +245,8 @@ class LeadAgent:
                 "Router Lead: aturan minimum\nLead AI model: belum dihubungkan\n"
                 f"Document Agent: {document_status}\n"
                 f"Document Engine: {engine_status}\n"
-                f"Finance runtime: {finance_status}\nGoogle Sheets Sync: {sync_status}"
+                f"Finance runtime: {finance_status}\nGoogle Sheets Sync: {sync_status}\n"
+                f"Kill switch: {'siap' if self.kill_switch is not None else 'belum tersedia'}"
             )
 
         if command == "/dokumen_status":
@@ -207,6 +254,163 @@ class LeadAgent:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.status()
             return LeadReply("document", result.status, result.text)
+
+        if command in {"/matikan_otomatis", "/killswitch_matikan"}:
+            if self.kill_switch is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kill switch belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            scope, reason = self._parse_kill_switch_args(rest)
+            state = self.kill_switch.activate(scope=scope, reason=reason, changed_by=f"admin:{self.admin_channel}")
+            return LeadReply(
+                "kill_switch", "berhasil",
+                f"Kill switch AKTIF untuk scope '{state.scope}'. Pesan pelanggan di scope ini otomatis ditolak "
+                f"(tidak diproses sama sekali) sampai dinyalakan lagi dengan /nyalakan_otomatis.\n"
+                f"Alasan: {state.reason or '(tidak diisi)'}"
+            )
+
+        if command in {"/nyalakan_otomatis", "/killswitch_nyalakan"}:
+            if self.kill_switch is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kill switch belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            scope, reason = self._parse_kill_switch_args(rest)
+            state = self.kill_switch.deactivate(scope=scope, reason=reason, changed_by=f"admin:{self.admin_channel}")
+            return LeadReply(
+                "kill_switch", "berhasil",
+                f"Kill switch NONAKTIF untuk scope '{state.scope}'. Pesan pelanggan diproses normal kembali."
+            )
+
+        if command in {"/status_otomatis", "/killswitch_status"}:
+            if self.kill_switch is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kill switch belum tersedia pada runtime ini.")
+            lines = []
+            for scope in [GLOBAL_SCOPE, *sorted(_KNOWN_KILL_SWITCH_SCOPES)]:
+                state = self.kill_switch.status(scope)
+                label = "AKTIF (menghentikan proses otomatis)" if state.active else "nonaktif"
+                if state.active and state.reason:
+                    label += f" — alasan: {state.reason}"
+                lines.append(f"{scope}: {label}")
+            return LeadReply("kill_switch", "berhasil", "Status kill switch:\n" + "\n".join(lines))
+
+        if command in {"/harga_set", "/harga_tambah"}:
+            if self.price_list is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Price list belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            if len(fields) < 2 or not fields[0] or not fields[1]:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /harga_set <nama layanan> | <harga> | <catatan opsional>\n"
+                    "Contoh: /harga_set Cetak Skripsi | Rp250/lembar hitam putih | Minimal 10 lembar",
+                )
+            service, price_text = fields[0], fields[1]
+            note = fields[2] if len(fields) > 2 else ""
+            try:
+                entry = self.price_list.set_price(
+                    service, price_text, note=note, updated_by=f"admin:{self.admin_channel}",
+                )
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply(
+                "price_list", "berhasil",
+                f"Harga tersimpan: {entry.display_name} = {entry.price_text}" + (f" ({entry.note})" if entry.note else ""),
+            )
+
+        if command in {"/harga_hapus", "/harga_hapus_layanan"}:
+            if self.price_list is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Price list belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            service = parts[1].strip() if len(parts) > 1 else ""
+            if not service:
+                return LeadReply("lead", "format_salah", "Format: /harga_hapus <nama layanan>")
+            removed = self.price_list.remove(service)
+            return LeadReply(
+                "price_list", "berhasil" if removed else "tidak_ditemukan",
+                f"Harga '{service}' dihapus." if removed else f"Layanan '{service}' tidak ditemukan di price list.",
+            )
+
+        if command in {"/harga_list", "/harga_daftar"}:
+            if self.price_list is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Price list belum tersedia pada runtime ini.")
+            entries = self.price_list.list_all()
+            if not entries:
+                return LeadReply("price_list", "berhasil", "Price list masih kosong. Tambah dengan /harga_set.")
+            lines = [f"- {entry.display_name}: {entry.price_text}" + (f" ({entry.note})" if entry.note else "") for entry in entries]
+            return LeadReply("price_list", "berhasil", "Price list saat ini:\n" + "\n".join(lines))
+
+        if command in {"/status_set", "/status_order_set"}:
+            if self.order_status is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Order status belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            header, _, status_text = rest.partition("|")
+            header_parts = header.split(maxsplit=1)
+            status_text = status_text.strip()
+            if len(header_parts) < 2 or not status_text:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /status_set <nomor_wa_pelanggan> <order_id> | <status>\n"
+                    "Contoh: /status_set 628111222333 ORD-001 | Sedang dicetak, estimasi selesai besok sore",
+                )
+            sender_id, order_id = header_parts[0].strip(), header_parts[1].strip()
+            try:
+                entry = self.order_status.set_status(
+                    order_id, sender_id, status_text, updated_by=f"admin:{self.admin_channel}",
+                )
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply(
+                "order_status", "berhasil",
+                f"Status order {entry.order_id} milik {entry.sender_id} tersimpan: {entry.status_text}",
+            )
+
+        if command in {"/status_lihat", "/status_order_lihat"}:
+            if self.order_status is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Order status belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            sender_id = parts[1].strip() if len(parts) > 1 else ""
+            if not sender_id:
+                return LeadReply("lead", "format_salah", "Format: /status_lihat <nomor_wa_pelanggan>")
+            entries = self.order_status.list_for_customer(sender_id)
+            if not entries:
+                return LeadReply("order_status", "berhasil", f"Belum ada order tercatat untuk {sender_id}.")
+            lines = [f"- {entry.order_id}: {entry.status_text} (diperbarui {entry.updated_at})" for entry in entries]
+            return LeadReply("order_status", "berhasil", f"Order milik {sender_id}:\n" + "\n".join(lines))
+
+        if command in {"/konten_baru", "/konten_baru_draft"}:
+            if self.content_studio is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Content Studio belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            if len(fields) < 3 or not fields[0] or not fields[1] or not fields[2]:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /konten_baru <usaha> | <platform> | <brief>\n"
+                    "Contoh: /konten_baru Risol Mamqi | instagram | promo risol weekend, tema ceria",
+                )
+            business, platform, brief = fields[0], fields[1], fields[2]
+            result = self.content_studio.generate_draft(business, platform, brief)
+            if result.status == "belum_dikonfigurasi":
+                return LeadReply("content_studio", result.status, "Content Studio belum dikonfigurasi (API key AI belum diisi).")
+            if result.status == "needs_review":
+                return LeadReply("content_studio", result.status, result.note or "Draft perlu ditinjau sebelum dilanjutkan.")
+            if result.status != "draft":
+                return LeadReply(
+                    "content_studio", result.status,
+                    result.note or "Gagal membuat draft konten, coba lagi sebentar lagi.",
+                )
+            lines = [f"{i}. {caption}" for i, caption in enumerate(result.captions, start=1)]
+            text = (
+                f"Draft konten untuk {result.business} ({result.platform}), id {result.content_id}:\n"
+                + "\n".join(lines)
+                + "\n\nIni masih draft — tinjau/edit dulu sebelum dijadwalkan (belum ada auto-publish)."
+            )
+            if result.note:
+                text += f"\nCatatan: {result.note}"
+            return LeadReply("content_studio", "berhasil", text)
 
         document_utility_commands = {
             "/dokumen_engine_status", "/dokumen_demo",
@@ -333,6 +537,14 @@ class LeadAgent:
             "Baik, boleh diceritakan kebutuhan layanannya (jenis jasa, jumlah/ukuran, dan tenggat waktu)? "
             "Supaya saya bisa bantu lebih lanjut."
         ),
+        # Topic restriction (guardrail dari docs/roadmap_customer_channel_v1.md
+        # "Guardrail Tambahan"): pengalihan sopan, tidak membahas isi topiknya sama
+        # sekali, tidak menuduh, dan tetap membuka pintu kalau pelanggan sebenarnya
+        # punya kebutuhan layanan.
+        "di_luar_topik": (
+            "Maaf, saya di sini khusus membantu kebutuhan layanan kami saja, jadi belum bisa "
+            "menanggapi hal itu. Ada kebutuhan terkait layanan kami yang bisa saya bantu?"
+        ),
     }
 
     # --- Kata kunci intent pelanggan (fallback fail-safe, dipakai saat AI-first di
@@ -372,6 +584,16 @@ class LeadAgent:
         "laporan kuliah", "kti", "skripsi",
         "susun dokumen", "buat dokumen", "buatkan dokumen", "bikin makalah", "bikin dokumen",
     )
+    # Topic restriction (fallback kata kunci, dipakai saat AI-first belum dikonfigurasi/
+    # gagal/hasilnya tidak valid — sama seperti daftar kata kunci lain di atas). Sengaja
+    # dijaga PENDEK dan hanya berisi sinyal yang cukup jelas di luar topik layanan usaha
+    # (curhat pribadi, topik sensitif) — kata kunci yang longgar berisiko salah menahan
+    # pesan pelanggan yang sebenarnya masih terkait bisnis. AI-first di
+    # app/customer_intent.py menangani nuansa yang lebih halus lewat prompt-nya sendiri.
+    _OFF_TOPIC_WORDS = (
+        "curhat", "galau", "putus sama pacar", "putus cinta", "masalah pribadi",
+        "cerita pribadi", "gosip artis", "ramalan zodiak", "horoskop",
+    )
 
     @classmethod
     def _detect_customer_action(cls, text: str) -> tuple[str, str]:
@@ -397,6 +619,8 @@ class LeadAgent:
             action_type = "jawab_faq"
         elif any(word in lowered for word in cls._CUSTOMER_DOCUMENT_WORDS):
             action_type = "buat_dokumen_pelanggan"
+        elif any(word in lowered for word in cls._OFF_TOPIC_WORDS):
+            action_type = "di_luar_topik"
         else:
             action_type = "minta_detail_order"
         return action_type, cls._CUSTOMER_REPLY_TEXT[action_type]
@@ -447,11 +671,42 @@ class LeadAgent:
             attachment_path = document.final_docx_path
         return LeadReply("document", result.status, result.text, attachment_path)
 
-    def handle_customer_message(self, sender_id: str, message: str, *, has_attachment: bool = False) -> LeadReply:
-        """Jalur pelanggan: WAJIB melalui Trust Layer lalu Approval Gate, terpisah
-        total dari `handle_admin_message`. Lihat Fase 3 di
+    def _augment_reply_with_real_data(self, action_type: str, raw: str, sender_id: str, reply_text: str) -> str:
+        """Ganti balasan generik dengan data ASLI dari `price_list`/`order_status` kalau
+        tersedia dan cocok — lihat `app/price_list.py`/`app/order_status.py` untuk
+        alasan lengkap. `reply_text` (teks lama) dikembalikan apa adanya kalau modul
+        belum dikonfigurasi ATAU datanya tidak ditemukan, supaya tidak pernah menebak."""
+        if action_type == "kirim_estimasi_harga_standar" and self.price_list is not None:
+            entry = self.price_list.find(raw)
+            if entry is not None:
+                text = f"Harga {entry.display_name}: {entry.price_text}."
+                if entry.note:
+                    text += f" {entry.note}"
+                return text
+        elif action_type == "kirim_status_antrean" and self.order_status is not None:
+            # `sender_id` sendiri WAJIB — lihat "Isolasi Antar Pelanggan" di
+            # policies/security_policy.md, ditegakkan lagi di app/order_status.py.
+            entry = self.order_status.get_latest_for_customer(sender_id)
+            if entry is not None:
+                return f"Status pesanan Anda ({entry.order_id}): {entry.status_text}."
+        return reply_text
+
+    def handle_customer_message(
+        self, sender_id: str, message: str, *, has_attachment: bool = False, channel: str = "whatsapp",
+    ) -> LeadReply:
+        """Jalur pelanggan: WAJIB melalui Kill Switch, lalu Trust Layer, lalu Approval
+        Gate, terpisah total dari `handle_admin_message`. Lihat Fase 3 di
         `docs/roadmap_customer_channel_v1.md`.
+
+        Kill Switch dicek PALING AWAL, sebelum apa pun lain disentuh — sesuai langkah
+        pertama "Incident Response" di `policies/security_policy.md` ("aktifkan kill
+        switch; hentikan channel/agent terdampak"). Saat aktif (baik scope `channel` ini
+        maupun scope "global"), pesan tidak pernah sampai ke Trust Layer/AI/Document
+        Agent sama sekali — hanya dibalas notice netral, tanpa detail insiden ke publik.
         """
+        if self.kill_switch is not None and self.kill_switch.is_active(channel):
+            return LeadReply("kill_switch", "dimatikan_sementara", CUSTOMER_NOTICE_TEXT)
+
         if self.trust_layer is None or self.approval_gate is None:
             return LeadReply("lead", "belum_tersedia", "Jalur pelanggan belum aktif pada runtime ini.")
 
@@ -493,6 +748,11 @@ class LeadAgent:
             return self._continue_customer_document(document, sender_id, raw)
 
         action_type, reply_text = self._classify_customer_intent(raw)
+        # Hallucination prevention (docs/roadmap_customer_channel_v1.md "Guardrail
+        # Tambahan"): kalau data ASLI (price list/order status yang diisi admin)
+        # tersedia, jawab dari data itu, bukan teks generik "diteruskan ke admin".
+        # Kalau tidak ketemu, reply_text TETAP teks generik lama — tidak pernah menebak.
+        reply_text = self._augment_reply_with_real_data(action_type, raw, sender_id, reply_text)
 
         if action_type == "buat_dokumen_pelanggan":
             if document is None:

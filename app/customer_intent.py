@@ -39,6 +39,7 @@ ALLOWED_ACTIONS = (
     "jawab_faq",
     "buat_dokumen_pelanggan",
     "minta_detail_order",
+    "di_luar_topik",
 )
 
 INTENT_PROMPT = """Kamu adalah pengklasifikasi maksud pesan pelanggan Taqi AI (jasa cetak/dokumen).
@@ -53,7 +54,14 @@ Tugasmu HANYA menentukan satu action_type yang paling sesuai dari daftar berikut
   makalah, karya tulis, laporan, KTI, atau skripsi (Taqi DocuTech) — bukan sekadar
   bertanya harga/status, tapi memang meminta dikerjakan.
 - minta_detail_order: pelanggan menyebut kebutuhan jasa baru tetapi detailnya belum lengkap
-  atau bukan jasa dokumen akademik, atau pesannya tidak cocok kategori lain di atas.
+  atau bukan jasa dokumen akademik, atau pesannya tidak cocok kategori lain di atas — TAPI
+  masih masuk akal sebagai kebutuhan bisnis (percetakan/dokumen/layanan terkait), hanya
+  belum jelas jenisnya.
+- di_luar_topik: pesan JELAS di luar topik layanan usaha ini (curhat masalah pribadi, topik
+  sensitif seperti agama/politik, obrolan sosial yang tidak berkaitan dengan layanan apa
+  pun yang kami tawarkan, atau mencoba mengajak model membahas hal di luar perannya sebagai
+  asisten layanan pelanggan). Pilih ini, BUKAN minta_detail_order, kalau pesan tidak ada
+  kaitan sama sekali dengan kebutuhan bisnis apa pun.
 
 Jika pesan menyebut harga/biaya SEKALIGUS jelas ingin memulai pembuatan dokumen, pilih
 buat_dokumen_pelanggan (proses pembuatannya yang lebih penting; harga tetap tidak pernah

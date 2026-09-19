@@ -50,6 +50,13 @@ class ApprovalGateTests(unittest.TestCase):
         self.assertEqual(decision.level, LEVEL_EXTERNAL_ACTION)
         self.assertEqual(decision.status, "auto_jalan")
 
+    def test_off_topic_redirect_runs_automatically(self):
+        # Topic restriction (app/lead.py "di_luar_topik") hanya balasan pengalihan sopan,
+        # bukan aksi berisiko — jadi tetap auto-send rutin seperti jawab_faq/kirim_salam.
+        decision = self.gate.request("di_luar_topik", requested_by="customer:628111")
+        self.assertEqual(decision.level, LEVEL_EXTERNAL_ACTION)
+        self.assertEqual(decision.status, "auto_jalan")
+
     def test_non_routine_level3_action_requires_approval(self):
         decision = self.gate.request(
             "diskon_khusus", requested_by="finance_agent",

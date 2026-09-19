@@ -185,4 +185,4 @@ V1 fokus menjadi asisten konten internal owner yang stabil untuk tiga usaha awal
 7. Multi-tenant bila ingin ditawarkan ke usaha lain.
 
 ## Versi
-- v0.1-draft
+- v0.2-draft. Modul 2 (Content Studio "Ide & Naskah") sudah diimplementasikan sebagai `app/content_studio.py`, dipanggil lewat `/konten_baru` di Telegram Admin — lihat `agents/social_media_agent.md` untuk detail status implementasi per modul.

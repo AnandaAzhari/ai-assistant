@@ -27,6 +27,18 @@ Komputer perlu menyala, internet tersedia, dan terminal runtime tetap terbuka. T
 
 Jika bot masih menggunakan webhook, program menjelaskan bentroknya dan tidak menghapus webhook otomatis. Hanya bila memang ingin memindahkan bot tersebut ke polling komputer ini, jalankan `python telegram_main.py --remove-webhook --check`; opsi ini mempertahankan pesan tertunda.
 
+### Auto-start tanpa buka `.bat` manual (opsional, 19 September 2026)
+
+Selama masih jalan dari PC (belum pindah VPS), runtime tetap perlu satu proses yang terus hidup dan tetap butuh PC menyala + internet tersambung — tapi tidak wajib membuka jendela terminal manual tiap kali. Berkas berikut mendaftarkan runtime sebagai Windows Scheduled Task yang otomatis jalan (disembunyikan, tanpa jendela terlihat) setiap kali owner login Windows:
+
+- `JALANKAN_TELEGRAM_BACKGROUND.bat` — versi non-interaktif `JALANKAN_TELEGRAM.bat` (tanpa `pause`), output/error ditulis ke `logs/telegram_background.log` (folder `logs/` sudah di `.gitignore`).
+- `JALANKAN_TELEGRAM_HIDDEN.vbs` — menjalankan berkas di atas tanpa jendela terminal yang kelihatan (dipanggil Task Scheduler, tidak perlu dijalankan manual).
+- `SETUP_AUTOSTART_TELEGRAM.bat` — **jalankan sekali saja** (dobel-klik biasa) untuk mendaftarkan Scheduled Task bernama `TaqiAI_TelegramBot` (`schtasks /create ... /sc onlogon`). Menawarkan opsi langsung mencoba jalan saat itu juga tanpa perlu logout/restart dulu.
+- `HENTIKAN_TELEGRAM_BACKGROUND.bat` — menghentikan proses `telegram_main.py` yang sedang jalan di background (tidak membatalkan pendaftaran auto-start; kalau login ulang, bot jalan lagi).
+- `HAPUS_AUTOSTART_TELEGRAM.bat` — membatalkan pendaftaran Scheduled Task (`schtasks /delete`), kembali ke cara manual seperti semula.
+
+Ini murni kenyamanan operasional (menghindari klik `.bat` manual tiap kali), bukan pengganti VPS — begitu WhatsApp Cloud API butuh endpoint HTTPS publik yang tidak tergantung PC/router rumah menyala, tetap perlu pindah hosting (lihat `docs/multi_business_channels_v1.md` dan diskusi VPS). Belum ada test otomatis untuk skrip Windows ini (di luar cakupan `python -m unittest`, sifatnya OS-level); verifikasi dilakukan manual di komputer owner.
+
 ### Pemulihan dan batas pengujian
 
 Jurnal update menyimpan penanda tindakan sebelum menjalankan layanan. Setelah crash di tengah tindakan, hasil bisa belum pasti: bot meminta owner mengecek `/hari_ini` atau `/dokumen_status`, bukan menjalankan tindakan itu lagi secara otomatis. Timeout saat pengiriman dapat menghasilkan balasan duplikat; tidak ada klaim pengiriman tepat satu kali. Pesan baru yang diketik ulang oleh pengguna memiliki update ID baru dan dapat menjalankan tindakan baru.

@@ -6,6 +6,7 @@ from app.brand_profile import BrandProfileStore
 from app.content_learning import ContentLearningStore
 from app.content_session import ContentSessionStore
 from app.content_studio import ContentStudio
+from app.customer_book import CustomerBookStore
 from app.document_agent import DocumentAgent
 from app.document_engine import DocumentEngine
 from app.document_preferences import DocumentPreferenceStore
@@ -17,6 +18,7 @@ from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
+from app.pdf_compressor import PdfCompressor
 from app.price_list import PriceListStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
@@ -61,4 +63,15 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         # draft Kirana tersimpan ke database yang sama, ditinjau berkala lewat
         # /eval_sample, /eval_tandai, /eval_status (lihat app/interaction_log.py).
         interaction_log=InteractionLogStore(db_path),
+        # Profil pelanggan dan riwayat order terstruktur, diisi/dilihat admin lewat
+        # /pelanggan_nama, /pelanggan_catat, /pelanggan_riwayat, /pelanggan_ringkasan
+        # (lihat app/customer_book.py). Database yang sama dengan whatsapp_main.py,
+        # supaya kontak pelanggan yang tercatat otomatis dari WhatsApp langsung
+        # terlihat di sini juga.
+        customer_book=CustomerBookStore(db_path),
+        # Dipakai admin lewat /kompres_pdf_status untuk cek apakah Ghostscript sudah
+        # terpasang di server ini (lihat app/pdf_compressor.py). Instance terpisah
+        # dari whatsapp_main.py (proses berbeda), tapi cukup untuk cek status karena
+        # tidak menyimpan state apa pun selain lokasi workspace.
+        pdf_compressor=PdfCompressor.from_env(),
     )

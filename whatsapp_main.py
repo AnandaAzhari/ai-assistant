@@ -34,6 +34,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.approval_gate import ApprovalGate
 from app.attachment_guard import AttachmentGuard
+from app.customer_book import CustomerBookStore
 from app.customer_intent import CustomerIntentClassifier
 from app.document_agent import DocumentAgent
 from app.document_engine import DocumentEngine
@@ -44,6 +45,7 @@ from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
+from app.pdf_compressor import PdfCompressor
 from app.price_list import PriceListStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
@@ -113,6 +115,15 @@ def create_customer_adapter() -> WhatsAppCustomerAdapter:
         # Telegram (/eval_sample dst. di app/lead.py), database yang sama dengan
         # admin_runtime.py supaya bisa ditinjau dari satu tempat.
         interaction_log=InteractionLogStore(db_path),
+        # Setiap pesan pelanggan otomatis "menyentuh" profilnya di sini (lihat
+        # LeadAgent.handle_customer_message) — nama/bisnis tetap diisi admin lewat
+        # /pelanggan_nama, tidak pernah ditebak dari isi pesan (app/customer_book.py).
+        customer_book=CustomerBookStore(db_path),
+        # Pelanggan bisa minta PDF yang mereka kirim dikompres ke target KB/MB
+        # tertentu — lihat app/pdf_compressor.py. Butuh Ghostscript terpasang di
+        # server (self.pdf_compressor.available); tanpa itu, fitur tetap terdaftar
+        # tapi membalas jujur "belum bisa dijalankan" (bukan pura-pura berhasil).
+        pdf_compressor=PdfCompressor.from_env(),
     )
     client = WhatsAppHTTPClient(
         os.environ.get("WHATSAPP_API_TOKEN", ""),
@@ -239,6 +250,11 @@ def main(argv: list[str] | None = None) -> int:
         f"aktif (quarantine: {adapter.attachment_guard.quarantine_dir})"
         if adapter.attachment_guard is not None else "belum tersambung"
     )
+    pdf_compressor = adapter.lead.pdf_compressor
+    pdf_compressor_note = (
+        ("siap (Ghostscript ditemukan)" if pdf_compressor.available else "terdaftar, tapi Ghostscript belum terpasang")
+        if pdf_compressor is not None else "belum tersambung"
+    )
 
     if args.check:
         print("Konfigurasi WhatsApp Customer Adapter lengkap.")
@@ -247,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
         print("Kill switch: " + kill_switch_note + ".")
         print("Attachment guard: " + attachment_guard_note + ".")
+        print("Kompresi PDF: " + pdf_compressor_note + ".")
         print(f"Server akan mendengarkan di {args.host}:{args.port}, endpoint /webhook.")
         return 0
 
@@ -259,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Pembuatan dokumen (makalah/KTI/skripsi): " + document_note + ".")
     print("Kill switch: " + kill_switch_note + ".")
     print("Attachment guard: " + attachment_guard_note + ".")
+    print("Kompresi PDF: " + pdf_compressor_note + ".")
     print("Biarkan terminal ini terbuka. Ctrl+C untuk berhenti.")
     try:
         server.serve_forever()

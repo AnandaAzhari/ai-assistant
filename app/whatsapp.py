@@ -326,13 +326,15 @@ class WhatsAppCustomerAdapter:
         replies: list[LeadReply] = []
         for message in extract_inbound_messages(payload):
             attachment_reply = None
+            attachment_path = ""
             if message.has_attachment and message.media_id and self.attachment_guard is not None:
-                attachment_reply = self._handle_attachment_message(message)
+                attachment_reply, attachment_path = self._handle_attachment_message(message)
             if attachment_reply is not None:
                 reply = attachment_reply
             else:
                 reply = self.lead.handle_customer_message(
-                    message.sender_id, message.text, has_attachment=message.has_attachment, channel="whatsapp",
+                    message.sender_id, message.text, has_attachment=message.has_attachment,
+                    channel="whatsapp", attachment_path=attachment_path,
                 )
             replies.append(reply)
             for chunk in text_chunks(reply.text, WHATSAPP_TEXT_LIMIT):
@@ -341,19 +343,27 @@ class WhatsAppCustomerAdapter:
                 except WhatsAppError as exc:
                     print(f"Balasan WhatsApp belum terkirim ke {message.sender_id}: {exc}", flush=True)
                     break
-            if reply.attachment_path:
-                self._send_attachment(message.sender_id, reply.attachment_path)
+            # Bisa lebih dari satu file (mis. DOCX + PDF sekaligus untuk makalah
+            # selesai, lihat app/lead.py `_continue_customer_document`) — dikirim
+            # berurutan, satu kegagalan tidak membatalkan file lain dalam daftar
+            # yang sama (lihat _send_attachment).
+            for attachment in reply.attachment_paths:
+                self._send_attachment(message.sender_id, attachment)
         return replies
 
-    def _handle_attachment_message(self, message: InboundWhatsAppMessage) -> LeadReply | None:
+    def _handle_attachment_message(self, message: InboundWhatsAppMessage) -> tuple[LeadReply | None, str]:
         """Jalankan pipeline keamanan attachment (`app/attachment_guard.py`) SEBELUM
         pesan disentuh Trust Layer/intent sama sekali — pemeriksaan file sengaja
         terpisah total dari alur klasifikasi intent (lihat
         `policies/attachment_link_security.md`).
 
-        Kembalikan `LeadReply` pengganti (short-circuit, `handle_customer_message`
-        TIDAK dipanggil untuk pesan ini) kalau file berisiko/gagal diverifikasi;
-        `None` kalau file aman dan pemrosesan normal boleh lanjut seperti biasa.
+        Kembalikan `(LeadReply, "")` pengganti (short-circuit, `handle_customer_message`
+        TIDAK dipanggil untuk pesan ini) kalau file berisiko/gagal diverifikasi; atau
+        `(None, quarantine_path)` kalau file aman dan pemrosesan normal boleh lanjut
+        seperti biasa — `quarantine_path` diteruskan ke
+        `LeadAgent.handle_customer_message(attachment_path=...)` supaya fitur yang
+        butuh isi file pelanggan (mis. kompresi PDF, lihat app/pdf_compressor.py) bisa
+        benar-benar mengaksesnya, bukan cuma tahu `has_attachment=True`.
         """
         try:
             data, mime_type = self.client.download_media(message.media_id)
@@ -367,7 +377,7 @@ class WhatsAppCustomerAdapter:
                     requested_by=f"customer:{message.sender_id}",
                     summary=f"Attachment dari {message.sender_id} gagal diunduh/diverifikasi: {exc}",
                 )
-            return LeadReply("attachment_guard", "tidak_dapat_diverifikasi", ATTACHMENT_HOLD_TEXT)
+            return LeadReply("attachment_guard", "tidak_dapat_diverifikasi", ATTACHMENT_HOLD_TEXT), ""
         decision = self.attachment_guard.inspect(
             data,
             filename=message.media_filename or f"{message.media_id}",
@@ -375,7 +385,7 @@ class WhatsAppCustomerAdapter:
             sender_id=message.sender_id,
         )
         if decision.allowed:
-            return None
+            return None, decision.quarantine_path
         if self.lead.approval_gate is not None:
             # Level 4 (selalu wajib approval, lihat app/approval_gate.py) — masuk
             # antrean admin yang sama seperti eskalasi lain, bukan cuma tercatat diam-
@@ -388,7 +398,7 @@ class WhatsAppCustomerAdapter:
                     f"({decision.risk_level}): {decision.reason}"
                 ),
             )
-        return LeadReply("attachment_guard", "ditahan_keamanan", ATTACHMENT_HOLD_TEXT)
+        return LeadReply("attachment_guard", "ditahan_keamanan", ATTACHMENT_HOLD_TEXT), ""
 
     def _send_attachment(self, to: str, file_path: str) -> None:
         """Unggah lalu kirim file (Word/PDF hasil Document Agent) sebagai dokumen WhatsApp.

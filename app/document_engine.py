@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -422,15 +424,27 @@ class DocumentEngine:
 
     @staticmethod
     def convert_to_pdf(docx_path: Path, timeout: int = 75) -> tuple[Path | None, str]:
-        """Convert DOCX ke PDF memakai Microsoft Word COM bila tersedia."""
-        if os.name != "nt":
-            return None, "PDF belum dibuat: konversi Word COM hanya tersedia di Windows pada tahap ini."
+        """Convert DOCX ke PDF.
+
+        Di Windows (PC owner) memakai Microsoft Word COM lewat PowerShell (kode di
+        bawah ini) — presisi tinggi, termasuk update Table of Contents/field, perilaku
+        LAMA tidak berubah sama sekali. Di platform lain (VPS Linux tempat
+        WhatsApp/Telegram produksi jalan) memakai LibreOffice headless
+        (`_convert_to_pdf_libreoffice`), karena Word COM tidak ada di Linux. Kedua jalur
+        menghasilkan bentuk balik yang sama (`(pdf_path, "")` sukses, atau
+        `(None, pesan_error)` gagal) supaya pemanggil di `app/document_agent.py` tidak
+        perlu tahu platform mana yang dipakai — DOCX (dibuat `build_docx`, murni Open
+        XML, tidak butuh Word/LibreOffice sama sekali) selalu tetap terkirim ke
+        pelanggan meskipun PDF gagal dibuat di server manapun."""
         try:
             src_path = docx_path.resolve(strict=True)
         except (OSError, FileNotFoundError) as exc:
             return None, f"PDF belum dibuat otomatis: file DOCX tidak ditemukan ({exc})."
 
         pdf_path = src_path.with_suffix(".pdf")
+        if os.name != "nt":
+            return DocumentEngine._convert_to_pdf_libreoffice(src_path, pdf_path, timeout)
+
         ps_env = os.environ.copy()
         ps_env["TAQI_DOCX_SOURCE"] = str(src_path)
         ps_env["TAQI_PDF_DEST"] = str(pdf_path)
@@ -472,6 +486,52 @@ try {
 
         if completed.returncode != 0 or not pdf_path.is_file():
             detail = (completed.stderr or completed.stdout or "Microsoft Word tidak tersedia.").strip()
+            return None, f"PDF belum dibuat otomatis: {detail[:360]}"
+        return pdf_path, ""
+
+    @staticmethod
+    def _convert_to_pdf_libreoffice(src_path: Path, pdf_path: Path, timeout: int) -> tuple[Path | None, str]:
+        """Jalur konversi PDF untuk VPS/Linux (dipanggil dari `convert_to_pdf` saat
+        `os.name != "nt"`). Butuh LibreOffice terpasang di server — kalau belum,
+        `sudo apt install libreoffice` (Ubuntu/Debian) lalu proses ulang.
+
+        `-env:UserInstallation=<folder sementara unik>` WAJIB diisi per pemanggilan:
+        tanpa ini, dua konversi yang berjalan BERSAMAAN (mis. dua pelanggan WhatsApp
+        minta makalah di waktu hampir sama — whatsapp_main.py memakai
+        `ThreadingHTTPServer`, jadi ini benar-benar bisa terjadi) akan rebutan folder
+        profil LibreOffice yang sama dan salah satu/kedua proses bisa crash
+        ("Fatal exception: Signal 6"). Folder sementara ini otomatis dihapus lagi
+        setelah proses selesai (`tempfile.TemporaryDirectory`)."""
+        binary = shutil.which("soffice") or shutil.which("libreoffice")
+        if not binary:
+            return None, (
+                "PDF belum dibuat otomatis: LibreOffice tidak ditemukan di server ini. "
+                "Install dengan `sudo apt install libreoffice` (Ubuntu/Debian), lalu coba lagi."
+            )
+        if pdf_path.exists():
+            try:
+                pdf_path.unlink()
+            except OSError:
+                pass
+        with tempfile.TemporaryDirectory(prefix="taqi_lo_profile_") as profile_dir:
+            profile_uri = Path(profile_dir).resolve().as_uri()
+            try:
+                completed = subprocess.run(
+                    [
+                        binary, "--headless", "--norestore",
+                        f"-env:UserInstallation={profile_uri}",
+                        "--convert-to", "pdf", "--outdir", str(src_path.parent), str(src_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return None, f"PDF belum dibuat otomatis: {exc}"
+
+        if completed.returncode != 0 or not pdf_path.is_file():
+            detail = (completed.stderr or completed.stdout or "LibreOffice gagal mengonversi dokumen.").strip()
             return None, f"PDF belum dibuat otomatis: {detail[:360]}"
         return pdf_path, ""
 

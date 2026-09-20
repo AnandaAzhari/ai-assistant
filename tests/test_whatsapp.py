@@ -178,10 +178,12 @@ class FakeCustomerDocumentAgent:
     tanpa perlu provider AI atau Document Engine sungguhan (itu sudah diuji tuntas di
     tests/test_document_agent.py)."""
 
-    def __init__(self, *, session_active: bool = False, responses=None, final_docx_path: str = ""):
+    def __init__(self, *, session_active: bool = False, responses=None, final_docx_path: str = "",
+                 final_pdf_path: str = ""):
         self.session_active = session_active
         self._responses = list(responses or [])
         self.final_docx_path = final_docx_path
+        self.final_pdf_path = final_pdf_path
         self.calls: list[str] = []
 
     def handle(self, raw: str) -> DocumentResult:
@@ -364,7 +366,9 @@ class WhatsAppHTTPClientMediaTests(unittest.TestCase):
 
 class WhatsAppAttachmentDeliveryTests(unittest.TestCase):
     """WhatsAppCustomerAdapter mengunggah lalu mengirim file saat LeadReply membawa
-    attachment_path (jalur pelanggan -> Document Agent -> file makalah selesai)."""
+    attachment_paths (jalur pelanggan -> Document Agent -> file makalah selesai).
+    Bisa lebih dari satu file (DOCX + PDF sekaligus, lihat app/lead.py
+    `_continue_customer_document`) — semuanya harus terkirim berurutan."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -411,6 +415,18 @@ class WhatsAppAttachmentDeliveryTests(unittest.TestCase):
         replies = adapter.process_webhook_event(payload)
         self.assertEqual(len(failing_client.sent), 1)
         self.assertEqual(replies[0].status, "final_ready")
+
+    def test_final_document_with_pdf_uploads_and_sends_both_files(self):
+        pdf_path = Path(self.temp.name) / "makalah.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 palsu")
+        self.fake_document.final_pdf_path = str(pdf_path)
+        payload = _text_message_payload("628996", "Tolong buatkan makalah tentang gizi seimbang")
+        self.adapter.process_webhook_event(payload)
+        # DOCX dan PDF dua-duanya terunggah dan terkirim, berurutan.
+        self.assertEqual(self.client.uploaded, [str(self.docx_path), str(pdf_path)])
+        self.assertEqual(len(self.client.documents_sent), 2)
+        self.assertEqual(self.client.documents_sent[0][2], "makalah.docx")
+        self.assertEqual(self.client.documents_sent[1][2], "makalah.pdf")
 
 
 class WhatsAppAttachmentGuardIntegrationTests(unittest.TestCase):

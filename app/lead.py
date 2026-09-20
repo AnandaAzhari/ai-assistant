@@ -24,10 +24,12 @@ pelanggan lain (lihat "Isolasi Antar Pelanggan" di `policies/security_policy.md`
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from app.approval_gate import ApprovalGate
 from app.content_studio import ContentStudio
+from app.customer_book import CustomerBookStore
 from app.customer_intent import CustomerIntentClassifier
 from app.desktop import DesktopAgent, Result
 from app.document_agent import DocumentAgent
@@ -38,6 +40,7 @@ from app.interaction_log import ALLOWED_REVIEW_LABELS, InteractionLogStore
 from app.interaction_policy import is_admin_command
 from app.kill_switch import CUSTOMER_NOTICE_TEXT, GLOBAL_SCOPE, KillSwitch
 from app.order_status import OrderStatusStore
+from app.pdf_compressor import PdfCompressor
 from app.price_list import PriceListStore
 from app.topic_guard import is_off_topic
 from app.trust_layer import TrustLayer
@@ -86,6 +89,11 @@ TELEGRAM_COMMAND_MENU: tuple[tuple[str, str], ...] = (
     ("harga_list", "Lihat semua harga tersimpan"),
     ("status_set", "Catat status pesanan pelanggan"),
     ("status_lihat", "Lihat riwayat status order pelanggan"),
+    ("pelanggan_nama", "Simpan/ubah nama dan bisnis pelanggan"),
+    ("pelanggan_catat", "Catat order terstruktur milik pelanggan"),
+    ("pelanggan_riwayat", "Lihat profil dan riwayat order pelanggan"),
+    ("pelanggan_ringkasan", "Ringkasan jumlah order dan omzet per bisnis"),
+    ("kompres_pdf_status", "Cek kesiapan kompresi PDF (Ghostscript)"),
     ("konten_baru", "Kirana: buat draft ide dan caption"),
     ("eval_sample", "Ambil sampel interaksi untuk ditinjau"),
     ("eval_tandai", "Catat hasil tinjauan satu interaksi"),
@@ -98,10 +106,12 @@ class LeadReply:
     target: str
     status: str
     text: str
-    # Path file lokal (Word/PDF) yang perlu dikirim ke pelanggan sebagai lampiran,
-    # kosong bila balasan ini tidak membawa file. Dipakai WhatsAppCustomerAdapter
-    # untuk tahu kapan harus mengunggah dan mengirim dokumen, bukan cuma teks.
-    attachment_path: str = ""
+    # Path file lokal (Word/PDF/dst.) yang perlu dikirim ke pelanggan sebagai
+    # lampiran, kosong (tuple kosong) bila balasan ini tidak membawa file. Bisa
+    # lebih dari satu — mis. makalah selesai sekarang mengirim DOCX DAN PDF
+    # sekaligus (lihat _continue_customer_document) — dikirim berurutan oleh
+    # WhatsAppCustomerAdapter, bukan cuma satu file per balasan seperti sebelumnya.
+    attachment_paths: tuple[str, ...] = ()
 
 
 class LeadAgent:
@@ -121,6 +131,8 @@ class LeadAgent:
         order_status: OrderStatusStore | None = None,
         content_studio: ContentStudio | None = None,
         interaction_log: InteractionLogStore | None = None,
+        customer_book: CustomerBookStore | None = None,
+        pdf_compressor: PdfCompressor | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -135,11 +147,20 @@ class LeadAgent:
         self.order_status = order_status
         self.content_studio = content_studio
         self.interaction_log = interaction_log
+        self.customer_book = customer_book
+        self.pdf_compressor = pdf_compressor
         # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
         # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
         # kalau document_factory tidak diberikan (fitur belum diaktifkan).
         self.document_factory = document_factory
         self._customer_documents: dict[str, DocumentAgent] = {}
+        # Pelanggan yang sudah kirim PDF tapi belum menyebutkan target ukuran (KB/MB)
+        # di pesan yang sama — menunggu balasan berikutnya, lihat
+        # _handle_customer_message_inner dan _run_pdf_compression di bawah. Per proses
+        # (sama seperti _customer_documents), tidak persisten lintas restart — wajar,
+        # karena kalau pelanggan tidak sempat balas sebelum server restart, mereka
+        # tinggal kirim ulang PDF-nya.
+        self._pending_pdf_compressions: dict[str, str] = {}
 
     def dispatch(self, command: str, *, name: str = "", path: str = "") -> Result:
         command = command.strip().lower()
@@ -266,6 +287,11 @@ class LeadAgent:
                 "/harga_list - lihat semua harga tersimpan\n"
                 "/status_set <nomor_wa> <order_id> | <status> - catat status pesanan pelanggan\n"
                 "/status_lihat <nomor_wa> - lihat riwayat status order pelanggan tsb\n"
+                "/pelanggan_nama <nomor_wa> | <nama> | <bisnis opsional> - simpan/ubah nama dan bisnis pelanggan\n"
+                "/pelanggan_catat <nomor_wa> <bisnis> | <item> | <harga opsional> - catat order terstruktur\n"
+                "/pelanggan_riwayat <nomor_wa> - lihat profil dan riwayat order pelanggan\n"
+                "/pelanggan_ringkasan <bisnis> - total order dan omzet bisnis tsb\n"
+                "/kompres_pdf_status - cek kesiapan kompresi PDF (Ghostscript) di server ini\n"
                 "/konten_baru <usaha> | <platform> | <brief> - Content Studio: buat draft caption\n"
                 "/eval_sample [agent] [n] - Fase 5: ambil sampel interaksi produksi untuk ditinjau\n"
                 "/eval_tandai <id> | <baik/perlu_perbaikan/tidak_baik> | <catatan opsional> - catat hasil tinjauan\n"
@@ -279,7 +305,9 @@ class LeadAgent:
                 f"Price list: {'siap' if self.price_list is not None else 'belum tersedia'}.\n"
                 f"Order status: {'siap' if self.order_status is not None else 'belum tersedia'}.\n"
                 f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}.\n"
-                f"Interaction Log (Fase 5): {'siap' if self.interaction_log is not None else 'belum tersedia'}."
+                f"Interaction Log (Fase 5): {'siap' if self.interaction_log is not None else 'belum tersedia'}.\n"
+                f"Customer Book: {'siap' if self.customer_book is not None else 'belum tersedia'}.\n"
+                f"Kompresi PDF (Nara): {'siap' if self.pdf_compressor is not None and self.pdf_compressor.available else 'belum tersedia'}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
@@ -433,6 +461,111 @@ class LeadAgent:
                 return LeadReply("order_status", "berhasil", f"Belum ada order tercatat untuk {sender_id}.")
             lines = [f"- {entry.order_id}: {entry.status_text} (diperbarui {entry.updated_at})" for entry in entries]
             return LeadReply("order_status", "berhasil", f"Order milik {sender_id}:\n" + "\n".join(lines))
+
+        if command in {"/pelanggan_nama", "/pelanggan_profil"}:
+            if self.customer_book is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Customer Book belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            sender_id = fields[0] if fields else ""
+            display_name = fields[1] if len(fields) > 1 else ""
+            business = fields[2] if len(fields) > 2 else ""
+            if not sender_id or not display_name:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /pelanggan_nama <nomor_wa> | <nama> | <bisnis opsional>\n"
+                    "Contoh: /pelanggan_nama 628111222333 | Budi | Risol Mamqi",
+                )
+            try:
+                entry = self.customer_book.set_profile(sender_id, display_name=display_name, business=business)
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply(
+                "customer_book", "berhasil",
+                f"Profil {entry.sender_id} tersimpan: {entry.display_name}"
+                + (f" ({entry.business})" if entry.business else ""),
+            )
+
+        if command in {"/pelanggan_catat", "/pelanggan_order"}:
+            if self.customer_book is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Customer Book belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            header, _, tail = rest.partition(" ")
+            fields = [field.strip() for field in tail.split("|")]
+            sender_id = header.strip()
+            business = fields[0] if fields else ""
+            item_description = fields[1] if len(fields) > 1 else ""
+            amount_text = fields[2] if len(fields) > 2 else ""
+            if not sender_id or not business or not item_description:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /pelanggan_catat <nomor_wa> <bisnis> | <item> | <harga opsional>\n"
+                    "Contoh: /pelanggan_catat 628111222333 Risol Mamqi | Risol isi ayam x10 | 50000",
+                )
+            amount = None
+            if amount_text:
+                digits_only = re.sub(r"[^0-9]", "", amount_text)
+                if not digits_only:
+                    return LeadReply("lead", "format_salah", "Harga harus berupa angka, mis. 50000 atau Rp 50.000.")
+                amount = int(digits_only)
+            try:
+                entry = self.customer_book.record_order(
+                    sender_id, business, item_description, amount=amount, created_by=f"admin:{self.admin_channel}",
+                )
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            harga_note = f", Rp{entry.amount:,}".replace(",", ".") if entry.amount is not None else ""
+            return LeadReply(
+                "customer_book", "berhasil",
+                f"Order {entry.id} milik {entry.sender_id} tercatat: {entry.item_description}{harga_note}",
+            )
+
+        if command in {"/pelanggan_riwayat", "/pelanggan_lihat"}:
+            if self.customer_book is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Customer Book belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            sender_id = parts[1].strip() if len(parts) > 1 else ""
+            if not sender_id:
+                return LeadReply("lead", "format_salah", "Format: /pelanggan_riwayat <nomor_wa>")
+            customer = self.customer_book.get_customer(sender_id)
+            orders = self.customer_book.list_orders_for_customer(sender_id)
+            if customer is None and not orders:
+                return LeadReply("customer_book", "berhasil", f"Belum ada data tercatat untuk {sender_id}.")
+            lines = []
+            if customer is not None:
+                nama = customer.display_name or "(nama belum diisi)"
+                bisnis = customer.business or "(bisnis belum diisi)"
+                lines.append(f"Profil: {nama} — {bisnis}")
+                lines.append(f"Kontak pertama: {customer.first_seen_at}, terakhir: {customer.last_seen_at}")
+            if orders:
+                lines.append("Riwayat order:")
+                for entry in orders:
+                    harga_note = f", Rp{entry.amount:,}".replace(",", ".") if entry.amount is not None else ""
+                    lines.append(f"- {entry.id} ({entry.business}): {entry.item_description}{harga_note} [{entry.status}]")
+            else:
+                lines.append("Belum ada order tercatat.")
+            return LeadReply("customer_book", "berhasil", "\n".join(lines))
+
+        if command in {"/pelanggan_ringkasan", "/pelanggan_omzet"}:
+            if self.customer_book is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Customer Book belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            business = parts[1].strip() if len(parts) > 1 else ""
+            if not business:
+                return LeadReply("lead", "format_salah", "Format: /pelanggan_ringkasan <bisnis>")
+            summary = self.customer_book.summary_by_business(business)
+            omzet_text = f"Rp{summary['total_omzet']:,}".replace(",", ".")
+            return LeadReply(
+                "customer_book", "berhasil",
+                f"Ringkasan {business}: {summary['total_order']} order tercatat, total omzet {omzet_text}.",
+            )
+
+        if command in {"/kompres_pdf_status", "/kompresi_pdf_status"}:
+            if self.pdf_compressor is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kompresi PDF belum tersedia pada runtime ini.")
+            return LeadReply("pdf_compressor", "berhasil", self.pdf_compressor.status_text)
 
         if command in {"/konten_baru", "/konten_baru_draft"}:
             if self.content_studio is None:
@@ -662,6 +795,15 @@ class LeadAgent:
             "Maaf, saya di sini khusus membantu kebutuhan layanan kami saja, jadi belum bisa "
             "menanggapi hal itu. Ada kebutuhan terkait layanan kami yang bisa saya bantu?"
         ),
+        # Fitur kompresi PDF (app/pdf_compressor.py) — pelanggan diberi tahu proaktif
+        # kalau bertanya soal ini, bukan cuma tersedia diam-diam. Alur sungguhan (kirim
+        # file -> sebutkan target KB/MB) ditangani terpisah di
+        # _handle_customer_message_inner, teks ini hanya balasan info sebelum file
+        # benar-benar dikirim.
+        "info_kompres_pdf": (
+            "Bisa! Kirim file PDF-nya ke sini, lalu sebutkan mau dikompres jadi berapa "
+            "(contoh: 500 KB atau 1 MB), nanti langsung saya proseskan."
+        ),
     }
 
     # --- Kata kunci intent pelanggan (fallback fail-safe, dipakai saat AI-first di
@@ -685,6 +827,13 @@ class LeadAgent:
     )
     _CUSTOMER_FAQ_WORDS = (
         "jam buka", "jam operasional", "lokasi", "alamat", "cara pesan", "cara order", "cara pemesanan",
+    )
+    # Fitur kompresi PDF (app/pdf_compressor.py) — dicek SEBELUM kata kunci dokumen di
+    # bawah supaya "kompres pdf tugas saya" tidak salah diarahkan ke sesi pembuatan
+    # dokumen baru (buat_dokumen_pelanggan).
+    _CUSTOMER_PDF_COMPRESS_WORDS = (
+        "kompres pdf", "kompres file pdf", "compress pdf", "perkecil ukuran pdf", "perkecil pdf",
+        "kecilkan pdf", "kecilkan ukuran pdf", "pdf kegedean", "pdf terlalu besar", "pdf kebesaran",
     )
     # Sama seperti `document_words` di router admin (lihat handle_admin_message di atas),
     # tapi dicek SETELAH kata harga/status supaya guardrail hallucination-prevention tetap
@@ -731,6 +880,8 @@ class LeadAgent:
             action_type = "kirim_estimasi_harga_standar"
         elif any(word in lowered for word in cls._CUSTOMER_FAQ_WORDS):
             action_type = "jawab_faq"
+        elif any(word in lowered for word in cls._CUSTOMER_PDF_COMPRESS_WORDS):
+            action_type = "info_kompres_pdf"
         elif any(word in lowered for word in cls._CUSTOMER_DOCUMENT_WORDS):
             action_type = "buat_dokumen_pelanggan"
         elif is_off_topic(lowered):
@@ -767,23 +918,108 @@ class LeadAgent:
             self._customer_documents[sender_id] = agent
         return agent
 
+    # Ambang ukuran PDF yang dianggap "besar" — di atas ini, Nara proaktif
+    # menyebut bahwa PDF-nya bisa dikompres lebih kecil (app/pdf_compressor.py)
+    # begitu file makalah selesai dikirim. Di bawah/sama dengan ambang ini TIDAK
+    # disebut sama sekali, supaya tidak jadi info berisik untuk file yang memang
+    # sudah ringan.
+    _PDF_COMPRESS_HINT_THRESHOLD_BYTES = 5 * 1024 * 1024
+
+    def _maybe_append_pdf_compress_hint(self, text: str, pdf_path: str) -> str:
+        """Tambahkan ajakan kompresi ke teks balasan kalau PDF yang baru dikirim
+        cukup besar DAN fitur kompresinya benar-benar tersedia di runtime ini —
+        tidak pernah menawarkan sesuatu yang tidak bisa dipenuhi. `text` dikembalikan
+        apa adanya kalau salah satu syarat itu tidak terpenuhi."""
+        if self.pdf_compressor is None:
+            return text
+        try:
+            size_bytes = Path(pdf_path).stat().st_size
+        except OSError:
+            return text
+        if size_bytes <= self._PDF_COMPRESS_HINT_THRESHOLD_BYTES:
+            return text
+        size_mb = size_bytes / (1024 * 1024)
+        return (
+            f"{text}\n\nFile PDF-nya sekitar {size_mb:.1f}MB. Kalau butuh versi yang lebih "
+            "ringan untuk dikirim/disimpan, tinggal bilang mau dikompres jadi berapa KB."
+        )
+
     def _continue_customer_document(self, document: DocumentAgent, sender_id: str, raw: str) -> LeadReply:
         """Serahkan giliran percakapan ke Document Agent (Nara) memakai pedoman
         penomoran/format yang sama seperti admin (`skills/document_academic/`,
         `policies/document_format_policy.md`). Saat file Word final selesai dibuat,
         catat `unggah_file_ke_pelanggan` ke Approval Gate (auto-send rutin, tetap
         wajib tercatat di audit log) dan sertakan path file di `LeadReply` supaya
-        adapter channel (mis. `WhatsAppCustomerAdapter`) tahu harus mengirim lampiran."""
+        adapter channel (mis. `WhatsAppCustomerAdapter`) tahu harus mengirim lampiran.
+
+        Mengirim DOCX DAN PDF sekaligus (kalau PDF-nya berhasil dibuat — lihat
+        `app/document_engine.py`, tidak semua server punya LibreOffice/Word) supaya
+        pelanggan tidak harus minta PDF terpisah; PDF yang besar sekalian ditawari
+        kompresi lewat `_maybe_append_pdf_compress_hint`."""
         result = document.handle(raw)
-        attachment_path = ""
+        attachment_paths: list[str] = []
+        reply_text = result.text
         if result.status == "final_ready" and document.final_docx_path:
             self.approval_gate.request(
                 "unggah_file_ke_pelanggan",
                 requested_by=f"customer:{sender_id}",
                 summary=f"Kirim file makalah selesai ke pelanggan {sender_id}",
             )
-            attachment_path = document.final_docx_path
-        return LeadReply("document", result.status, result.text, attachment_path)
+            attachment_paths.append(document.final_docx_path)
+            pdf_path = document.final_pdf_path
+            if pdf_path:
+                attachment_paths.append(pdf_path)
+                reply_text = self._maybe_append_pdf_compress_hint(reply_text, pdf_path)
+        return LeadReply("document", result.status, reply_text, tuple(attachment_paths))
+
+    # Target ukuran WAJIB menyebut satuan eksplisit ("kb"/"mb") — sengaja tidak
+    # menerima angka polos begitu saja supaya nomor telepon/angka lain di pesan
+    # pelanggan tidak salah ditafsirkan sebagai target ukuran kompresi PDF.
+    _TARGET_SIZE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(kb|mb)\b", re.IGNORECASE)
+
+    @classmethod
+    def _parse_target_size_bytes(cls, text: str) -> int | None:
+        """Ambil target ukuran kompresi PDF dari pesan pelanggan, mis. "500kb",
+        "500 KB", "1 mb", "0,5MB" — lihat `app/pdf_compressor.py` untuk pemakaiannya."""
+        match = cls._TARGET_SIZE_RE.search(text or "")
+        if not match:
+            return None
+        try:
+            value = float(match.group(1).replace(",", "."))
+        except ValueError:
+            return None
+        multiplier = 1024 * 1024 if match.group(2).casefold() == "mb" else 1024
+        size_bytes = int(value * multiplier)
+        return size_bytes if size_bytes > 0 else None
+
+    def _run_pdf_compression(self, sender_id: str, source_path: str, target_bytes: int) -> LeadReply:
+        """Jalankan kompresi sungguhan (`app/pdf_compressor.py`) dan laporkan hasilnya
+        apa adanya ke pelanggan — termasuk jujur kalau target tidak tercapai persis
+        (lihat docstring `PdfCompressor.compress_to_target`, prinsip "tidak berpura-
+        pura selalu bisa tepat sasaran"). File hasil dikirim lewat `attachment_paths`
+        di `LeadReply`, sama seperti file makalah dari Document Agent."""
+        if self.pdf_compressor is None:
+            return LeadReply("pdf_compressor", "belum_tersedia", "Fitur kompresi PDF belum aktif di server ini.")
+        result = self.pdf_compressor.compress_to_target(source_path, target_bytes, order_id=f"WA-{sender_id}")
+        if result.status != "berhasil":
+            return LeadReply(
+                "pdf_compressor", "gagal",
+                result.warning or "Kompresi PDF gagal diproses. Silakan coba lagi atau hubungi admin.",
+            )
+        original_kb = result.original_size_bytes // 1024
+        achieved_kb = result.compressed_size_bytes // 1024
+        if result.achieved:
+            text = f"Selesai! PDF berhasil dikompres dari {original_kb}KB menjadi {achieved_kb}KB."
+            if result.warning:
+                text += f" {result.warning}"
+        else:
+            text = f"PDF sudah dikompres dari {original_kb}KB menjadi {achieved_kb}KB. {result.warning}"
+        self.approval_gate.request(
+            "unggah_file_ke_pelanggan",
+            requested_by=f"customer:{sender_id}",
+            summary=f"Kirim hasil kompresi PDF ke pelanggan {sender_id}",
+        )
+        return LeadReply("pdf_compressor", "berhasil", text, (result.output_path,))
 
     def _augment_reply_with_real_data(self, action_type: str, raw: str, sender_id: str, reply_text: str) -> str:
         """Ganti balasan generik dengan data ASLI dari `price_list`/`order_status` kalau
@@ -807,24 +1043,38 @@ class LeadAgent:
 
     def handle_customer_message(
         self, sender_id: str, message: str, *, has_attachment: bool = False, channel: str = "whatsapp",
+        attachment_path: str = "",
     ) -> LeadReply:
         """Bungkus `_handle_customer_message_inner` dengan Interaction Log (Fase 5 —
-        Evaluasi & Observability, `docs/roadmap_customer_channel_v1.md`), supaya setiap
-        interaksi produksi dengan pelanggan tersimpan untuk ditinjau ulang, tanpa
-        mengubah alur/hasil balasan itu sendiri. Hanya jalan kalau `interaction_log`
-        diisi (opsional, default nonaktif)."""
+        Evaluasi & Observability, `docs/roadmap_customer_channel_v1.md`) dan Customer
+        Book (`app/customer_book.py`), supaya setiap interaksi produksi dengan
+        pelanggan tersimpan untuk ditinjau ulang dan setiap pelanggan tercatat
+        kontaknya, tanpa mengubah alur/hasil balasan itu sendiri. Keduanya opsional
+        (default nonaktif) dan hanya jalan kalau storenya diisi.
+
+        `attachment_path` kosong untuk pesan tanpa lampiran ATAU lampiran yang belum
+        lolos pemeriksaan `app/attachment_guard.py` — diisi WhatsAppCustomerAdapter
+        hanya untuk file yang sudah aman disimpan di quarantine (lihat
+        `app/whatsapp.py` `_handle_attachment_message`), supaya fitur yang butuh isi
+        file pelanggan (mis. kompresi PDF) bisa mengaksesnya."""
         reply = self._handle_customer_message_inner(
-            sender_id, message, has_attachment=has_attachment, channel=channel,
+            sender_id, message, has_attachment=has_attachment, channel=channel, attachment_path=attachment_path,
         )
         if self.interaction_log is not None:
             agent = "nara" if reply.target == "document" else "taqi"
             self.interaction_log.log(
                 agent, sender_id, channel, message or "", reply.text, status=reply.status,
             )
+        if self.customer_book is not None:
+            # Hanya mencatat first_seen/last_seen/total_contacts — TIDAK PERNAH
+            # menebak nama/bisnis pelanggan dari isi pesan. Lihat docstring
+            # `CustomerBookStore.touch`.
+            self.customer_book.touch(sender_id, channel=channel)
         return reply
 
     def _handle_customer_message_inner(
         self, sender_id: str, message: str, *, has_attachment: bool = False, channel: str = "whatsapp",
+        attachment_path: str = "",
     ) -> LeadReply:
         """Jalur pelanggan: WAJIB melalui Kill Switch, lalu Trust Layer, lalu Approval
         Gate, terpisah total dari `handle_admin_message`. Lihat Fase 3 di
@@ -869,6 +1119,35 @@ class LeadAgent:
                 "Sebelum saya lanjutkan, boleh diceritakan dulu jenis layanan yang Anda butuhkan, "
                 "beserta jumlah/ukuran dan tenggat waktunya?",
             )
+
+        # Kompresi PDF (app/pdf_compressor.py): pelanggan kirim file PDF (lewat
+        # attachment_path, sudah lolos app/attachment_guard.py) -> tanya/simpan target
+        # ukuran KB/MB kalau belum disebut di caption -> kompres begitu targetnya
+        # diketahui (bisa langsung di pesan yang sama atau balasan berikutnya).
+        # Dicek SEBELUM sesi dokumen aktif supaya tidak pernah salah diarahkan ke
+        # Document Agent (Nara) hanya karena pelanggan kebetulan juga sedang punya
+        # sesi dokumen berjalan.
+        if attachment_path and self.pdf_compressor is not None and Path(attachment_path).suffix.casefold() == ".pdf":
+            self.approval_gate.request(
+                "kompres_pdf_pelanggan",
+                requested_by=f"customer:{sender_id}",
+                summary=f"[{trust.category}] PDF diterima dari {sender_id} untuk dikompres.",
+            )
+            target_bytes = self._parse_target_size_bytes(raw)
+            if target_bytes is not None:
+                return self._run_pdf_compression(sender_id, attachment_path, target_bytes)
+            self._pending_pdf_compressions[sender_id] = attachment_path
+            return LeadReply(
+                "pdf_compressor", "menunggu_target_ukuran",
+                "File PDF sudah diterima. Mau dikompres jadi berapa? (contoh: 500 KB atau 1 MB)",
+            )
+
+        pending_pdf = self._pending_pdf_compressions.get(sender_id)
+        if pending_pdf and not has_attachment:
+            target_bytes = self._parse_target_size_bytes(raw)
+            if target_bytes is not None:
+                del self._pending_pdf_compressions[sender_id]
+                return self._run_pdf_compression(sender_id, pending_pdf, target_bytes)
 
         # Pelanggan yang sudah punya sesi dokumen aktif (brief sedang diisi, kerangka
         # menunggu persetujuan, dst.) langsung diteruskan ke Document Agent tanpa

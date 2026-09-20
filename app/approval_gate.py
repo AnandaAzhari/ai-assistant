@@ -65,6 +65,10 @@ _ACTION_LEVELS: dict[str, int] = {
     # pelanggan (WhatsApp dst.) lewat Document Agent — lihat app/lead.py
     # `_classify_customer_intent` dan `_continue_customer_document`.
     "buat_dokumen_pelanggan": LEVEL_CONTROLLED_WRITE,
+    # Pelanggan mengirim PDF untuk dikompres (app/pdf_compressor.py) — sama seperti
+    # buat_dokumen_pelanggan, mengolah file yang sudah lolos app/attachment_guard.py,
+    # bukan aksi eksternal berisiko, jadi auto-jalan.
+    "kompres_pdf_pelanggan": LEVEL_CONTROLLED_WRITE,
     # Level 3 — External Action, auto-send diizinkan (lihat approval_policy.md "Auto-Send yang Diizinkan")
     "kirim_salam": LEVEL_EXTERNAL_ACTION,
     "jawab_faq": LEVEL_EXTERNAL_ACTION,
@@ -78,6 +82,9 @@ _ACTION_LEVELS: dict[str, int] = {
     # balasan pengalihan sopan saat pesan di luar topik layanan usaha — bukan aksi
     # berisiko, cukup auto-send rutin seperti jawab_faq/kirim_salam.
     "di_luar_topik": LEVEL_EXTERNAL_ACTION,
+    # Balasan info fitur kompresi PDF (app/lead.py `_CUSTOMER_REPLY_TEXT`) — teks
+    # deterministik, tidak beda risikonya dari jawab_faq.
+    "info_kompres_pdf": LEVEL_EXTERNAL_ACTION,
     "ubah_status_order": LEVEL_EXTERNAL_ACTION,
     "unggah_file_ke_pelanggan": LEVEL_EXTERNAL_ACTION,
     # Level 3 — External Action, wajib approval (lihat approval_policy.md "Wajib Approval Admin")
@@ -106,7 +113,7 @@ _ACTION_LEVELS: dict[str, int] = {
 # selalu berhenti dan minta approval meski policy-nya sama-sama "External Action".
 _ROUTINE_AUTO_SEND = {
     "kirim_salam", "jawab_faq", "minta_detail_order", "konfirmasi_file_diterima",
-    "di_luar_topik",
+    "di_luar_topik", "info_kompres_pdf",
     "kirim_estimasi_harga_standar", "kirim_status_antrean", "kirim_pengingat_status",
     "tolak_spam_sopan", "ubah_status_order", "unggah_file_ke_pelanggan",
 }

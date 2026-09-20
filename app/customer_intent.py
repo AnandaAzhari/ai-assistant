@@ -42,6 +42,7 @@ ALLOWED_ACTIONS = (
     "buat_dokumen_pelanggan",
     "minta_detail_order",
     "di_luar_topik",
+    "info_kompres_pdf",
 )
 
 INTENT_PROMPT = """Kamu adalah pengklasifikasi maksud pesan pelanggan Taqi AI (jasa cetak/dokumen).
@@ -66,6 +67,8 @@ Tugasmu HANYA menentukan satu action_type yang paling sesuai dari daftar berikut
   layanan dokumen/print di sini, mis. photobooth/Pixiva.ID, Risol Mamqi, atau servis
   komputer/laptop). Pilih ini, BUKAN minta_detail_order, kalau pesan tidak ada kaitan sama
   sekali dengan kebutuhan layanan dokumen/print Taqi Desk.
+- info_kompres_pdf: pelanggan bertanya/menyebut ingin mengecilkan ukuran file PDF
+  (kompres, perkecil, kecilkan ukuran PDF), belum tentu sudah mengirim filenya.
 
 Jika pesan menyebut harga/biaya SEKALIGUS jelas ingin memulai pembuatan dokumen, pilih
 buat_dokumen_pelanggan (proses pembuatannya yang lebih penting; harga tetap tidak pernah

@@ -17,10 +17,12 @@ class FakeCustomerDocumentAgent:
     sungguhan — supaya tes jembatan WA->Document Agent tetap cepat dan terisolasi
     dari `app/document_agent.py`."""
 
-    def __init__(self, *, session_active: bool = False, responses=None, final_docx_path: str = ""):
+    def __init__(self, *, session_active: bool = False, responses=None, final_docx_path: str = "",
+                 final_pdf_path: str = ""):
         self.session_active = session_active
         self._responses = list(responses or [])
         self.final_docx_path = final_docx_path
+        self.final_pdf_path = final_pdf_path
         self.calls: list[str] = []
 
     def handle(self, raw: str) -> DocumentResult:
@@ -221,8 +223,63 @@ class HandleCustomerMessageDocumentBridgeTests(unittest.TestCase):
         )
         reply = lead.handle_customer_message("628ccc", "Baik kak, makalahnya lanjutkan saja sampai selesai ya")
         self.assertEqual(reply.status, "final_ready")
-        self.assertEqual(reply.attachment_path, "/tmp/makalah-628ccc.docx")
+        # PDF belum dibuat (final_pdf_path kosong) -> cuma DOCX yang dilampirkan.
+        self.assertEqual(reply.attachment_paths, ("/tmp/makalah-628ccc.docx",))
         self.assertIn("unggah_file_ke_pelanggan", self._logged_action_types("customer:628ccc"))
+
+    def test_final_ready_document_with_pdf_attaches_both_files(self):
+        pdf_path = Path(self.temp.name) / "makalah-628ddd.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 kecil")  # jauh di bawah ambang 5MB
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=True,
+            responses=[DocumentResult("final_ready", "File makalah sudah tersedia.")],
+            final_docx_path="/tmp/makalah-628ddd.docx",
+            final_pdf_path=str(pdf_path),
+        )
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document, pdf_compressor=object(),
+        )
+        reply = lead.handle_customer_message("628ddd", "Baik kak, makalahnya lanjutkan saja sampai selesai ya")
+        self.assertEqual(reply.attachment_paths, ("/tmp/makalah-628ddd.docx", str(pdf_path)))
+        # File kecil (di bawah ambang) -> tidak perlu ditawari kompresi.
+        self.assertNotIn("dikompres", reply.text)
+
+    def test_final_ready_document_with_large_pdf_offers_compression(self):
+        pdf_path = Path(self.temp.name) / "makalah-628eee.pdf"
+        pdf_path.write_bytes(b"0" * (6 * 1024 * 1024))  # 6MB, di atas ambang 5MB
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=True,
+            responses=[DocumentResult("final_ready", "File makalah sudah tersedia.")],
+            final_docx_path="/tmp/makalah-628eee.docx",
+            final_pdf_path=str(pdf_path),
+        )
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document, pdf_compressor=object(),
+        )
+        reply = lead.handle_customer_message("628eee", "Baik kak, makalahnya lanjutkan saja sampai selesai ya")
+        self.assertEqual(reply.attachment_paths, ("/tmp/makalah-628eee.docx", str(pdf_path)))
+        self.assertIn("dikompres", reply.text)
+        self.assertIn("6.0MB", reply.text)
+
+    def test_large_pdf_offers_no_compression_hint_when_compressor_not_configured(self):
+        pdf_path = Path(self.temp.name) / "makalah-628fff.pdf"
+        pdf_path.write_bytes(b"0" * (6 * 1024 * 1024))
+        fake_document = FakeCustomerDocumentAgent(
+            session_active=True,
+            responses=[DocumentResult("final_ready", "File makalah sudah tersedia.")],
+            final_docx_path="/tmp/makalah-628fff.docx",
+            final_pdf_path=str(pdf_path),
+        )
+        # pdf_compressor TIDAK diisi -> jangan menawarkan sesuatu yang tidak bisa dipenuhi.
+        lead = LeadAgent(
+            trust_layer=self.trust_layer, approval_gate=self.approval_gate,
+            document_factory=lambda sender_id: fake_document,
+        )
+        reply = lead.handle_customer_message("628fff", "Baik kak, makalahnya lanjutkan saja sampai selesai ya")
+        self.assertEqual(reply.attachment_paths, ("/tmp/makalah-628fff.docx", str(pdf_path)))
+        self.assertNotIn("dikompres", reply.text)
 
     def test_price_question_wins_over_document_keyword_in_fallback_router(self):
         lead = LeadAgent(trust_layer=self.trust_layer, approval_gate=self.approval_gate)

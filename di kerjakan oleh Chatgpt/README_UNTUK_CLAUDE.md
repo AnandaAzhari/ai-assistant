@@ -22,10 +22,16 @@ dan versi repository terbaru sebelum mengedit; jangan menimpa pekerjaan mereka.
 - Repository: `AnandaAzhari/ai-assistant`.
 - Acuan awal harga/pembayaran: `f49aff17e764c9bc32e5be493c5038cf52dfe307`.
 - Acuan penambahan antrean: `c1a96c25f08d2cfcf532db3023634c7951b5c37a`.
+- Perbaikan format dimulai dari demo `be04efe2d165b9a2e7af198d20b9db8bc48c850d`.
+- Main terbaru diperiksa pada `2b58fd6b704dfc3d7f718f4be4cf59e84a3f5297`.
+  Commit itu sudah menggabungkan payment gate utama. Semua perubahan dari pihak
+  lain dipertahankan; pembaruan ini hanya menyentuh folder prototipe.
 - `app/finance.py`: ledger keuangan lokal, belum rekonsiliasi bank atau gateway.
 - `app/order_status.py`: status pesanan yang diisi admin.
 - `app/customer_book.py`: catatan pelanggan/order yang berbeda dari ledger.
-- `app/lead.py`: routing admin/pelanggan; belum alur tagihan pembayaran.
+- `app/lead.py`: routing admin/pelanggan. Payment gate utama kini ada pada branch
+  main terbaru; bandingkan `app/payment_gate.py` dan `app/pdf_watermark.py` sebelum
+  menyatukan rancangan. Jangan membuat dua sumber kebenaran pembayaran.
 - `whatsapp_main.py`: webhook khusus Meta; bukan endpoint pembayaran.
 - `app/web_admin.py`: API admin; jangan membukanya tanpa autentikasi untuk gateway.
 - `app/telegram.py`: `TelegramAdminAdapter`, `AdminIdentity`, pengiriman pesan,
@@ -39,7 +45,12 @@ bukan klaim bahwa semua file akan selalu sama.
 
 ## Cara menjalankan dan bagian yang dapat dipakai
 
-Python 3.11+, standard library saja. Dari folder ini:
+Python 3.11+. Harga/pembayaran memakai standard library. Pekerja format dan tes
+format memerlukan `pypdf` dari `requirements_format.txt`. Di Windows, jalankan
+`SIAPKAN_FORMAT.bat` dan gunakan peluncur `.bat`; peluncur memilih `.venv` otomatis.
+Konversi PDF memakai Microsoft Word desktop. Untuk Linux pengembangan, pasang
+requirements pada environment uji dan gunakan LibreOffice seperti engine proyek.
+Dari folder ini, dengan interpreter environment tersebut:
 
 ```bash
 python -B -m unittest discover -s tests -p 'test_*.py' -v
@@ -124,10 +135,34 @@ dari 15 menit perlu memakai claim/heartbeat/complete dengan koneksi heartbeat
 terpisah, atau scheduler yang memperpanjang lease selama pekerjaan hidup.
 Demo belum mempunyai daemon, timer heartbeat, atau pengirim notifikasi otomatis.
 
-`OfflineDemoWorker` menghasilkan dokumen pendek tanpa AI/dependensi tambahan.
-DOCX memakai footnote asli; PDF dibuat sebagai fixture terpisah dengan teks
-serupa. PDF itu bukan konversi tata letak DOCX. Watermark hanya penanda visual.
-Nomor BAB/subbab pada fixture adalah teks contoh, bukan mesin perapian otomatis.
+`ProjectFormatWorker` adalah pekerja menu pengguna. Ia memuat langsung modul
+`app/document_engine.py` melalui importlib, memakai `MakalahSpec` dan `DocumentSection`
+asli, serta memberikan root build sementara di `runtime/format_builds`. Tidak ada
+pemanggilan `from_env()`, startup bot, database utama, atau provider AI. Engine proyek
+harus tetap modul tanpa startup saat di-import; periksa lagi bila engine berubah.
+
+A4, margin, style, cover, section numbering, heading, serta field daftar isi
+berasal dari engine yang sama. `project_format.py` menambahkan satu footnote native
+untuk catatan uji internal serta format bibliografi kebijakan repository. Ini
+bukan implementasi penuh CitationEngine: sitasi akademik pelanggan tetap wajib
+melalui sumber terverifikasi dan alur sitasi Nara yang sebenarnya.
+
+PDF dibuat oleh `DocumentEngine.convert_to_pdf()`. Di Windows Word COM memperbarui
+field/daftar isi, menyimpan DOCX, lalu mengekspor PDF. `demo_toc.py` menolak hasil
+Windows bila placeholder daftar isi belum terisi. Untuk pemeriksaan Linux, helper
+mengisi cache field TOC khusus contoh ini berdasarkan posisi heading dalam PDF,
+kemudian mengonversi ulang sampai nomor stabil, maksimal tiga kali. Helper tersebut
+bukan pembuat TOC generik untuk semua makalah atau pengganti pembaruan field Word.
+
+`pdf_preview.make_preview()` memakai pypdf untuk menyalin PDF final dan menambahkan
+watermark pada setiap halaman. Isi dan ukuran halaman dipertahankan; file final
+sumber tidak ditimpa. Watermark hanya penanda visual. Fungsi ini dapat diberikan
+kepada `PreparedNaraWorker` saat integrasi dan tetap perlu diuji pada PDF Nara.
+`ACUAN_FORMAT.json` mencatat hash engine, dua kebijakan, dan dua pedoman akademik.
+
+`OfflineDemoWorker` lama dipertahankan sebagai fixture unit test pembayaran dan
+antrean. Ia tidak dipakai peluncur pengguna dan tidak boleh dipakai untuk hasil
+pelanggan. Tidak ada migrasi yang menulis ulang file atau saldo demo lama.
 
 `artifacts.py` memeriksa lokasi file, ukuran, struktur XML/DOCX dasar, pasangan
 referensi footnote, penanda PDF, dan hash SHA-256. Pemeriksaan PDF ini bukan
@@ -283,9 +318,9 @@ Dokumentasi yang perlu diperiksa ulang ketika membangun adapter:
 
 ### 4. Pratinjau, revisi, dan pengujian integrasi
 
-- Tahap kedua sudah mempunyai PDF fixture ber-watermark. Bangun dan uji pembuat
-  watermark untuk PDF keluaran Nara; jangan memakai referensi teks dari demo lama
-  atau menganggap watermark mencegah penyalinan isi.
+- Pembuat pratinjau `pdf_preview.make_preview()` sudah memberi watermark pada
+  PDF hasil konversi DOCX. Uji lagi pada keluaran Nara; jangan menganggap watermark
+  mencegah penyalinan isi atau menghubungkannya diam-diam ke runtime utama.
 - Gerbang final harus melindungi semua jalur: WhatsApp, tautan unduh, dan alat
   admin yang relevan. Pertahankan isolasi data pelanggan.
 - Terapkan batas waktu revisi bila disepakati; belum ada timer di prototipe.
@@ -301,4 +336,7 @@ Belum ada adapter Midtrans live/sandbox, API/layar pelanggan, autentikasi baru,
 penghubung TaqiDesk, posting ledger Laras, integrasi watermark keluaran Nara,
 pengiriman file, revisi berversi pada antrean, refund, batas revisi berbasis waktu,
 cetak/jilid, fee provider, atau pajak.
-Tidak ada penggunaan internet oleh kode demo maupun tesnya.
+Tidak ada penggunaan internet oleh kode demo maupun tesnya setelah dependensi
+tersedia. `SIAPKAN_FORMAT.bat` membutuhkan internet untuk pemasangan paket.
+Hasil verifikasi: 94 tes lulus dan 7 halaman contoh diperiksa; lihat laporan
+untuk batas pengujian Microsoft Word COM di Windows.

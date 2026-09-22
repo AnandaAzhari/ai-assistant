@@ -5,6 +5,16 @@ tagihan Rp60.000. Tahap kedua menguji apa yang terjadi setelah pembayaran:
 pekerjaan masuk antrean, hasil diperiksa, pratinjau disetujui, lalu file final
 dilepas. Semua pembayaran tetap simulasi dan dokumennya contoh singkat tanpa AI.
 
+## Persiapan format
+
+Gunakan checkout repository lengkap, Python 3.11+, dan Microsoft Word desktop.
+Di folder ini, jalankan **`SIAPKAN_FORMAT.bat` sekali** untuk memasang `pypdf`
+pada Python terpisah di `.venv`. Hanya pemasangan paket yang memerlukan internet.
+Folder contoh tetap memakai data demo sendiri.
+
+Jika sebelumnya contoh sudah selesai, biarkan hasil lama tersimpan. Pembaruan kode
+tidak menulis ulang dokumen lama. Percobaan otomatis berikut membuat file baru.
+
 ## Percobaan otomatis
 
 Buka `JALANKAN_CONTOH_ANTREAN.bat`. Tidak perlu memasukkan perintah Telegram.
@@ -21,6 +31,19 @@ Salin lokasi folder hasil dari terminal ke alamat File Explorer. Di sana ada
 `hasil.docx`, `hasil.pdf`, dan `BUKTI_PENYERAHAN.json`. Lokasi `pratinjau.pdf`
 juga tercetak di terminal. Word memiliki footnote asli. PDF pratinjau memiliki
 watermark `PRATINJAU - SIMULASI`; PDF final tidak memiliki watermark tersebut.
+
+Periksa hasil yang baru:
+
+1. Sampul, kata pengantar, daftar isi, BAB I–III, dan daftar pustaka terpisah.
+2. A4, Times New Roman 12, spasi 1,5; margin kiri 4 cm, lainnya 3 cm.
+3. BAB di tengah; subbab berurutan A., 1., a., dengan indentasi sesuai tingkat.
+4. Sampul tanpa nomor; halaman awal i/ii; BAB I mulai 1, lalu berlanjut.
+5. Daftar isi berisi nomor halaman, dengan Heading 4 tidak ikut tampil.
+6. Footnote superscript berada di bawah halaman; daftar pustaka memakai hanging indent.
+7. Tata letak PDF final sesuai Word; pratinjau mempertahankan halaman PDF tersebut.
+
+`ACUAN_FORMAT.json` berada bersama pratinjau di folder `private`, untuk pemeriksaan
+Claude. File itu mencatat versi isi engine dan kebijakan format melalui hash.
 
 Contoh otomatis membuat database baru di `runtime/samples/` setiap kali
 dijalankan. Persetujuan pratinjau juga disimulasikan oleh program. Untuk mencoba
@@ -76,7 +99,11 @@ versi hasil atau revisi dokumen setelah pratinjau dibuat.
 
 Jika pembaca PDF tidak terbuka, buka lokasi yang dicetak melalui File Explorer.
 Jika Python tidak ditemukan, gunakan Python 3.11+ yang menjalankan AI Assistant.
-Peluncur Windows tidak memerlukan paket Python tambahan.
+Jika muncul pesan paket `pypdf` tidak tersedia, jalankan `SIAPKAN_FORMAT.bat`.
+Jika konversi PDF atau pembaruan daftar isi gagal, buka Microsoft Word sekali
+untuk memastikan instalasinya dapat digunakan, kemudian simpan pesan error untuk
+diperiksa. Jangan memaksa melepas hasil yang masih berstatus blocked. Menu 12 dapat
+mencoba ulang setelah masalah diperbaiki, atau buat contoh otomatis baru.
 
 ## Batas tahap ini
 
@@ -85,8 +112,9 @@ Peluncur Windows tidak memerlukan paket Python tambahan.
 - Tidak ada bot Telegram kedua, pembacaan token, atau pemanggilan Nara/Midtrans.
   Menjalankan dua peluncur antrean ini tidak memulai bot utama.
 - File final tersedia di komputer. Status selesai bukan bukti terkirim ke pelanggan.
-- Pemeriksaan struktur dan hash belum menilai kebenaran sumber, konsistensi
-  penomoran akademik, mutu isi, atau tata letak makalah sebenarnya.
+- Format contoh memakai engine proyek dan mempunyai tes regresi format. Pemeriksa
+  hasil antrean tetap hanya memeriksa struktur dasar dan hash; kebenaran sumber,
+  mutu isi, serta tata letak semua kemungkinan brief belum dinilai otomatis.
 - Perapian file pelanggan dan revisi versi hasil belum masuk antrean tahap ini.
 
 Claude dapat membaca `README_UNTUK_CLAUDE.md` untuk menyambungkan modul ini ke

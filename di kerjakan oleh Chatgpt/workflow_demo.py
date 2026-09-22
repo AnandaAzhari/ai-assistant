@@ -11,12 +11,15 @@ from pathlib import Path
 from chatgpt_billing.pricing import QuoteRequest, make_quote
 from chatgpt_billing.telegram_admin import payment_summary
 from chatgpt_billing.workflow import Brief, JOB_LABELS, WorkflowStore
-from chatgpt_billing.workers import OfflineDemoWorker
+from chatgpt_billing.project_format import ProjectFormatWorker
 
 ROOT = Path(__file__).resolve().parent
 
 
-def create_example(store: WorkflowStore, title: str = 'Pemanfaatan AI untuk administrasi dokumen') -> str:
+DEFAULT_TITLE = 'Uji Format Makalah dan Antrean Pembayaran'
+
+
+def create_example(store: WorkflowStore, title: str = DEFAULT_TITLE) -> str:
     order = store.create_order(make_quote(QuoteRequest()), approved_by='operator-demo')
     store.accept_quote(order.order_id, actor='pelanggan-demo')
     store.register_brief(order.order_id, Brief(title), actor='pelanggan-demo')
@@ -51,16 +54,16 @@ def open_local(path: Path) -> None:
         print('Buka lokasi tersebut melalui pengelola file.')
 
 
-def sample(store: WorkflowStore) -> None:
+def sample(store: WorkflowStore, worker) -> None:
     order_id = create_example(store)
     print('Pesanan contoh baru:', order_id)
     if store.claim_next() is not None:
         raise ValueError('Skenario otomatis harus memakai database contoh kosong.')
     print('LULUS: pekerja ditahan sebelum DP.')
     pay(store, order_id, settle=False)
-    result = store.run_next(OfflineDemoWorker())
+    result = store.run_next(worker)
     if not result or result['state'] != 'review':
-        raise ValueError('Hasil gagal diperiksa: ' + str(result))
+        raise ValueError('Hasil gagal diperiksa: ' + (result['problem'] if result else 'Antrean kosong.'))
     print('Pratinjau:', store.preview(order_id))
     for label, approve in [('sebelum persetujuan', False), ('sebelum lunas', True)]:
         if approve:
@@ -79,7 +82,7 @@ def sample(store: WorkflowStore) -> None:
     print('File disalin lokal; belum dikirim ke pelanggan atau Telegram.')
 
 
-def interactive(store: WorkflowStore) -> None:
+def interactive(store: WorkflowStore, worker) -> None:
     current = None
     seen: dict[str, str] = {}
     print('Mulai dengan 1 untuk pesanan baru. Pesanan uji lama: pilih 2, lalu 10 untuk menambahkan brief.')
@@ -95,8 +98,8 @@ def interactive(store: WorkflowStore) -> None:
             if choice == '0':
                 return
             if choice == '1':
-                title = input('Judul contoh [Pemanfaatan AI untuk administrasi dokumen]: ').strip()
-                current = create_example(store, title or 'Pemanfaatan AI untuk administrasi dokumen')
+                title = input('Judul contoh [' + DEFAULT_TITLE + ']: ').strip()
+                current = create_example(store, title or DEFAULT_TITLE)
                 overview(store, current)
             elif choice == '2':
                 for order in store.list_orders():
@@ -105,7 +108,7 @@ def interactive(store: WorkflowStore) -> None:
                 store.get(selected)
                 current = selected
             elif choice == '4':
-                result = store.run_next(OfflineDemoWorker())
+                result = store.run_next(worker)
                 if result:
                     current = result['order_id']
                     print('Pekerjaan:', current, '|', JOB_LABELS[result['state']])
@@ -149,21 +152,23 @@ def interactive(store: WorkflowStore) -> None:
             print('TIDAK DIPROSES:', exc)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, worker_factory=None) -> int:
     parser = argparse.ArgumentParser(description='Antrean DP sampai file final - DEMO OFFLINE')
     parser.add_argument('--sample', action='store_true', help='Jalankan satu alur contoh otomatis')
     args = parser.parse_args(argv)
     print('=== DEMO ANTREAN: PEMBAYARAN SIMULASI, FILE CONTOH, TANPA AI/TELEGRAM ASLI ===')
-    print('Dokumen contoh singkat bukan makalah 10 halaman; harga tetap usulan uji.')
+    print('Format memakai DocumentEngine proyek; isi tetap contoh uji, bukan makalah AI 10 halaman.')
+    print('PDF dikonversi dari Word; di Windows memerlukan Microsoft Word dan paket pypdf.')
     store = None
     try:
+        worker = (worker_factory or ProjectFormatWorker)()
         if args.sample:
             # Tiap contoh otomatis terpisah dari pesanan interaktif pengguna.
             location = ROOT / 'runtime' / 'samples' / uuid.uuid4().hex
             store = WorkflowStore(location / 'demo.sqlite3', location / 'workflow')
         else:
             store = WorkflowStore(ROOT / 'runtime' / 'demo.sqlite3', ROOT / 'runtime' / 'workflow')
-        sample(store) if args.sample else interactive(store)
+        sample(store, worker) if args.sample else interactive(store, worker)
         return 0
     except (EOFError, KeyboardInterrupt):
         print('\nDemo ditutup. Data yang telah tersimpan tetap tersedia.')

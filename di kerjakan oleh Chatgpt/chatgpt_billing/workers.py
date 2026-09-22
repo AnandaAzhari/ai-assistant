@@ -92,7 +92,10 @@ def _docx(path: Path, paragraphs: list[str]) -> None:
 
 
 class OfflineDemoWorker:
-    """Menghasilkan fixture singkat; tidak memakai AI dan tidak memenuhi target halaman pesanan."""
+    """Fixture khusus unit test; bukan pembuat dokumen yang dipakai menu pengguna.
+
+    Demo pengguna memakai ProjectFormatWorker agar mengikuti engine proyek.
+    """
 
     def produce(self, item: WorkItem) -> ArtifactSet:
         paragraphs = [

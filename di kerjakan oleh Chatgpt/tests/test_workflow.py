@@ -407,7 +407,12 @@ class WorkflowCLITests(unittest.TestCase):
             runtime = copied / 'runtime'
             runtime.mkdir()
             (runtime / 'demo.sqlite3').write_text('not a demo database - must stay untouched')
-            result = subprocess.run([sys.executable, '-B', str(copied / 'workflow_demo.py'), '--sample'],
+            # Isolasi CLI/alur pembayaran; renderer proyek diuji terpisah.
+            bootstrap = ('import sys; sys.path.insert(0, sys.argv[1]); '
+                         'from workflow_demo import main; '
+                         'from chatgpt_billing.workers import OfflineDemoWorker; '
+                         'raise SystemExit(main(["--sample"], worker_factory=OfflineDemoWorker))')
+            result = subprocess.run([sys.executable, '-B', '-c', bootstrap, str(copied)],
                                     cwd=tmp, capture_output=True, text=True, encoding='utf-8', timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('ALUR SELESAI', result.stdout)

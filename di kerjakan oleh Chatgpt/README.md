@@ -11,12 +11,16 @@ pembuatan/pengiriman makalah sungguhan dari demo ini.
 ## Mulai di Windows
 
 Gunakan Python **3.11 atau lebih baru**, seperti proyek AI Assistant.
-Tidak perlu `pip install` untuk prototipe ini.
+Demo antrean memakai **Microsoft Word desktop** untuk konversi PDF di Windows,
+serta paket `pypdf` untuk membuat pratinjau. Jalankan `SIAPKAN_FORMAT.bat` sekali;
+paket dipasang pada `.venv` di folder percobaan ini. Pemasangan memerlukan internet.
+Demo pembayaran lama tetap memakai standard library.
 
 1. Ambil pembaruan repository sesuai `CARA_GIT_PULL.md`.
-2. Buka folder `di kerjakan oleh Chatgpt` di salinan percobaan yang baru.
-3. Klik dua kali **`JALANKAN_CONTOH_ANTREAN.bat`** untuk melihat alur tahap kedua
-   sampai menghasilkan file Word, PDF, dan pratinjau PDF ber-watermark simulasi.
+2. Buka folder `di kerjakan oleh Chatgpt` pada `D:\ai-assistant-chatgpt-antrean`.
+3. Klik dua kali **`SIAPKAN_FORMAT.bat`**. Setelah selesai, klik
+   **`JALANKAN_CONTOH_ANTREAN.bat`** untuk membuat contoh baru dengan format proyek,
+   PDF hasil konversi Word, serta pratinjau ber-watermark simulasi.
 4. Klik dua kali **`JALANKAN_ANTREAN_DEMO.bat`** untuk mencoba langkahnya sendiri.
    Urutan menu: **1 → 3 → 4 → 5 → 6 → 7 → 8**. Lihat `PANDUAN_ANTREAN.md`.
 5. `JALANKAN_TELEGRAM_DEMO.bat` tetap tersedia untuk format chat admin di terminal.
@@ -26,11 +30,11 @@ Tidak perlu `pip install` untuk prototipe ini.
 Alternatif terminal, dari dalam folder ini:
 
 ```powershell
-py -3 -B workflow_demo.py --sample
-py -3 -B workflow_demo.py
+.venv\Scripts\python.exe -B workflow_demo.py --sample
+.venv\Scripts\python.exe -B workflow_demo.py
 py -3 -B demo.py --sample
 py -3 -B demo.py --telegram-demo
-py -3 -B -m unittest discover -s tests -p "test_*.py" -v
+.venv\Scripts\python.exe -B -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 Menu interaktif lama dan baru memakai `runtime/demo.sqlite3` di folder ini.
@@ -51,10 +55,32 @@ Pembayaran dan pengantrean dicatat dalam transaksi yang sama. Satu pekerja
 mengambil satu pesanan; pekerjaan terputus perlu diperiksa sebelum diulang.
 Pengulangan dibatasi maksimal dua percobaan.
 
-Pekerja demo menghasilkan dokumen singkat yang isinya tetap. Word mempunyai
-contoh BAB, subbab, serta footnote asli; PDF pratinjau diberi watermark
-`PRATINJAU - SIMULASI`. **Ini file uji alur, bukan makalah 10 halaman yang
-dikerjakan AI.** Pembuatan makalah berdasarkan riset tetap tugas Nara saat integrasi.
+Pekerja `ProjectFormatWorker` memakai **`app/document_engine.py` milik proyek**
+secara baca-saja, dengan direktori keluaran eksplisit di folder percobaan. Modul
+bot, `.env`, database utama, dan provider AI tidak dijalankan. Checkout repository
+harus lengkap; folder prototipe saja tidak cukup untuk contoh format ini.
+
+Format mengikuti `policies/document_format_policy.md`,
+`policies/document_type_structure_policy.md`, dan `skills/document_academic/`:
+
+- A4, Times New Roman 12, spasi 1,5; margin kiri 4 cm dan sisi lain 3 cm.
+- Sampul, kata pengantar, daftar isi, BAB I–III, serta daftar pustaka.
+- Hierarki BAB → A. → 1. → a.; BAB baru pada halaman baru.
+- Halaman awal Romawi, isi mulai angka 1; daftar isi sampai Heading 3.
+- Footnote Word asli 10 pt, superscript; daftar pustaka dengan hanging indent.
+
+PDF final dikonversi dari DOCX, kemudian disalin menjadi pratinjau dengan watermark
+`PRATINJAU - SIMULASI` pada setiap halaman. Bila konversi atau daftar isi gagal,
+pekerjaan ditahan. `ACUAN_FORMAT.json` di folder hasil internal merekam hash acuan.
+
+**Isi tetap contoh pengujian, bukan makalah 10 halaman yang dikerjakan AI.**
+Catatan kaki merujuk dokumen kebijakan repository, bukan sumber akademik rekaan.
+Contoh bawaan menghasilkan 7 halaman pada pengujian Linux; periksa lagi hasil Word
+di PC Anda. Pembuatan isi berdasarkan riset tetap tugas Nara saat integrasi.
+`OfflineDemoWorker` lama hanya dipertahankan untuk unit test.
+
+File yang sudah dihasilkan versi lama tidak diubah. Jalankan contoh otomatis
+lagi untuk memperoleh pesanan dan file baru dengan format yang diperbaiki.
 
 Sistem memeriksa struktur dasar dokumen dan mencatat hash file. Pelepasan file
 final memerlukan persetujuan atas versi pratinjau yang sama dan pembayaran lunas.

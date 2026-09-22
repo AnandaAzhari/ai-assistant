@@ -25,9 +25,11 @@ class AdminReply:
 
 def payment_summary(order: OrderView) -> str:
     initial_label = "Bayar penuh sebelum mulai" if order.required_before_work == order.total else "DP sebelum mulai"
+    payment_state = "Lunas" if order.remaining == 0 else ("Belum dibayar" if order.paid == 0 else "Dibayar sebagian")
     return (
         f"[SIMULASI] {order.order_id}\n"
         f"Status: {LABELS[order.status]}\n"
+        f"Status pembayaran: {payment_state}\n"
         f"Total tagihan: {rupiah(order.total)}\n"
         f"{initial_label}: {rupiah(order.required_before_work)}\n"
         f"Pembayaran tercatat: {rupiah(order.paid)}\n"

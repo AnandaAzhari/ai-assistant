@@ -133,6 +133,20 @@ class DemoStore:
         self.db.execute("INSERT INTO demo_events(order_id,created,action,detail) VALUES(?,?,?,?)",
                         (order_id, datetime.now(timezone.utc).isoformat(), action, detail))
 
+    def _payment_recorded(self, order: OrderView) -> None:
+        """Hook dalam transaksi yang sama; turunan dapat mengantrekan pekerjaan."""
+        if order.can_start and self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_jobs'").fetchone():
+            changed = self.db.execute("UPDATE demo_jobs SET state='queued' WHERE order_id=? AND state='waiting'",
+                                      (order.order_id,)).rowcount
+            if changed:
+                self._event(order.order_id, 'job_enqueued', 'Brief disetujui dan pembayaran awal cukup.')
+
+    def _managed_guard(self, order_id: str) -> None:
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_jobs'").fetchone():
+            if self.db.execute("SELECT 1 FROM demo_jobs WHERE order_id=?", (order_id,)).fetchone():
+                raise ValueError("Pesanan ini dikelola antrean. Buka JALANKAN_ANTREAN_DEMO.bat.")
+
     def create_order(self, quote: Quote, *, approved_by: str, manual_review_confirmed: bool = False) -> OrderView:
         quote.validate()
         actor = _text(approved_by, "Operator pembuat penawaran")
@@ -182,6 +196,7 @@ class DemoStore:
             if self.get(order_id).stage != "quoted":
                 raise ValueError("Harga hanya dapat disetujui saat penawaran baru.")
             self._set_stage(order_id, "accepted", "accept_quote", actor)
+            self._payment_recorded(self.get(order_id))
         return self.get(order_id)
 
     def simulate_payment(self, order_id: str, reference: str, amount: int, *,
@@ -210,6 +225,7 @@ class DemoStore:
                 if (prior["order_id"], prior["amount"]) != (order_id, amount):
                     raise ValueError("Referensi transaksi sudah dipakai untuk pesanan atau nominal berbeda.")
                 if prior["credited"]:
+                    self._payment_recorded(order)
                     return PaymentUpdate(order)
             if order.stage in ("quoted", "cancelled", "delivered"):
                 raise ValueError("Tahap pesanan tidak menerima pembayaran baru. Perlu pemeriksaan operator.")
@@ -228,6 +244,7 @@ class DemoStore:
                                 (status, int(status == "settlement"), source, ref))
             self._event(order_id, "simulated_payment", f"{actor}; {source}; {ref}; {status}; {amount}")
             updated = self.get(order_id)
+            self._payment_recorded(updated)
             became_ready = updated.can_start and not order.can_start
             if became_ready:
                 self._event(order_id, "ready_for_work", "Pembayaran awal cukup; belum mengeksekusi Nara.")
@@ -236,6 +253,7 @@ class DemoStore:
 
     def start_work(self, order_id: str, *, actor: str) -> OrderView:
         with self._transaction():
+            self._managed_guard(order_id)
             if not self.get(order_id).can_start:
                 raise ValueError("Belum boleh dikerjakan: harga harus disetujui dan pembayaran awal harus cukup.")
             self._set_stage(order_id, "working", "start_work", actor)
@@ -244,6 +262,7 @@ class DemoStore:
     def send_preview(self, order_id: str, reference: str, *, actor: str) -> OrderView:
         reference = _text(reference, "Referensi pratinjau", 1000)
         with self._transaction():
+            self._managed_guard(order_id)
             if self.get(order_id).stage != "working":
                 raise ValueError("Pratinjau hanya dapat dicatat setelah pengerjaan dimulai.")
             self.db.execute("UPDATE demo_orders SET preview_reference=? WHERE id=?", (reference, order_id))
@@ -255,6 +274,7 @@ class DemoStore:
         if type(correction) is not bool:
             raise ValueError("Jenis koreksi harus true atau false.")
         with self._transaction():
+            self._managed_guard(order_id)
             order = self.get(order_id)
             if order.stage != "preview":
                 raise ValueError("Revisi hanya dapat diminta pada tahap review pratinjau.")
@@ -268,6 +288,7 @@ class DemoStore:
 
     def approve_preview(self, order_id: str, *, actor: str) -> OrderView:
         with self._transaction():
+            self._managed_guard(order_id)
             if self.get(order_id).stage != "preview":
                 raise ValueError("Belum ada pratinjau yang menunggu persetujuan.")
             self._set_stage(order_id, "approved", "approve_preview", actor)
@@ -276,6 +297,7 @@ class DemoStore:
     def release_final(self, order_id: str, reference: str, *, actor: str) -> OrderView:
         reference = _text(reference, "Referensi file final", 1000)
         with self._transaction():
+            self._managed_guard(order_id)
             if not self.get(order_id).can_deliver:
                 raise ValueError("File final ditahan sampai pratinjau disetujui dan tagihan lunas.")
             self.db.execute("UPDATE demo_orders SET final_reference=? WHERE id=?", (reference, order_id))
@@ -285,6 +307,7 @@ class DemoStore:
     def cancel_unpaid(self, order_id: str, reason: str, *, actor: str) -> OrderView:
         reason = _text(reason, "Alasan pembatalan", 1000)
         with self._transaction():
+            self._managed_guard(order_id)
             order = self.get(order_id)
             if order.paid or order.stage not in ("quoted", "accepted"):
                 raise ValueError("Hanya pesanan belum dibayar dan belum dikerjakan yang dapat dibatalkan di demo.")

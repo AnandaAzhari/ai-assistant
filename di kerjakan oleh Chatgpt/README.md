@@ -1,4 +1,4 @@
-# Prototipe harga dan pembayaran — dikerjakan oleh ChatGPT
+# Prototipe harga pembayaran dan antrean dokumen
 
 **Status: DEMO TERPISAH. Tarif masih usulan untuk diuji oleh owner.**
 
@@ -14,29 +14,61 @@ Gunakan Python **3.11 atau lebih baru**, seperti proyek AI Assistant.
 Tidak perlu `pip install` untuk prototipe ini.
 
 1. Ambil pembaruan repository sesuai `CARA_GIT_PULL.md`.
-2. Buka folder `ai-assistant\di kerjakan oleh Chatgpt` di File Explorer.
-3. Klik dua kali `JALANKAN_CONTOH.bat` untuk melihat satu alur lengkap otomatis.
-4. Klik dua kali `JALANKAN_DEMO.bat` untuk mencoba menu interaktif sendiri.
-5. Klik dua kali `JALANKAN_TELEGRAM_DEMO.bat` untuk mencoba format chat admin Telegram.
+2. Buka folder `di kerjakan oleh Chatgpt` di salinan percobaan yang baru.
+3. Klik dua kali **`JALANKAN_CONTOH_ANTREAN.bat`** untuk melihat alur tahap kedua
+   sampai menghasilkan file Word, PDF, dan pratinjau PDF ber-watermark simulasi.
+4. Klik dua kali **`JALANKAN_ANTREAN_DEMO.bat`** untuk mencoba langkahnya sendiri.
+   Urutan menu: **1 → 3 → 4 → 5 → 6 → 7 → 8**. Lihat `PANDUAN_ANTREAN.md`.
+5. `JALANKAN_TELEGRAM_DEMO.bat` tetap tersedia untuk format chat admin di terminal.
 6. Klik dua kali `JALANKAN_TEST.bat` untuk menjalankan tes. Hasil akhir yang
    diharapkan: `OK` dan `TES LULUS.`
 
 Alternatif terminal, dari dalam folder ini:
 
 ```powershell
+py -3 -B workflow_demo.py --sample
+py -3 -B workflow_demo.py
 py -3 -B demo.py --sample
-py -3 -B demo.py
 py -3 -B demo.py --telegram-demo
 py -3 -B -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-`--sample` memakai database sementara di memori. Menu interaktif menyimpan
-pesanan contoh di `runtime/demo.sqlite3` dalam folder ini, sehingga bisa dibuka
-kembali. Folder `runtime/` diabaikan Git. Modul tidak membaca `.env` atau database
-produksi AI Assistant. Untuk memulai demo kosong, tutup demo lalu **ganti nama
-file demo.sqlite3 di folder runtime ini saja**, misalnya `demo-lama.sqlite3`.
+Menu interaktif lama dan baru memakai `runtime/demo.sqlite3` di folder ini.
+Antrean serta file hasil dapat dibuka kembali setelah program ditutup.
+`workflow_demo.py --sample` memakai subfolder baru di `runtime/samples/` pada
+setiap peluncuran, sehingga tidak mengambil antrean interaktif. Contoh lama
+`demo.py --sample` tetap memakai database memori.
 
-## Contoh yang bisa dicoba
+Folder `runtime/` diabaikan Git. Modul tidak membaca `.env` atau database
+produksi AI Assistant. Untuk demo kosong, tutup semua demo lalu ganti nama
+**seluruh folder `runtime` milik prototipe ini**, misalnya `runtime-lama`.
+Database dan folder hasil antrean harus disimpan bersama.
+
+## Tahap kedua yang sudah tersedia
+
+Pesanan dengan brief dan harga yang disetujui masuk antrean setelah DP cukup.
+Pembayaran dan pengantrean dicatat dalam transaksi yang sama. Satu pekerja
+mengambil satu pesanan; pekerjaan terputus perlu diperiksa sebelum diulang.
+Pengulangan dibatasi maksimal dua percobaan.
+
+Pekerja demo menghasilkan dokumen singkat yang isinya tetap. Word mempunyai
+contoh BAB, subbab, serta footnote asli; PDF pratinjau diberi watermark
+`PRATINJAU - SIMULASI`. **Ini file uji alur, bukan makalah 10 halaman yang
+dikerjakan AI.** Pembuatan makalah berdasarkan riset tetap tugas Nara saat integrasi.
+
+Sistem memeriksa struktur dasar dokumen dan mencatat hash file. Pelepasan file
+final memerlukan persetujuan atas versi pratinjau yang sama dan pembayaran lunas.
+File yang berubah setelah diperiksa akan ditahan. Pelepasan berarti menyalin
+Word/PDF ke folder lokal; belum mengirimnya ke pelanggan.
+
+Pada demo interaktif, menu 4 menjalankan satu pekerjaan. Antrean belum mempunyai
+pekerja latar belakang. Adapter `PreparedNaraWorker` disediakan untuk Claude,
+tetapi belum dihubungkan ke Nara, bot Telegram, atau pembayaran sungguhan.
+
+Folder `private` adalah pemisahan lokasi internal aplikasi, bukan enkripsi atau
+pembatasan akses terhadap pemilik PC. Watermark juga bukan pencegah penyalinan.
+
+## Contoh tahap pertama yang tetap tersedia
 
 Alur otomatis memakai makalah 10 halaman isi:
 
@@ -53,13 +85,14 @@ Alur otomatis memakai makalah 10 halaman isi:
 | Simulasi pelunasan | Siap menyerahkan final |
 | Catat penyerahan final | Selesai |
 
-Dalam menu interaktif, urutan mudah: **1 → 3 → 4 → 5 → 6 → 8 → 4 → 9**.
+Dalam menu lama `JALANKAN_DEMO.bat`, urutan mudah: **1 → 3 → 4 → 5 → 6 → 8 → 4 → 9**.
 Nomor 4 pertama untuk DP; nomor 4 kedua untuk sisa tagihan. Masukkan angka
 tanpa titik: `18000`, bukan `18.000`. Menu 2 membuka pesanan demo lama.
 Untuk mencoba notifikasi berulang, gunakan sumber, referensi, dan nominal yang sama.
 
-Menu pratinjau dan final hanya mencatat tahap serta referensi contoh.
-Program ini **belum menghasilkan PDF ber-watermark, file Word, atau pengiriman**.
+Menu lama hanya mencatat tahap serta referensi contoh. Gunakan demo antrean
+untuk membuat file sebenarnya. Pesanan yang sudah dikelola antrean tidak dapat
+melewati pemeriksaan hasil melalui menu tahap pertama.
 
 ## Telegram sebagai panel admin AI agent
 
@@ -86,7 +119,9 @@ Untuk mencontohkan jalur otomatis, tersedia perintah **khusus demo**
 `/simulasi_midtrans ID_PESANAN NOMINAL REFERENSI STATUS`. Status pending/expire/deny
 tidak membuat DP terbayar; settlement menghitung penerimaan satu kali.
 Saat syarat pembayaran awal terpenuhi, pengendali menghasilkan sinyal pesanan siap
-diteruskan ke Nara. Ia belum mengeksekusi Nara atau mengirim apa pun.
+diteruskan ke Nara. Jika brief sudah didaftarkan melalui demo antrean pada
+database yang sama, pesanan juga masuk antrean persisten. Pengendali belum
+mengeksekusi Nara atau mengirim apa pun.
 
 Setelah integrasi nyata:
 
@@ -179,6 +214,10 @@ provider pembayaran, dan pajak **belum dihitung**.
 - Batas waktu revisi tiga hari **belum ditegakkan otomatis**. Ini masih aturan yang
   perlu dikonfirmasi owner dan diimplementasikan saat integrasi.
 
+Aturan revisi di atas diuji pada alur tahap pertama. Antrean file tahap kedua
+belum mendukung putaran revisi atau jasa merapikan file pelanggan. Jangan memakai
+menu revisi lama untuk mengubah hasil yang telah dikunci oleh antrean.
+
 Pembatalan demo hanya tersedia untuk pesanan yang belum menerima pembayaran dan
 belum dikerjakan. Pembayaran terlambat setelah pembatalan atau pembayaran berlebih
 ditolak oleh demo dan membutuhkan pemeriksaan operator. Integrasi nyata harus
@@ -191,11 +230,17 @@ menyimpan kejadian tersebut untuk rekonsiliasi; tidak boleh menghilangkan bukti 
 | `chatgpt_billing/pricing.py` | Validasi input/config dan kalkulasi penawaran |
 | `chatgpt_billing/payment_flow.py` | Tahapan pesanan, database demo, simulasi pembayaran, jejak tindakan |
 | `chatgpt_billing/telegram_admin.py` | Cek DP/pelunasan dan konfirmasi owner, tanpa koneksi bot |
+| `chatgpt_billing/workflow.py` | Antrean SQLite, pemulihan pekerjaan, persetujuan versi, pelepasan file |
+| `chatgpt_billing/artifacts.py` | Pemeriksaan struktur dasar, isolasi lokasi, hash dokumen |
+| `chatgpt_billing/workers.py` | Pekerja contoh offline dan adapter Nara yang belum diaktifkan |
+| `workflow_demo.py` | Menu antrean dan contoh otomatis sampai file lokal |
 | `demo.py` | Contoh otomatis dan menu terminal |
 | `config_harga.json` | Tarif serta aturan pembayaran usulan |
 | `tests/test_chatgpt_billing.py` | Pengujian perilaku harga/pembayaran |
+| `tests/test_workflow.py` | Pengujian antrean, pemulihan, file, dan adapter |
 | `JALANKAN_*.bat` | Peluncur Windows |
 | `CARA_GIT_PULL.md` | Cara mengambil pembaruan dan menjalankan demo |
+| `PANDUAN_ANTREAN.md` | Langkah percobaan tahap kedua di komputer owner |
 | `README_UNTUK_CLAUDE.md` | Batas implementasi dan peta integrasi |
 | `HASIL_PENGUJIAN.md` | Bukti pengujian serta batas verifikasi |
 

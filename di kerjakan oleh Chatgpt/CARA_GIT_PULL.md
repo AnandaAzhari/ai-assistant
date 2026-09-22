@@ -1,80 +1,92 @@
 # Mengambil pembaruan di PC Windows
 
-Pembaruan ini menambahkan folder `di kerjakan oleh Chatgpt` pada branch `main`.
-Tidak ada paket Python tambahan yang harus dipasang untuk demo.
+Semua kode tahap kedua tetap berada dalam folder GitHub `di kerjakan oleh Chatgpt`.
+Demo memakai Python 3.11+ tanpa paket tambahan.
 
-## 1. Buka terminal di folder proyek
+## Untuk kondisi komputer owner saat ini
 
-Jika memakai PowerShell dan proyek berada di `D:\ai-assistant`:
+Screenshot menunjukkan pekerjaan utama berada pada branch
+`fitur-watermark-payment-gate` dengan perubahan lokal, sedangkan salinan demo
+`D:\ai-assistant-chatgpt` berada pada detached commit `c1a96c2`. Folder demo di
+salinan tersebut terlihat bernama `di_kerjakan_oleh_chatgpt`.
 
-```powershell
-cd D:\ai-assistant
-git status --short
-git branch --show-current
-```
+**Tidak perlu pindah ke main atau melakukan pull pada branch pekerjaan utama.**
+Ambil pembaruan melalui worktree baru agar folder yang sudah diganti namanya,
+data demo lama, dan pekerjaan Claude tetap tersimpan.
 
-Jika memakai Git Bash:
+Jika demo lama masih berjalan, ketik `0` untuk menutup demo itu. Bot utama tidak
+perlu dihentikan hanya untuk menjalankan contoh offline ini. Pada Git Bash,
+jalankan perintah berikut satu per satu:
 
 ```bash
 cd /d/ai-assistant
-git status --short
-git branch --show-current
+git fetch origin
+git worktree add --detach /d/ai-assistant-chatgpt-antrean origin/main
+cd "/d/ai-assistant-chatgpt-antrean/di kerjakan oleh Chatgpt"
+py -3 -B workflow_demo.py --sample
 ```
 
-Sesuaikan lokasi bila folder proyek berbeda. Pada Command Prompt gunakan
-`cd /d D:\ai-assistant`. Perintah Git berikutnya sama di ketiga terminal.
+Lanjutkan ke perintah berikutnya hanya jika perintah sebelumnya berhasil.
+`git fetch` memperbarui referensi remote; `git worktree add` membuat salinan
+checkout baru tanpa mengganti branch atau file kerja `D:\ai-assistant`.
+Nama folder di GitHub masih memakai spasi, jadi gunakan tanda petik seperti contoh.
 
-## 2. Periksa sebelum mengambil perubahan
+Alternatif PowerShell:
 
-- Jika `git status --short` tidak menampilkan baris, tidak ada perubahan lokal
-  yang dilaporkan Git. Branch yang diharapkan adalah `main`.
-- Jika muncul daftar perubahan, selesaikan/simpan pekerjaan tersebut bersama
-  Claude terlebih dahulu. Tidak perlu menghapus file atau membuang perubahan.
-- Jika branch berbeda, periksa pekerjaan di branch tersebut sebelum pindah ke
-  `main`. Jangan otomatis mencampurkan main ke branch pekerjaan lain.
-- Jika muncul `not a git repository`, terminal belum berada di folder repository
-  atau folder berasal dari ZIP, bukan clone Git.
+```powershell
+cd D:\ai-assistant
+git fetch origin
+git worktree add --detach D:\ai-assistant-chatgpt-antrean origin/main
+cd "D:\ai-assistant-chatgpt-antrean\di kerjakan oleh Chatgpt"
+py -3 -B workflow_demo.py --sample
+```
 
-## 3. Ambil pembaruan
+Jika `py` tidak dikenali tetapi Python AI Assistant tersedia sebagai `python`,
+gunakan `python -B workflow_demo.py --sample`. Peluncur `.bat` juga mencoba kedua
+nama interpreter itu dan memeriksa versinya.
 
-Setelah status dan branch sesuai:
+Jika folder `ai-assistant-chatgpt-antrean` sudah ada, periksa isinya; jangan
+menghapus atau menimpanya untuk memaksa perintah berhasil. Gunakan lokasi baru
+yang belum ada atau kirim pesan error untuk diperiksa.
+
+Data pesanan demo lama tidak otomatis berpindah ke worktree baru. Mulailah dengan
+pesanan contoh baru pada tahap ini; pembayaran dan file lama tetap ada di lokasi
+lama. Jika suatu saat memindahkan data demo, tutup seluruh proses demo dan salin
+seluruh folder `runtime` sebagai satu kesatuan, bukan database atau file terpisah.
+Jangan mencampurnya dengan runtime demo baru yang sudah berisi data.
+
+## Menjalankan tahap kedua
+
+Di File Explorer, buka:
+
+```text
+D:\ai-assistant-chatgpt-antrean\di kerjakan oleh Chatgpt
+```
+
+1. `JALANKAN_CONTOH_ANTREAN.bat`: contoh otomatis sampai Word dan PDF tersedia.
+2. `JALANKAN_ANTREAN_DEMO.bat`: menu interaktif; ikuti `PANDUAN_ANTREAN.md`.
+3. `JALANKAN_TEST.bat`: pemeriksaan otomatis; hasil akhir `OK` dan `TES LULUS.`.
+
+Jendela `.bat` menunggu tombol agar pesan hasil/error terbaca. Peluncur lama
+`JALANKAN_CONTOH.bat`, `JALANKAN_DEMO.bat`, dan `JALANKAN_TELEGRAM_DEMO.bat`
+tetap tersedia untuk pengujian pembayaran tahap pertama. Semua ini demo offline;
+perintah pembayaran belum diaktifkan pada bot Telegram utama.
+
+## Jika kelak memperbarui checkout main yang bersih
+
+Bagian ini hanya berlaku jika `git branch --show-current` menunjukkan `main`
+dan `git status --short` kosong, bukan kondisi branch kerja owner pada screenshot.
 
 ```bash
+git status --short
+git branch --show-current
 git pull --ff-only origin main
 ```
 
-Opsi `--ff-only` mencegah Git membuat merge otomatis bila riwayat bercabang.
-Jika ada pesan konflik, `would be overwritten`, atau `Not possible to fast-forward`,
-berhenti dan kirim pesan lengkapnya untuk diperiksa. **Jangan gunakan `reset --hard`,
-`clean -fd`, atau force pull untuk memaksa pembaruan ini.**
+Jika ada perubahan lokal, riwayat bercabang, konflik, atau pesan file akan
+ditimpa, periksa dahulu. Jangan menggunakan `reset --hard`, `clean -fd`, atau
+force pull. Login GitHub dilakukan melalui mekanisme Git di komputer; token
+atau password tidak perlu dikirim di chat.
 
-Jika diminta login GitHub, lakukan melalui mekanisme login Git di komputer;
-jangan menaruh token/password di chat atau repository.
-
-## 4. Coba hasilnya
-
-Buka folder `di kerjakan oleh Chatgpt` di File Explorer, kemudian klik:
-
-1. `JALANKAN_CONTOH.bat` — alur otomatis dari harga hingga final.
-2. `JALANKAN_DEMO.bat` — menu untuk membuat pesanan contoh sendiri.
-3. `JALANKAN_TELEGRAM_DEMO.bat` — mencoba format chat cek DP di terminal.
-4. `JALANKAN_TEST.bat` — pemeriksaan otomatis; akhir yang diharapkan `TES LULUS.`.
-
-Demo Telegram ini tidak terhubung ke bot sungguhan. Perintah baru di bot utama
-baru tersedia setelah integrasi yang Anda perintahkan berikutnya.
-
-Atau, dari root repository, PowerShell/Git Bash:
-
-```bash
-py -3 -B "di kerjakan oleh Chatgpt/demo.py" --sample
-```
-
-Jendela `.bat` sengaja menunggu tombol ditekan agar pesan hasil/error bisa dibaca.
-Jika Python tidak ditemukan, gunakan instalasi Python 3.11+ yang menjalankan
-AI Assistant. Bila diperlukan, kirim screenshot pesan tersebut.
-
-## 5. Setelah demo cocok
-
-Minta Claude membaca `README_UNTUK_CLAUDE.md` dari folder ini, membaca kode serta
-hasil pengujiannya, lalu menyusun perubahan integrasi berdasarkan kode terbaru.
-Pemindahan file saja belum menyambungkan Midtrans, Nara, atau Laras.
+Setelah demo cocok, minta Claude membaca `README_UNTUK_CLAUDE.md`, kode, dan
+`HASIL_PENGUJIAN.md`, lalu mengintegrasikan berdasarkan versi aplikasi terbaru.

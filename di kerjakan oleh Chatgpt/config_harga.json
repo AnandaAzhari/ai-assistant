@@ -1,0 +1,28 @@
+{
+  "version": "usulan-2026-09-22-v1",
+  "status": "USULAN_UNTUK_UJI",
+  "packages": {
+    "ringkas": {"pages": 5, "price": 35000},
+    "standar": {"pages": 10, "price": 60000},
+    "lengkap": {"pages": 15, "price": 90000}
+  },
+  "extra_page": 6000,
+  "formatting": {
+    "dasar": {"per_page": 2000, "minimum": 15000},
+    "struktur": {"per_page": 3500, "minimum": 25000},
+    "khusus": {"per_page": 5000, "minimum": 40000}
+  },
+  "footnotes": {
+    "existing_each": 1000,
+    "existing_minimum": 10000,
+    "bundle_price": 15000,
+    "bundle_count": 10,
+    "bundle_extra_each": 1000
+  },
+  "source_verification_each": 5000,
+  "extra_revision_round": 10000,
+  "included_revision_rounds": 1,
+  "rush_percent": 30,
+  "payment": {"full_payment_threshold": 35000, "deposit_percent": 30}
+}
+

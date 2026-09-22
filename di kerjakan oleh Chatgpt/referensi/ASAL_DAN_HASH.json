@@ -1,0 +1,26 @@
+{
+  "source_commit": "70771143c0ce8f6b9213a648f50c495e5559307b",
+  "purpose": "Snapshot bahan baca; modul runtime tetap memakai sumber repository asli",
+  "files": [
+    {
+      "source": "policies/document_format_policy.md",
+      "copy": "referensi/FORMAT_MAKALAH.md",
+      "sha256": "90932b35a57d9c5e0b3d9bf9851f4a557ba0072d59f56efae3e377b8ea8d431c"
+    },
+    {
+      "source": "policies/document_type_structure_policy.md",
+      "copy": "referensi/STRUKTUR_JENIS_DOKUMEN.md",
+      "sha256": "59c58a1b536e43ebc75b1a20b0d70d1332b5ac794798f4fb50ea7c27f54fbb2f"
+    },
+    {
+      "source": "skills/document_academic/SKILL.md",
+      "copy": "referensi/PEDOMAN_DOKUMEN_AKADEMIK.md",
+      "sha256": "ecab6c6ed2145fdaeb6fc4f76a8ed8921d4923432dc3a99e2355befb16492a2f"
+    },
+    {
+      "source": "skills/document_academic/CITATION_STYLE.md",
+      "copy": "referensi/PEDOMAN_SITASI.md",
+      "sha256": "a2c69b4af4e1bc095254f69e51217800d7d7a2b04370bb8ccb3b172b4ff682da"
+    }
+  ]
+}

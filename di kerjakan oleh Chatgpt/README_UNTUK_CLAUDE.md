@@ -1,5 +1,14 @@
 # Serah terima prototipe pembayaran dan antrean kepada Claude
 
+**Mulai dari `00_BACA_DULU_CLAUDE.md`.** Owner telah menyatakan hasil format
+“sudah sesuai”. Seluruh 94 tes prototipe lulus pada tes ulang atas kode commit
+`70771143c0ce8f6b9213a648f50c495e5559307b`; log, lingkungan, dan hash tersedia
+di `bukti_uji/hasil_unit_test.json`. Persetujuan tersebut berlaku untuk tampilan
+contoh, tidak membuktikan integrasi Nara/Telegram/pembayaran sungguhan.
+
+Salinan pedoman lengkap ada di `referensi/`. Rencana berikutnya tersedia pada
+`02_LANJUTAN_NARA_TELEGRAM.md`; file ini menjelaskan kontrak implementasinya.
+
 ## Keputusan dan batas pekerjaan owner
 
 Owner meminta kode `.py` yang dapat dicoba dahulu dalam folder persis
@@ -23,7 +32,7 @@ dan versi repository terbaru sebelum mengedit; jangan menimpa pekerjaan mereka.
 - Acuan awal harga/pembayaran: `f49aff17e764c9bc32e5be493c5038cf52dfe307`.
 - Acuan penambahan antrean: `c1a96c25f08d2cfcf532db3023634c7951b5c37a`.
 - Perbaikan format dimulai dari demo `be04efe2d165b9a2e7af198d20b9db8bc48c850d`.
-- Main terbaru diperiksa pada `2b58fd6b704dfc3d7f718f4be4cf59e84a3f5297`.
+- Main saat perbaikan format disiapkan: `2b58fd6b704dfc3d7f718f4be4cf59e84a3f5297`.
   Commit itu sudah menggabungkan payment gate utama. Semua perubahan dari pihak
   lain dipertahankan; pembaruan ini hanya menyentuh folder prototipe.
 - `app/finance.py`: ledger keuangan lokal, belum rekonsiliasi bank atau gateway.

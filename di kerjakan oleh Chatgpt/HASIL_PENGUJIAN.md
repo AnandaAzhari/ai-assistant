@@ -2,8 +2,15 @@
 
 Tanggal: 22 September 2026.
 
+**Status serah terima: seluruh 94 tes prototipe lulus dan owner telah menerima
+format Word/PDF contoh.** Tes ulang atas kode commit
+`70771143c0ce8f6b9213a648f50c495e5559307b` menghasilkan 94 lulus, 0 gagal,
+0 error, 0 skip. Waktu eksekusi, log, lingkungan, dan hash kode dicatat dalam
+`bukti_uji/hasil_unit_test.json`. Pembaruan serah terima hanya menambah/memperbarui
+dokumentasi serta bukti, tanpa mengubah kode Python.
+
 - Lingkungan eksekusi: Linux, Python 3.12.14.
-- Acuan perbaikan format: demo `be04efe`; main terbaru diperiksa pada `2b58fd6`.
+- Acuan saat perbaikan format disiapkan: demo `be04efe`; main `2b58fd6`.
 - Engine `app/document_engine.py` dan kebijakan format sama pada kedua acuan.
 - Lingkup kode: hanya folder `di kerjakan oleh Chatgpt`.
 - Dependensi format: pypdf 6.10.0; konversi/QA Linux menggunakan LibreOffice dan Poppler.
@@ -76,7 +83,11 @@ DP Rp18.000 dan pelunasan Rp42.000, dengan total Rp60.000 dan sisa Rp0.
 Screenshot berikutnya membuktikan demo antrean `be04efe` selesai di PC owner dan
 Word/PDF berhasil dibuka. Owner kemudian melaporkan format Calibri/nomor desimal
 tidak sesuai aturan proyek. Laporan itu menjadi dasar perbaikan ini.
-Konversi Word COM untuk versi format yang baru masih perlu diperiksa pada PC owner.
+Setelah perbaikan format dikirim, owner mengonfirmasi: **“hasilnya sudah sesuai”**.
+Konfirmasi tersebut dicatat sebagai penerimaan tampilan hasil Word/PDF pada
+percobaan owner. Tidak ada log Windows baru atau rincian versi Microsoft Word
+yang dilampirkan bersama konfirmasi itu. ChatGPT tidak menjalankan Word COM di
+Windows; bukti owner dan pengujian Linux di atas harus tetap dibedakan.
 
 ## Batas verifikasi
 

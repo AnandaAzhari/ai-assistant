@@ -1,6 +1,10 @@
 # Prototipe harga pembayaran dan antrean dokumen
 
-**Status: DEMO TERPISAH. Tarif masih usulan untuk diuji oleh owner.**
+**Status: DEMO TERPISAH. Format hasil telah disetujui owner; 94 tes prototipe lulus.
+Tarif masih usulan untuk diuji oleh owner.**
+
+Untuk serah terima, Claude mulai dari **`00_BACA_DULU_CLAUDE.md`**. Persetujuan
+format, bukti tes, urutan integrasi, dan salinan pedoman sudah ada dalam folder ini.
 
 Folder ini berisi kode Python yang dapat dijalankan, pengujian, dan panduan
 integrasi untuk Claude. **Tujuannya adalah modul untuk AI agent, dengan Telegram
@@ -258,7 +262,14 @@ menyimpan kejadian tersebut untuk rekonsiliasi; tidak boleh menghilangkan bukti 
 | `chatgpt_billing/telegram_admin.py` | Cek DP/pelunasan dan konfirmasi owner, tanpa koneksi bot |
 | `chatgpt_billing/workflow.py` | Antrean SQLite, pemulihan pekerjaan, persetujuan versi, pelepasan file |
 | `chatgpt_billing/artifacts.py` | Pemeriksaan struktur dasar, isolasi lokasi, hash dokumen |
-| `chatgpt_billing/workers.py` | Pekerja contoh offline dan adapter Nara yang belum diaktifkan |
+| `chatgpt_billing/workers.py` | Fixture unit test dan adapter Nara yang belum diaktifkan |
+| `chatgpt_billing/project_format.py` | Pekerja contoh dengan DocumentEngine asli |
+| `chatgpt_billing/pdf_preview.py`, `chatgpt_billing/demo_toc.py` | Watermark PDF dan cache daftar isi contoh |
+| `tests/test_project_format.py` | Pengujian format, konversi gagal, TOC, serta pratinjau |
+| `00_BACA_DULU_CLAUDE.md` | Titik masuk serah terima dan urutan membaca |
+| `01_FORMAT_DAN_PERSETUJUAN_OWNER.md` | Acuan format yang telah diterima owner |
+| `02_LANJUTAN_NARA_TELEGRAM.md` | Pekerjaan integrasi berikutnya |
+| `bukti_uji/`, `referensi/` | Bukti tes ulang dan salinan pedoman format |
 | `workflow_demo.py` | Menu antrean dan contoh otomatis sampai file lokal |
 | `demo.py` | Contoh otomatis dan menu terminal |
 | `config_harga.json` | Tarif serta aturan pembayaran usulan |
@@ -270,5 +281,6 @@ menyimpan kejadian tersebut untuk rekonsiliasi; tidak boleh menghilangkan bukti 
 | `README_UNTUK_CLAUDE.md` | Batas implementasi dan peta integrasi |
 | `HASIL_PENGUJIAN.md` | Bukti pengujian serta batas verifikasi |
 
-Tidak ada import dari `app/`, pemanggilan bot, atau perubahan pada peluncur utama.
+Pekerja format hanya memuat `app/document_engine.py` asli dengan root keluaran
+terpisah. Tidak ada pemanggilan bot atau perubahan pada peluncur utama.
 Penggunaan aplikasi utama setelah `git pull` tetap mengikuti kode utamanya.

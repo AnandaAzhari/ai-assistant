@@ -45,7 +45,9 @@ from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
+from app.payment_gate import PaymentGateStore
 from app.pdf_compressor import PdfCompressor
+from app.pdf_watermark import PdfWatermarker
 from app.price_list import PriceListStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
@@ -124,6 +126,15 @@ def create_customer_adapter() -> WhatsAppCustomerAdapter:
         # server (self.pdf_compressor.available); tanpa itu, fitur tetap terdaftar
         # tapi membalas jujur "belum bisa dijalankan" (bukan pura-pura berhasil).
         pdf_compressor=PdfCompressor.from_env(),
+        # Payment Gate (app/payment_gate.py, app/pdf_watermark.py): begitu makalah
+        # selesai, pelanggan hanya terima PDF pratinjau ber-watermark; DOCX+PDF
+        # bersih ditahan sampai admin `/lunas` (Telegram/Web Admin, database yang
+        # sama). Butuh reportlab+pypdf terpasang di server (self.pdf_watermarker.
+        # available); tanpa itu, makalah tetap selesai tapi pratinjaunya SENGAJA
+        # tidak dikirim (lihat docstring app/pdf_watermark.py) daripada bocor tanpa
+        # watermark.
+        payment_gate=PaymentGateStore(db_path),
+        pdf_watermarker=PdfWatermarker.from_env(),
     )
     client = WhatsAppHTTPClient(
         os.environ.get("WHATSAPP_API_TOKEN", ""),
@@ -255,6 +266,11 @@ def main(argv: list[str] | None = None) -> int:
         ("siap (Ghostscript ditemukan)" if pdf_compressor.available else "terdaftar, tapi Ghostscript belum terpasang")
         if pdf_compressor is not None else "belum tersambung"
     )
+    pdf_watermarker = adapter.lead.pdf_watermarker
+    payment_gate_note = (
+        ("siap (reportlab+pypdf ditemukan)" if pdf_watermarker.available else "terdaftar, tapi reportlab/pypdf belum terpasang")
+        if pdf_watermarker is not None and adapter.lead.payment_gate is not None else "belum tersambung"
+    )
 
     if args.check:
         print("Konfigurasi WhatsApp Customer Adapter lengkap.")
@@ -264,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Kill switch: " + kill_switch_note + ".")
         print("Attachment guard: " + attachment_guard_note + ".")
         print("Kompresi PDF: " + pdf_compressor_note + ".")
+        print("Payment Gate (watermark + lunas): " + payment_gate_note + ".")
         print(f"Server akan mendengarkan di {args.host}:{args.port}, endpoint /webhook.")
         return 0
 
@@ -277,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Kill switch: " + kill_switch_note + ".")
     print("Attachment guard: " + attachment_guard_note + ".")
     print("Kompresi PDF: " + pdf_compressor_note + ".")
+    print("Payment Gate (watermark + lunas): " + payment_gate_note + ".")
     print("Biarkan terminal ini terbuka. Ctrl+C untuk berhenti.")
     try:
         server.serve_forever()

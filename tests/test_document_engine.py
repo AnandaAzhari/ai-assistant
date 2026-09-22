@@ -50,7 +50,13 @@ def test_document_engine_builds_docx_without_ai(tmp_path: Path):
         assert "word/styles.xml" in names
         xml = package.read("word/document.xml").decode("utf-8")
         assert "UJI MAKALAH" in xml
-        assert "BAB I PENDAHULUAN" in xml
+        # Judul bab (mis. "BAB I PENDAHULUAN") sengaja dipecah jadi dua baris oleh
+        # _legacy_chapter_title ("BAB I" lalu "PENDAHULUAN" di bawahnya, dipisah
+        # <w:br/>) supaya tampilan di Word rapi seperti makalah resmi — jadi tidak
+        # pernah muncul sebagai satu string utuh "BAB I PENDAHULUAN" di document.xml.
+        assert "BAB I" in xml
+        assert "PENDAHULUAN" in xml
+        assert "<w:br/>" in xml
         assert "MAN CONTOH" in xml
 
 

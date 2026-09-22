@@ -87,6 +87,14 @@ _ACTION_LEVELS: dict[str, int] = {
     "info_kompres_pdf": LEVEL_EXTERNAL_ACTION,
     "ubah_status_order": LEVEL_EXTERNAL_ACTION,
     "unggah_file_ke_pelanggan": LEVEL_EXTERNAL_ACTION,
+    # Payment Gate (app/payment_gate.py, app/pdf_watermark.py): kirim PDF pratinjau
+    # ber-watermark begitu makalah selesai, dan kirim file bersih begitu order
+    # ditandai lunas — sama-sama pengiriman file rutin ke pelanggan, risikonya sama
+    # dengan unggah_file_ke_pelanggan di atas (bukan aksi finansial itu sendiri,
+    # cuma pengiriman dokumen; status lunasnya sudah diverifikasi admin manual lewat
+    # command /lunas sebelum sampai di sini).
+    "unggah_preview_watermark_ke_pelanggan": LEVEL_EXTERNAL_ACTION,
+    "kirim_dokumen_setelah_lunas": LEVEL_EXTERNAL_ACTION,
     # Level 3 — External Action, wajib approval (lihat approval_policy.md "Wajib Approval Admin")
     "diskon_khusus": LEVEL_EXTERNAL_ACTION,
     "harga_di_luar_price_list": LEVEL_EXTERNAL_ACTION,
@@ -116,6 +124,7 @@ _ROUTINE_AUTO_SEND = {
     "di_luar_topik", "info_kompres_pdf",
     "kirim_estimasi_harga_standar", "kirim_status_antrean", "kirim_pengingat_status",
     "tolak_spam_sopan", "ubah_status_order", "unggah_file_ke_pelanggan",
+    "unggah_preview_watermark_ke_pelanggan", "kirim_dokumen_setelah_lunas",
 }
 
 _HIGH_RISK_KEYWORDS = (

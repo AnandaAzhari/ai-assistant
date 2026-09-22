@@ -40,7 +40,9 @@ from app.interaction_log import ALLOWED_REVIEW_LABELS, InteractionLogStore
 from app.interaction_policy import is_admin_command
 from app.kill_switch import CUSTOMER_NOTICE_TEXT, GLOBAL_SCOPE, KillSwitch
 from app.order_status import OrderStatusStore
+from app.payment_gate import PaymentGateStore
 from app.pdf_compressor import PdfCompressor
+from app.pdf_watermark import PdfWatermarker
 from app.price_list import PriceListStore
 from app.topic_guard import is_off_topic
 from app.trust_layer import TrustLayer
@@ -94,6 +96,9 @@ TELEGRAM_COMMAND_MENU: tuple[tuple[str, str], ...] = (
     ("pelanggan_riwayat", "Lihat profil dan riwayat order pelanggan"),
     ("pelanggan_ringkasan", "Ringkasan jumlah order dan omzet per bisnis"),
     ("kompres_pdf_status", "Cek kesiapan kompresi PDF (Ghostscript)"),
+    ("lunas", "Tandai order pelanggan lunas, kirim file bersih"),
+    ("set_pembayaran", "Simpan info QR GoPay/DANA/rekening untuk pelanggan"),
+    ("cek_pembayaran", "Lihat info pembayaran & kesiapan watermark PDF"),
     ("konten_baru", "Kirana: buat draft ide dan caption"),
     ("eval_sample", "Ambil sampel interaksi untuk ditinjau"),
     ("eval_tandai", "Catat hasil tinjauan satu interaksi"),
@@ -133,6 +138,8 @@ class LeadAgent:
         interaction_log: InteractionLogStore | None = None,
         customer_book: CustomerBookStore | None = None,
         pdf_compressor: PdfCompressor | None = None,
+        payment_gate: PaymentGateStore | None = None,
+        pdf_watermarker: PdfWatermarker | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -149,6 +156,8 @@ class LeadAgent:
         self.interaction_log = interaction_log
         self.customer_book = customer_book
         self.pdf_compressor = pdf_compressor
+        self.payment_gate = payment_gate
+        self.pdf_watermarker = pdf_watermarker
         # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
         # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
         # kalau document_factory tidak diberikan (fitur belum diaktifkan).
@@ -292,6 +301,10 @@ class LeadAgent:
                 "/pelanggan_riwayat <nomor_wa> - lihat profil dan riwayat order pelanggan\n"
                 "/pelanggan_ringkasan <bisnis> - total order dan omzet bisnis tsb\n"
                 "/kompres_pdf_status - cek kesiapan kompresi PDF (Ghostscript) di server ini\n"
+                "/lunas <nomor_wa_pelanggan> - tandai order lunas, file Word+PDF bersih otomatis "
+                "terkirim begitu pelanggan itu kirim pesan berikutnya\n"
+                "/set_pembayaran <teks> - simpan info QR GoPay/DANA/no rekening yang ditampilkan ke pelanggan\n"
+                "/cek_pembayaran - lihat info pembayaran tersimpan & kesiapan watermark PDF\n"
                 "/konten_baru <usaha> | <platform> | <brief> - Content Studio: buat draft caption\n"
                 "/eval_sample [agent] [n] - Fase 5: ambil sampel interaksi produksi untuk ditinjau\n"
                 "/eval_tandai <id> | <baik/perlu_perbaikan/tidak_baik> | <catatan opsional> - catat hasil tinjauan\n"
@@ -307,7 +320,8 @@ class LeadAgent:
                 f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}.\n"
                 f"Interaction Log (Fase 5): {'siap' if self.interaction_log is not None else 'belum tersedia'}.\n"
                 f"Customer Book: {'siap' if self.customer_book is not None else 'belum tersedia'}.\n"
-                f"Kompresi PDF (Nara): {'siap' if self.pdf_compressor is not None and self.pdf_compressor.available else 'belum tersedia'}."
+                f"Kompresi PDF (Nara): {'siap' if self.pdf_compressor is not None and self.pdf_compressor.available else 'belum tersedia'}.\n"
+                f"Payment Gate (watermark + lunas): {'siap' if self.payment_gate is not None and self.pdf_watermarker is not None and self.pdf_watermarker.available else 'belum tersedia'}."
             )
 
         if command == "/status" or text in {"status", "cek status", "health", "health check"}:
@@ -566,6 +580,61 @@ class LeadAgent:
             if self.pdf_compressor is None:
                 return LeadReply("lead", "belum_dikonfigurasi", "Kompresi PDF belum tersedia pada runtime ini.")
             return LeadReply("pdf_compressor", "berhasil", self.pdf_compressor.status_text)
+
+        if command in {"/lunas", "/tandai_lunas"}:
+            if self.payment_gate is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Payment Gate belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            sender_id = parts[1].strip() if len(parts) > 1 else ""
+            if not sender_id:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /lunas <nomor_wa_pelanggan>\nContoh: /lunas 628111222333",
+                )
+            entry = self.payment_gate.mark_paid(sender_id, updated_by=f"admin:{self.admin_channel}")
+            if entry is None:
+                return LeadReply(
+                    "payment_gate", "tidak_ditemukan",
+                    f"Tidak ada dokumen makalah yang tertahan untuk nomor {sender_id}. Pastikan pelanggan "
+                    "sudah menerima PDF pratinjau (artinya makalahnya sudah selesai) sebelum ditandai lunas.",
+                )
+            return LeadReply(
+                "payment_gate", "berhasil",
+                f"Order milik {sender_id} ditandai LUNAS. File Word + PDF bersih (tanpa watermark) akan "
+                "otomatis terkirim begitu pelanggan itu mengirim pesan berikutnya ke WhatsApp.",
+            )
+
+        if command in {"/set_pembayaran", "/pembayaran_set"}:
+            if self.payment_gate is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Payment Gate belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            info_text = parts[1].strip() if len(parts) > 1 else ""
+            if not info_text:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /set_pembayaran <teks>\n"
+                    "Contoh: /set_pembayaran Transfer BCA 1234567890 a.n. Ananda Azhari, atau scan QR "
+                    "GoPay/DANA di nomor 08xxxxxxxxxx",
+                )
+            self.payment_gate.set_payment_info(info_text, updated_by=f"admin:{self.admin_channel}")
+            return LeadReply(
+                "payment_gate", "berhasil",
+                "Info pembayaran tersimpan, akan otomatis ditampilkan ke pelanggan bersama PDF pratinjau.",
+            )
+
+        if command in {"/cek_pembayaran", "/pembayaran_lihat"}:
+            if self.payment_gate is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Payment Gate belum tersedia pada runtime ini.")
+            watermark_status = (
+                self.pdf_watermarker.status_text if self.pdf_watermarker is not None
+                else "Watermark PDF belum tersedia pada runtime ini."
+            )
+            info_text = self.payment_gate.get_payment_info()
+            info_line = (
+                f"Info pembayaran tersimpan: {info_text}" if info_text
+                else "Info pembayaran BELUM diisi. Set dengan /set_pembayaran <teks>."
+            )
+            return LeadReply("payment_gate", "berhasil", f"{watermark_status}\n{info_line}")
 
         if command in {"/konten_baru", "/konten_baru_draft"}:
             if self.content_studio is None:
@@ -947,29 +1016,81 @@ class LeadAgent:
     def _continue_customer_document(self, document: DocumentAgent, sender_id: str, raw: str) -> LeadReply:
         """Serahkan giliran percakapan ke Document Agent (Nara) memakai pedoman
         penomoran/format yang sama seperti admin (`skills/document_academic/`,
-        `policies/document_format_policy.md`). Saat file Word final selesai dibuat,
-        catat `unggah_file_ke_pelanggan` ke Approval Gate (auto-send rutin, tetap
-        wajib tercatat di audit log) dan sertakan path file di `LeadReply` supaya
-        adapter channel (mis. `WhatsAppCustomerAdapter`) tahu harus mengirim lampiran.
+        `policies/document_format_policy.md`). Saat file Word final selesai dibuat:
 
-        Mengirim DOCX DAN PDF sekaligus (kalau PDF-nya berhasil dibuat — lihat
-        `app/document_engine.py`, tidak semua server punya LibreOffice/Word) supaya
-        pelanggan tidak harus minta PDF terpisah; PDF yang besar sekalian ditawari
-        kompresi lewat `_maybe_append_pdf_compress_hint`."""
+        Kalau Payment Gate AKTIF di runtime ini (`self.payment_gate` diisi — lihat
+        `app/pdf_watermark.py`/`app/payment_gate.py` untuk alur lengkapnya) —
+        pelanggan HANYA menerima PDF pratinjau ber-watermark dulu; DOCX + PDF bersih
+        ditahan sampai admin `/lunas`. PENTING: begitu `payment_gate` diisi, modul
+        ini WAJIB berhasil bikin watermark sebelum mengirim apa pun ke pelanggan —
+        kalau `pdf_watermarker` kosong/tidak tersedia, PDF belum berhasil dibuat, ATAU
+        watermark-nya sendiri gagal dibuat, TIDAK ADA file yang dikirim sama sekali
+        (bukan diam-diam jatuh ke pengiriman file mentah tanpa proteksi — lihat
+        docstring `app/pdf_watermark.py`, prinsip jujur "tidak pernah diam-diam
+        bocor"). Admin diberi tahu lewat log server di setiap kasus kegagalan itu.
+
+        Kalau Payment Gate belum diaktifkan SAMA SEKALI di runtime ini
+        (`payment_gate` None, default — belum diwire ke `LeadAgent`), perilaku LAMA
+        dipertahankan utuh supaya tidak ada regresi: DOCX DAN PDF dikirim sekaligus
+        (kalau PDF-nya berhasil dibuat — lihat `app/document_engine.py`, tidak semua
+        server punya LibreOffice/Word), PDF besar ditawari kompresi lewat
+        `_maybe_append_pdf_compress_hint`.
+
+        Baik pratinjau maupun kirim file lama dicatat ke Approval Gate (auto-send
+        rutin, tetap wajib tercatat di audit log)."""
         result = document.handle(raw)
-        attachment_paths: list[str] = []
         reply_text = result.text
-        if result.status == "final_ready" and document.final_docx_path:
+        if result.status != "final_ready" or not document.final_docx_path:
+            return LeadReply("document", result.status, reply_text)
+
+        pdf_path = document.final_pdf_path
+
+        if self.payment_gate is not None:
+            watermark_ready = self.pdf_watermarker is not None and self.pdf_watermarker.available and pdf_path
+            if not watermark_ready:
+                reason = (
+                    "PDF makalah belum berhasil dibuat" if not pdf_path
+                    else "watermark PDF belum tersedia di server ini (pdf_watermarker kosong/lib belum terpasang)"
+                )
+                print(f"Payment Gate aktif tapi pratinjau tidak bisa disiapkan untuk {sender_id}: {reason}.", flush=True)
+                text = (
+                    f"{reply_text}\n\nDokumen sudah selesai, tapi ada kendala teknis menyiapkan pratinjaunya. "
+                    "Admin akan segera membantu."
+                )
+                return LeadReply("document", "kendala_watermark", text)
+
+            watermark = self.pdf_watermarker.add_preview_watermark(pdf_path, order_id=f"WA-{sender_id}")
+            if watermark.status != "berhasil":
+                print(f"Watermark gagal untuk pelanggan {sender_id}: {watermark.warning}", flush=True)
+                text = (
+                    f"{reply_text}\n\nDokumen sudah selesai, tapi ada kendala teknis menyiapkan pratinjaunya. "
+                    "Admin akan segera membantu."
+                )
+                return LeadReply("document", "kendala_watermark", text)
             self.approval_gate.request(
-                "unggah_file_ke_pelanggan",
+                "unggah_preview_watermark_ke_pelanggan",
                 requested_by=f"customer:{sender_id}",
-                summary=f"Kirim file makalah selesai ke pelanggan {sender_id}",
+                summary=f"Kirim PDF pratinjau (watermark) makalah ke pelanggan {sender_id}",
             )
-            attachment_paths.append(document.final_docx_path)
-            pdf_path = document.final_pdf_path
-            if pdf_path:
-                attachment_paths.append(pdf_path)
-                reply_text = self._maybe_append_pdf_compress_hint(reply_text, pdf_path)
+            self.payment_gate.save_pending(sender_id, document.final_docx_path, pdf_path)
+            payment_info = self.payment_gate.get_payment_info()
+            info_line = f"\n\nCara pembayaran:\n{payment_info}" if payment_info else ""
+            text = (
+                f"{reply_text}\n\nIni pratinjau PDF-nya (ada watermark \"belum lunas\"). File Word dan PDF "
+                "bersih (tanpa watermark) akan otomatis saya kirim begitu pembayaran dikonfirmasi admin."
+                f"{info_line}"
+            )
+            return LeadReply("document", result.status, text, (watermark.output_path,))
+
+        self.approval_gate.request(
+            "unggah_file_ke_pelanggan",
+            requested_by=f"customer:{sender_id}",
+            summary=f"Kirim file makalah selesai ke pelanggan {sender_id}",
+        )
+        attachment_paths: list[str] = [document.final_docx_path]
+        if pdf_path:
+            attachment_paths.append(pdf_path)
+            reply_text = self._maybe_append_pdf_compress_hint(reply_text, pdf_path)
         return LeadReply("document", result.status, reply_text, tuple(attachment_paths))
 
     # Target ukuran WAJIB menyebut satuan eksplisit ("kb"/"mb") — sengaja tidak
@@ -1091,6 +1212,28 @@ class LeadAgent:
 
         if self.trust_layer is None or self.approval_gate is None:
             return LeadReply("lead", "belum_tersedia", "Jalur pelanggan belum aktif pada runtime ini.")
+
+        # Payment Gate: kalau pelanggan ini punya order yang SUDAH ditandai lunas
+        # admin (`/lunas`) tapi file bersihnya belum pernah dikirim, kirim SEKARANG
+        # sebelum memproses isi pesan yang baru masuk — lihat docstring
+        # `app/payment_gate.py` poin 3 untuk alasan kenapa rilisnya nunggu pesan
+        # pelanggan berikutnya, bukan push instan saat admin mengetik `/lunas`.
+        # Dicek lebih dulu daripada apa pun lain di bawah supaya tidak pernah
+        # tertunda oleh routing lain (kompresi PDF, sesi dokumen, dst.).
+        if self.payment_gate is not None:
+            release = self.payment_gate.pop_ready_release(sender_id)
+            if release is not None:
+                self.approval_gate.request(
+                    "kirim_dokumen_setelah_lunas",
+                    requested_by=f"customer:{sender_id}",
+                    summary=f"Kirim file makalah bersih (lunas) ke pelanggan {sender_id}",
+                )
+                return LeadReply(
+                    "payment_gate", "berhasil",
+                    "Terima kasih! Pembayaran sudah dikonfirmasi admin — ini dokumen lengkapnya "
+                    "(Word + PDF tanpa watermark).",
+                    (release.docx_path, release.pdf_path),
+                )
 
         raw = (message or "").strip()
         if not raw and not has_attachment:

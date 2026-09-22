@@ -18,7 +18,9 @@ from app.interaction_log import InteractionLogStore
 from app.kill_switch import KillSwitch
 from app.lead import LeadAgent
 from app.order_status import OrderStatusStore
+from app.payment_gate import PaymentGateStore
 from app.pdf_compressor import PdfCompressor
+from app.pdf_watermark import PdfWatermarker
 from app.price_list import PriceListStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
@@ -74,4 +76,12 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         # dari whatsapp_main.py (proses berbeda), tapi cukup untuk cek status karena
         # tidak menyimpan state apa pun selain lokasi workspace.
         pdf_compressor=PdfCompressor.from_env(),
+        # Payment Gate (app/payment_gate.py, app/pdf_watermark.py): admin menandai
+        # order lunas lewat /lunas dan mengisi info QR/DANA/rekening lewat
+        # /set_pembayaran di sini. Database yang sama dengan whatsapp_main.py
+        # (proses berbeda), supaya status lunas yang admin catat di Telegram/Web
+        # Admin langsung terlihat oleh runtime WhatsApp yang terpisah begitu
+        # pelanggan itu kirim pesan berikutnya (lihat docstring app/payment_gate.py).
+        payment_gate=PaymentGateStore(db_path),
+        pdf_watermarker=PdfWatermarker.from_env(),
     )

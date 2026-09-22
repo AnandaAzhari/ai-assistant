@@ -1,0 +1,13 @@
+# Dependency proyek ai-assistant (Taqi AI). Hampir semua modul (Telegram, WhatsApp,
+# DeepSeek, Google Sheets Sync) sengaja hanya memakai Python standard library
+# (urllib) supaya runtime tetap ringan — lihat docstring masing-masing modul di app/.
+# File ini HANYA berisi library pihak ketiga yang benar-benar dibutuhkan:
+#
+# Runtime — dipakai langsung saat program jalan (fitur watermark PDF pratinjau):
+reportlab==4.4.10
+pypdf==3.17.4
+
+# Test only — dipakai tests/, TIDAK dibutuhkan saat program jalan di produksi/VPS:
+pytest==9.1.1
+numpy==2.4.4
+Pillow==12.2.0

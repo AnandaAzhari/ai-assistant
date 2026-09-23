@@ -18,6 +18,7 @@ import sqlite3
 import threading
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from app.citation_engine import CitationEngine
 from app.document_cover import MakalahCoverData
@@ -159,6 +160,14 @@ class DocumentAgent:
         self._turn_intake: IntakeResult | None = None
         self._conversation: list[dict[str, str]] = []
         self._continue_after_cover = False
+        # Pelapor status opsional untuk satu panggilan `handle()` yang sedang aktif
+        # (lihat `_emit_status`). Disetel di awal `handle()`, dibersihkan lagi di
+        # `finally`-nya — aman karena `_handle_lock` menjamin hanya satu panggilan
+        # `handle()` berjalan per instance ini, jadi tidak ada risiko tercampur
+        # antar sesi/pelanggan berbeda. Default None = tidak melakukan apa-apa,
+        # sehingga WhatsApp dan Web Admin (yang tidak pernah mengisi ini) tidak
+        # berubah perilakunya sama sekali.
+        self._on_status: Callable[[str], None] | None = None
         self.brief = MakalahBrief()
         # Alias sementara agar modul lama yang membaca `requirements` tetap kompatibel.
         self.requirements = self.brief
@@ -487,6 +496,7 @@ class DocumentAgent:
         if not self.configured:
             return self.status()
         self._save_session()
+        self._emit_status("✍️ Nara sedang menyusun kerangka...")
         messages = self._outline_messages(raw, revision=revision)
         reply = self.provider.generate(messages, max_tokens=OUTLINE_MAX_TOKENS, temperature=0.3, timeout=45)
         if reply.status != "berhasil" and "kosong" in (reply.text or "").casefold():
@@ -598,6 +608,7 @@ class DocumentAgent:
             sources = self.registry.list_sources(self.source_scope)
             cached = [s for s in sources if s.ref_id in self._automatic_source_ids]
             if context != self._automatic_research_context or len(cached) != len(self._automatic_source_ids) or not cached:
+                self._emit_status("🔍 Nara sedang mencari sumber referensi...")
                 result = self.automatic_research.run(self.brief, self._outline_text)
                 if result.status != "berhasil":
                     reasons = {
@@ -643,6 +654,7 @@ class DocumentAgent:
                 "membutuhkan_sumber",
                 "Belum ada sumber yang disimpan. Cari sumber terlebih dahulu sebelum membuat isi makalah.",
             )
+        self._emit_status("📝 Nara sedang menulis draft...")
         result = self.draft_generator.generate(
             self.brief.structured_text(), self.cover.structured_text(), self._outline_text, sources,
         )
@@ -707,6 +719,7 @@ class DocumentAgent:
         if not sources:
             return DocumentResult("membutuhkan_sumber", "Daftar sumber kosong, sehingga catatan kaki dan daftar pustaka belum bisa dibuat.")
 
+        self._emit_status("📄 Nara sedang membuat file Word/PDF...")
         result = self.citation_engine.build(
             self._draft_spec,
             sources,
@@ -935,10 +948,25 @@ class DocumentAgent:
             return self.build_final()
         return DocumentResult("membutuhkan_bantuan", "Tahap dokumen belum dapat dilanjutkan.")
 
-    def handle(self, message: str) -> DocumentResult:
+    def _emit_status(self, text: str) -> None:
+        """Laporkan tahap proses saat ini ke pelapor channel (kalau ada). Best-effort
+        dan murni kosmetik: dipanggil dari titik-titik proses yang berpotensi lama
+        (kerangka, riset sumber, tulis draft, render Word/PDF) supaya channel yang
+        mendukungnya (mis. Telegram lewat `on_status` di `handle()`) bisa menampilkan
+        status berjalan ke pengguna. Kegagalan pelapor (mis. Telegram API error)
+        TIDAK PERNAH menggagalkan proses dokumen itu sendiri."""
+        if self._on_status is None:
+            return
+        try:
+            self._on_status(text)
+        except Exception:
+            pass
+
+    def handle(self, message: str, *, on_status: Callable[[str], None] | None = None) -> DocumentResult:
         # Web Admin is threaded: do not run two research/draft jobs for one session.
         if not self._handle_lock.acquire(blocking=False):
             return DocumentResult("sedang_diproses", "Permintaan sebelumnya masih diproses. Mohon tunggu sebentar.")
+        self._on_status = on_status
         try:
             self._turn_intake = None
             try:
@@ -958,6 +986,7 @@ class DocumentAgent:
                     "\n\nPenyimpanan sesi ke disk gagal. Data saat ini masih ada di aplikasi yang terbuka; jangan tutup sebelum penyimpanan berhasil.")
             return result
         finally:
+            self._on_status = None
             self._handle_lock.release()
 
     def _handle_message(self, message: str) -> DocumentResult:

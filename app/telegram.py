@@ -142,6 +142,69 @@ class TelegramHTTPClient:
             data['message_thread_id'] = message_thread_id
         return self._post('sendMessage', data, timeout=20)
 
+    def edit_message_text(self, chat_id: int, message_id: int, text: str):
+        """Perbarui isi pesan yang sudah terkirim di tempat yang sama (dipakai untuk
+        pesan status berjalan — lihat `_StatusReporter` di bawah). Telegram menolak
+        edit kalau teksnya identik dengan yang sekarang ("message is not modified");
+        caller (`_StatusReporter`) sudah menghindari ini sendiri, tapi tetap dibiarkan
+        sebagai TelegramError biasa kalau suatu saat terjadi, supaya ditangani seperti
+        error Telegram lain (best-effort, tidak pernah menggagalkan alur utama)."""
+        data = {
+            'chat_id': chat_id, 'message_id': message_id, 'text': text,
+            'link_preview_options': json.dumps({'is_disabled': True}),
+        }
+        return self._post('editMessageText', data, timeout=20)
+
+    def delete_message(self, chat_id: int, message_id: int):
+        return self._post('deleteMessage', {'chat_id': chat_id, 'message_id': message_id}, timeout=20)
+
+
+class _StatusReporter:
+    """Pelapor status satu-pesan untuk SATU update Telegram yang sedang diproses
+    (dibuat ulang tiap `process_update`, tidak pernah dipakai ulang lintas pesan).
+    Panggilan pertama kirim pesan status baru; panggilan berikutnya edit pesan yang
+    sama di tempat lewat `editMessageText` — tidak pernah menumpuk beberapa pesan
+    status terpisah. `clear()` menghapus pesan status begitu balasan final siap
+    dikirim, supaya tidak ada pesan status yang tertinggal di riwayat chat.
+
+    Diteruskan sebagai `on_status` ke `handler` (`LeadAgent.handle_admin_message`),
+    yang meneruskannya apa adanya ke DocumentAgent/FinanceService/ContentStudio —
+    lihat `_emit_status` di `app/document_agent.py`. Murni best-effort: kegagalan
+    API Telegram di sini (jaringan, rate limit, dll.) TIDAK PERNAH menggagalkan
+    pemrosesan pesan utama, hanya berarti status berjalan tidak tampil kali itu."""
+
+    def __init__(self, client: TelegramHTTPClient, chat_id: int, thread_id: int | None):
+        self._client = client
+        self._chat_id = chat_id
+        self._thread_id = thread_id
+        self._message_id: int | None = None
+        self._last_text: str | None = None
+
+    def __call__(self, text: str) -> None:
+        if not text or text == self._last_text:
+            # Telegram menolak edit dengan teks yang identik dengan yang sekarang
+            # ("message is not modified"); dicegah lebih dulu di sini.
+            return
+        try:
+            if self._message_id is None:
+                result = self._client.send_message(self._chat_id, text, message_thread_id=self._thread_id)
+                if isinstance(result, dict) and type(result.get('message_id')) is int:
+                    self._message_id = result['message_id']
+            else:
+                self._client.edit_message_text(self._chat_id, self._message_id, text)
+            self._last_text = text
+        except TelegramError:
+            pass
+
+    def clear(self) -> None:
+        if self._message_id is None:
+            return
+        try:
+            self._client.delete_message(self._chat_id, self._message_id)
+        except TelegramError:
+            pass
+        self._message_id = None
+
 
 @dataclass(frozen=True)
 class AdminIdentity:
@@ -186,9 +249,12 @@ INTERRUPTED_REPLY = (
 class TelegramAdminAdapter:
     def __init__(self, client: TelegramHTTPClient, identity: AdminIdentity,
                  handler: Callable[..., LeadReply], *, store: TelegramUpdateStore | None = None):
-        # `handler` dipanggil sebagai handler(text, agent_hint=...) — agent_hint None
-        # untuk chat pribadi/topik "Lead Agent" (perilaku default LeadAgent, tidak
-        # berubah), atau "document"/"finance" untuk topik Nara/Laras (lihat
+        # `handler` dipanggil sebagai handler(text, agent_hint=..., on_status=...) —
+        # agent_hint None untuk chat pribadi/topik "Lead Agent" (perilaku default
+        # LeadAgent, tidak berubah), atau "document"/"finance" untuk topik
+        # Nara/Laras; on_status adalah `_StatusReporter` satu-pesan per update
+        # (lihat kelas itu dan `process_update`) yang diteruskan apa adanya sampai
+        # ke DocumentAgent/FinanceService/ContentStudio (lihat
         # LeadAgent.handle_admin_message di app/lead.py).
         self.client = client
         self.identity = identity
@@ -278,18 +344,24 @@ class TelegramAdminAdapter:
         elif len(text) > 8000:
             reply_text = 'Pesan terlalu panjang. Mohon kirim dalam beberapa bagian.'
         else:
+            status_reporter = _StatusReporter(self.client, chat_id, thread_id)
             try:
                 # Normalize Telegram's /command@bot form before passing to the app.
                 head, sep, tail = text.strip().partition(' ')
                 if head.startswith('/'):
                     text = head.split('@', 1)[0] + sep + tail
-                reply = self.handler(text, agent_hint=agent_hint)
+                reply = self.handler(text, agent_hint=agent_hint, on_status=status_reporter)
                 reply_text = reply.text
             except ValueError:
                 reply_text = 'Permintaan belum dapat diselesaikan. Periksa /hari_ini atau /dokumen_status dan pastikan data lengkap sebelum mencoba lagi.'
             except Exception as exc:
                 print(f'Pemrosesan pesan terhenti ({type(exc).__name__}); rincian pesan tidak dicetak.', flush=True)
                 reply_text = INTERRUPTED_REPLY
+            finally:
+                # Pesan status (kalau sempat terkirim) selalu dibersihkan sebelum
+                # balasan final dikirim di bawah — baik proses berhasil, gagal, atau
+                # meleset ke exception yang tidak terduga.
+                status_reporter.clear()
         if self.store:
             self.store.complete(update_id, reply_text)
         self._deliver(update_id, chat_id, reply_text, thread_id)

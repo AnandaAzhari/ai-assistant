@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from app.finance_query import FinanceQueryInterpreter
 
@@ -732,7 +732,7 @@ class FinanceService:
             f"Arus kas bersih: {rupiah(data['net'])}",
         )
 
-    def handle(self, message: str) -> FinanceResult:
+    def handle(self, message: str, *, on_status: Callable[[str], None] | None = None) -> FinanceResult:
         raw = message.strip()
         text = raw.casefold()
         command = text.split(maxsplit=1)[0].split("@", 1)[0] if text else ""
@@ -875,6 +875,14 @@ class FinanceService:
         probe_amount = parse_amount(raw) if probe_kind else None
         is_recording_instruction = bool(probe_kind and probe_amount is not None)
         if not is_recording_instruction and self.query_interpreter is not None and self.query_interpreter.configured:
+            if on_status is not None:
+                # Best-effort: kegagalan pelapor status tidak pernah menggagalkan
+                # jawaban laporan itu sendiri (sama seperti Nara, lihat
+                # DocumentAgent._emit_status).
+                try:
+                    on_status("🔎 Laras sedang menganalisis pertanyaan Anda...")
+                except Exception:
+                    pass
             query_reply = self._answer_free_form_query(raw)
             if query_reply is not None:
                 return query_reply

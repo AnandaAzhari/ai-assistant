@@ -17,7 +17,7 @@ Lima kebutuhan yang diuji di sini (persis permintaan owner):
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 from app.dp_policy import DpPolicyStore
 from app.lead import LeadAgent, LeadReply
@@ -126,7 +126,7 @@ class AuthorizationTests(unittest.TestCase):
 
     def test_private_chat_still_works_exactly_as_before(self):
         self.assertTrue(self.adapter.process_update(private_message()))
-        self.handler.assert_called_once_with("/status", agent_hint=None)
+        self.handler.assert_called_once_with("/status", agent_hint=None, on_status=ANY)
 
 
 class ReplyRoutingTests(unittest.TestCase):
@@ -139,7 +139,7 @@ class ReplyRoutingTests(unittest.TestCase):
         self.adapter.process_update(group_message(thread_id=NARA_THREAD))
         self.assertEqual(self.client.sent, [(GROUP_CHAT_ID, "Makalah dicatat")])
         self.assertEqual(self.client.thread_ids, [NARA_THREAD])
-        self.handler.assert_called_once_with("halo", agent_hint="document")
+        self.handler.assert_called_once_with("halo", agent_hint="document", on_status=ANY)
 
     def test_reply_to_private_chat_never_carries_a_thread_id(self):
         self.adapter.process_update(private_message(text="/bantuan"))
@@ -147,11 +147,11 @@ class ReplyRoutingTests(unittest.TestCase):
 
     def test_lead_agent_topic_passes_no_special_hint(self):
         self.adapter.process_update(group_message(thread_id=LEAD_THREAD, text="/status"))
-        self.handler.assert_called_once_with("/status", agent_hint="lead")
+        self.handler.assert_called_once_with("/status", agent_hint="lead", on_status=ANY)
 
     def test_laras_topic_hints_finance(self):
         self.adapter.process_update(group_message(thread_id=LARAS_THREAD, text="saldo berapa"))
-        self.handler.assert_called_once_with("saldo berapa", agent_hint="finance")
+        self.handler.assert_called_once_with("saldo berapa", agent_hint="finance", on_status=ANY)
 
 
 class DurablePendingAcrossTopicsTests(unittest.TestCase):
@@ -192,8 +192,13 @@ class TelegramUpdateStoreThreadIdTests(unittest.TestCase):
 
     def test_migration_adds_thread_id_column_to_pre_existing_database(self):
         import sqlite3
+        from contextlib import closing
         self.db.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db) as db:
+        # closing(...) di sini WAJIB, bukan cuma `with sqlite3.connect(...) as db:` —
+        # itu hanya commit/rollback transaksi, tidak menutup koneksi, dan di Windows
+        # itu membuat file db tetap terkunci sehingga TemporaryDirectory.cleanup()
+        # gagal (WinError 32). Lihat pola yang sama di app/document_preferences.py.
+        with closing(sqlite3.connect(self.db)) as db, db:
             db.execute('''CREATE TABLE telegram_updates (
                 bot_id INTEGER NOT NULL, update_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
                 state TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', sent_chunks INTEGER NOT NULL DEFAULT 0,
@@ -222,12 +227,12 @@ class LeadAgentTopicHintRoutingTests(unittest.TestCase):
     def test_document_hint_routes_ambiguous_free_text_to_document(self):
         reply = self.lead.handle_admin_message("tolong bantu ya", agent_hint="document")
         self.assertEqual(reply.target, "document")
-        self.document.handle.assert_called_once_with("tolong bantu ya")
+        self.document.handle.assert_called_once_with("tolong bantu ya", on_status=None)
 
     def test_finance_hint_routes_ambiguous_free_text_to_finance(self):
         reply = self.lead.handle_admin_message("tolong bantu ya", agent_hint="finance")
         self.assertEqual(reply.target, "finance")
-        self.finance.handle.assert_called_once_with("tolong bantu ya")
+        self.finance.handle.assert_called_once_with("tolong bantu ya", on_status=None)
 
     def test_lead_hint_behaves_exactly_like_no_hint(self):
         with_hint = self.lead.handle_admin_message("tolong bantu ya", agent_hint="lead")
@@ -278,14 +283,14 @@ class TopicDocumentIsolationTests(unittest.TestCase):
         lead = LeadAgent(document=shared_document, topic_document_factory=factory)
         lead.handle_admin_message("susun dokumen tentang AI", agent_hint="document")
         self.assertIn("telegram-nara", built)
-        built["telegram-nara"].handle.assert_called_once_with("susun dokumen tentang AI")
+        built["telegram-nara"].handle.assert_called_once_with("susun dokumen tentang AI", on_status=None)
         shared_document.handle.assert_not_called()
 
     def test_lead_agent_topic_and_private_chat_keep_using_the_shared_instance(self):
         shared_document = self._document_agent("shared")
         lead = LeadAgent(document=shared_document, topic_document_factory=lambda key: self._document_agent(key))
         lead.handle_admin_message("susun dokumen tentang AI", agent_hint=None)
-        shared_document.handle.assert_called_once_with("susun dokumen tentang AI")
+        shared_document.handle.assert_called_once_with("susun dokumen tentang AI", on_status=None)
 
     def test_active_nara_session_does_not_leak_into_lead_agent_topic_free_text(self):
         shared_document = self._document_agent("shared")
@@ -304,7 +309,7 @@ class TopicDocumentIsolationTests(unittest.TestCase):
         shared_document = self._document_agent("shared")
         lead = LeadAgent(document=shared_document)  # topic_document_factory belum diberikan
         lead.handle_admin_message("susun dokumen tentang AI", agent_hint="document")
-        shared_document.handle.assert_called_once_with("susun dokumen tentang AI")
+        shared_document.handle.assert_called_once_with("susun dokumen tentang AI", on_status=None)
 
 
 class RealDocumentIsolationIntegrationTests(unittest.TestCase):

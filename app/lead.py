@@ -408,14 +408,22 @@ class LeadAgent:
             "Gunakan /sync untuk mencoba lagi."
         )
 
-    def handle_admin_message(self, message: str, *, agent_hint: str | None = None) -> LeadReply:
+    def handle_admin_message(
+        self, message: str, *, agent_hint: str | None = None,
+        on_status: Callable[[str], None] | None = None,
+    ) -> LeadReply:
         """agent_hint datang dari topik Telegram grup admin ("document" untuk topik
         Nara, "finance" untuk topik Laras, None untuk chat pribadi ATAU topik Lead
         Agent — keduanya berperilaku identik, tidak berubah sama sekali). Perintah
         "/..." dan kata kunci eksplisit di bawah TETAP diperiksa lebih dulu apa pun
         hint-nya (supaya /dp_wajib dkk tetap berfungsi dari topik mana pun) — hint
         hanya dipakai sebagai jalur terakhir untuk teks bebas yang benar-benar
-        ambigu, lihat akhir fungsi ini."""
+        ambigu, lihat akhir fungsi ini.
+
+        on_status: pelapor status opsional (lihat `app/telegram.py`), diteruskan
+        apa adanya ke DocumentAgent/FinanceService/ContentStudio yang dipanggil di
+        bawah. Default None untuk caller lama (WhatsApp, Web Admin) — perilaku
+        mereka tidak berubah sama sekali."""
         raw = (message or "").strip()
         if not raw:
             return LeadReply("lead", "membutuhkan_bantuan", "Pesan kosong. Ketik /bantuan untuk melihat perintah awal.")
@@ -964,7 +972,7 @@ class LeadAgent:
                     "Contoh: /konten_baru Risol Mamqi | instagram | promo risol weekend, tema ceria",
                 )
             business, platform, brief = fields[0], fields[1], fields[2]
-            result = self.content_studio.generate_draft(business, platform, brief)
+            result = self.content_studio.generate_draft(business, platform, brief, on_status=on_status)
             if result.status == "belum_dikonfigurasi":
                 return LeadReply("content_studio", result.status, "Content Studio belum dikonfigurasi (API key AI belum diisi).")
             if result.status == "needs_review":
@@ -1054,13 +1062,13 @@ class LeadAgent:
         if command in document_utility_commands:
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = document_agent.handle(raw)
+            result = document_agent.handle(raw, on_status=on_status)
             return LeadReply("document", result.status, result.text)
 
         if command in {"/dokumen_baru", "/makalah_baru"}:
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = document_agent.handle(raw)
+            result = document_agent.handle(raw, on_status=on_status)
             return LeadReply("document", result.status, result.text)
 
         document_commands = {"/makalah", "/dokumen", "/paper", "/laporan"}
@@ -1072,7 +1080,7 @@ class LeadAgent:
         if command in document_commands or any(word in text for word in document_words):
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = document_agent.handle(raw)
+            result = document_agent.handle(raw, on_status=on_status)
             return LeadReply("document", result.status, result.text)
 
         if command == "/sync_status":
@@ -1117,7 +1125,7 @@ class LeadAgent:
                     "Belum saya catat karena akun sumber belum disebutkan. Untuk top up/transfer, tulis sumbernya agar akun tujuan tidak salah dianggap sebagai sumber.\n"
                     "Contoh: Catat pengeluaran 300 ribu top up saldo DANA istri pakai BNI."
                 )
-            result = self.finance.handle(raw)
+            result = self.finance.handle(raw, on_status=on_status)
             sync_note = self._auto_sync_after_finance_write(raw, result)
             return LeadReply("finance", result.status, result.text + sync_note)
 
@@ -1130,7 +1138,7 @@ class LeadAgent:
             )
 
         if self._document_session_active(document_agent):
-            result = document_agent.handle(raw)
+            result = document_agent.handle(raw, on_status=on_status)
             return LeadReply("document", result.status, result.text)
 
         # Jalur terakhir sebelum menyerah: teks bebas yang benar-benar ambigu (tidak
@@ -1139,11 +1147,11 @@ class LeadAgent:
         # Topik "Lead Agent" dan chat pribadi (agent_hint None) TIDAK masuk sini,
         # jatuh ke fallback lama di bawah seperti sebelum fitur topik ada.
         if agent_hint == "document" and document_agent is not None and not command.startswith("/"):
-            result = document_agent.handle(raw)
+            result = document_agent.handle(raw, on_status=on_status)
             return LeadReply("document", result.status, result.text)
 
         if agent_hint == "finance" and self.finance is not None and not command.startswith("/"):
-            result = self.finance.handle(raw)
+            result = self.finance.handle(raw, on_status=on_status)
             sync_note = self._auto_sync_after_finance_write(raw, result)
             return LeadReply("finance", result.status, result.text + sync_note)
 

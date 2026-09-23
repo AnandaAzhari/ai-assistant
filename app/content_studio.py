@@ -28,6 +28,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
+from typing import Callable
 
 from app.brand_profile import BrandProfile, BrandProfileStore
 from app.content_learning import ContentLearningStore, FeedbackPattern
@@ -146,6 +147,7 @@ class ContentStudio:
         *,
         content_id: str = "",
         n_alternatives: int = DEFAULT_ALTERNATIVES,
+        on_status: Callable[[str], None] | None = None,
     ) -> ContentDraftResult:
         business = (business or "").strip()
         platform = (platform or "").strip()
@@ -180,6 +182,13 @@ class ContentStudio:
             {"role": "system", "content": prompt},
             {"role": "user", "content": "BRIEF OWNER:\n" + brief[:2000]},
         ]
+        if on_status is not None:
+            # Best-effort, sama seperti DocumentAgent._emit_status: kegagalan
+            # pelapor status tidak pernah menggagalkan pembuatan draft caption.
+            try:
+                on_status("🎨 Kirana sedang menyusun draft caption...")
+            except Exception:
+                pass
         reply = self.provider.generate(messages, max_tokens=1200, temperature=0.7, timeout=45)
         if reply.status != "berhasil":
             return ContentDraftResult(reply.status, business=business, platform=platform)

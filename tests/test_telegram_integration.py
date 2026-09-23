@@ -7,7 +7,7 @@ import unittest
 import urllib.error
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from app.admin_runtime import create_admin_lead
 from app.lead import LeadReply
@@ -67,7 +67,7 @@ class TelegramDeliveryTests(unittest.TestCase):
 
     def test_command_suffix_is_normalized(self):
         self.adapter.process_update(update(text='/makalah_baru@existing_bot'))
-        self.handler.assert_called_once_with('/makalah_baru', agent_hint=None)
+        self.handler.assert_called_once_with('/makalah_baru', agent_hint=None, on_status=ANY)
 
     def test_repeat_after_restart_does_not_repeat_action_or_reply(self):
         self.adapter.process_update(update())

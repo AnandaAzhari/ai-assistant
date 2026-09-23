@@ -33,6 +33,7 @@ from app.customer_book import CustomerBookStore
 from app.customer_intent import CustomerIntentClassifier
 from app.desktop import DesktopAgent, Result
 from app.document_agent import DocumentAgent
+from app.dp_policy import DpPolicyStore
 from app.finance import FinanceService
 from app.finance_corrections import correct_latest_account
 from app.google_sheets_sync import GoogleSheetsSync
@@ -44,6 +45,7 @@ from app.payment_gate import PaymentGateStore
 from app.pdf_compressor import PdfCompressor
 from app.pdf_watermark import PdfWatermarker
 from app.price_list import PriceListStore
+from app.pricing import PRICING_SETTING_KEYS, PricingConfigStore, Quote, QuoteRequest, make_quote
 from app.topic_guard import is_off_topic
 from app.trust_layer import TrustLayer
 
@@ -52,6 +54,35 @@ from app.trust_layer import TrustLayer
 # admin/testing), tapi command Telegram/Web Admin hanya mengenali nama-nama ini supaya
 # admin tidak salah ketik scope yang tidak pernah dicek kode mana pun.
 _KNOWN_KILL_SWITCH_SCOPES = {"whatsapp"}
+
+
+def _rupiah(amount: int) -> str:
+    return f"Rp{amount:,}".replace(",", ".")
+
+
+def _parse_amount(text: str) -> int:
+    cleaned = re.sub(r"(?i)^rp\.?\s*", "", (text or "").strip())
+    cleaned = cleaned.replace(".", "").replace(",", "").replace(" ", "")
+    if not cleaned or not re.fullmatch(r"-?\d+", cleaned):
+        raise ValueError(f"Angka tidak valid: '{text}'.")
+    return int(cleaned)
+
+
+def _format_quote(quote: Quote) -> str:
+    lines = [quote.label, f"Subtotal: {_rupiah(quote.base_price)}"]
+    if quote.footnote_fee:
+        lines.append(f"Footnote: {_rupiah(quote.footnote_fee)}")
+    if quote.rush_fee:
+        lines.append(f"Rush: {_rupiah(quote.rush_fee)}")
+    lines.append(f"Total: {_rupiah(quote.total)}")
+    if quote.sisa:
+        lines.append(f"DP (referensi): {_rupiah(quote.dp_amount)} — sisa {_rupiah(quote.sisa)}")
+    else:
+        lines.append("Bayar penuh di depan (total di bawah ambang DP).")
+    for reason in quote.review_reasons:
+        lines.append(f"Catatan: {reason}")
+    return "\n".join(lines)
+
 
 # Daftar perintah untuk menu "/" bawaan Telegram (BotFather `setMyCommands`), supaya
 # owner bisa mengetuk "/" di chat dan langsung melihat daftar perintah dengan
@@ -75,6 +106,7 @@ TELEGRAM_COMMAND_MENU: tuple[tuple[str, str], ...] = (
     ("sync_status", "Status Google Sheets Sync"),
     ("sync", "Sinkronkan ledger ke Google Sheets"),
     ("dokumen_status", "Cek Document Agent (Nara)"),
+    ("cari_riwayat", "Cari riwayat lintas Nara/Kirana/Laras sekaligus"),
     ("dokumen_engine_status", "Cek mesin pembuat DOCX/PDF"),
     ("dokumen_demo", "Buat DOCX/PDF demo tanpa token AI"),
     ("research", "Cari sumber akademik tanpa token AI"),
@@ -89,6 +121,16 @@ TELEGRAM_COMMAND_MENU: tuple[tuple[str, str], ...] = (
     ("harga_set", "Simpan/ubah harga layanan"),
     ("harga_hapus", "Hapus harga layanan"),
     ("harga_list", "Lihat semua harga tersimpan"),
+    ("paket_set", "Simpan/ubah paket harga makalah"),
+    ("paket_hapus", "Hapus paket harga makalah"),
+    ("paket_list", "Lihat semua paket harga"),
+    ("tarif_set", "Ubah komponen tarif (footnote/rush/DP/dst.)"),
+    ("tarif_list", "Lihat semua komponen tarif"),
+    ("hitung_harga", "Hitung harga makalah otomatis"),
+    ("hitung_rapikan", "Hitung harga jasa rapikan dokumen"),
+    ("dp_wajib", "Aktifkan DP wajib untuk order baru"),
+    ("dp_opsional", "Kembalikan DP jadi opsional"),
+    ("dp_status", "Cek status kebijakan DP saat ini"),
     ("status_set", "Catat status pesanan pelanggan"),
     ("status_lihat", "Lihat riwayat status order pelanggan"),
     ("pelanggan_nama", "Simpan/ubah nama dan bisnis pelanggan"),
@@ -140,6 +182,9 @@ class LeadAgent:
         pdf_compressor: PdfCompressor | None = None,
         payment_gate: PaymentGateStore | None = None,
         pdf_watermarker: PdfWatermarker | None = None,
+        pricing: PricingConfigStore | None = None,
+        dp_policy: DpPolicyStore | None = None,
+        topic_document_factory: Callable[[str], DocumentAgent] | None = None,
     ):
         self.desktop = desktop
         self.finance = finance
@@ -158,11 +203,22 @@ class LeadAgent:
         self.pdf_compressor = pdf_compressor
         self.payment_gate = payment_gate
         self.pdf_watermarker = pdf_watermarker
+        # Kalkulator harga (/paket_set, /tarif_set, /hitung_harga, /hitung_rapikan)
+        # dan kebijakan DP wajib/opsional (/dp_wajib, /dp_opsional, /dp_status) —
+        # lihat app/pricing.py dan app/dp_policy.py.
+        self.pricing = pricing
+        self.dp_policy = dp_policy
         # Rakit DocumentAgent per-pelanggan hanya saat pertama kali dibutuhkan
         # (lihat _customer_document_agent), supaya jalur pelanggan tetap ringan
         # kalau document_factory tidak diberikan (fitur belum diaktifkan).
         self.document_factory = document_factory
         self._customer_documents: dict[str, DocumentAgent] = {}
+        # DocumentAgent tersendiri per TOPIK Telegram (mis. topik "Nara" di grup
+        # admin) — pola yang sama dengan _customer_documents di atas, tapi untuk
+        # isolasi antar topik grup admin, bukan antar pelanggan WhatsApp. Lihat
+        # _topic_document_agent/_document_for dan app/admin_runtime.py.
+        self.topic_document_factory = topic_document_factory
+        self._topic_documents: dict[str, DocumentAgent] = {}
         # Pelanggan yang sudah kirim PDF tapi belum menyebutkan target ukuran (KB/MB)
         # di pesan yang sama — menunggu balasan berikutnya, lihat
         # _handle_customer_message_inner dan _run_pdf_compression di bawah. Per proses
@@ -219,17 +275,125 @@ class LeadAgent:
             return first.casefold(), remainder.strip()
         return GLOBAL_SCOPE, rest
 
-    def _document_session_active(self) -> bool:
-        if self.document is None:
+    def _document_session_active(self, document: DocumentAgent | None = None) -> bool:
+        """Tanpa argumen, tetap memeriksa self.document seperti sebelumnya (chat
+        pribadi/topik Lead Agent, tidak berubah). handle_admin_message meneruskan
+        DocumentAgent topik yang sedang aktif (lihat _document_for) supaya sesi
+        makalah topik Nara tidak diperiksa/tercampur dari topik lain."""
+        document = self.document if document is None else document
+        if document is None:
             return False
-        session_active = getattr(self.document, "session_active", None)
+        session_active = getattr(document, "session_active", None)
         if isinstance(session_active, bool):
             return session_active
-        requirements = getattr(self.document, "requirements", None)
+        requirements = getattr(document, "requirements", None)
         if requirements is None:
             return False
         labels = getattr(requirements, "FIELD_LABELS", {})
         return any(bool(getattr(requirements, key, "")) for key in labels)
+
+    def _document_for(self, agent_hint: str | None) -> DocumentAgent | None:
+        """DocumentAgent yang dipakai untuk pesan admin ini. Topik Telegram "Nara"
+        (agent_hint == "document") dapat instance TERSENDIRI lewat
+        _topic_document_agent, supaya sesi susun makalah di topik itu tidak pernah
+        bocor ke topik lain atau ke chat pribadi — sama seperti isolasi per-pelanggan
+        WhatsApp (_customer_document_agent). Chat pribadi dan topik lain (Lead
+        Agent/Laras) tetap memakai self.document seperti sebelum fitur topik ada."""
+        if agent_hint == "document":
+            topic_agent = self._topic_document_agent("telegram-nara")
+            if topic_agent is not None:
+                return topic_agent
+        return self.document
+
+    def _topic_document_agent(self, topic_key: str) -> DocumentAgent | None:
+        if self.topic_document_factory is None:
+            return self.document
+        agent = self._topic_documents.get(topic_key)
+        if agent is None:
+            agent = self.topic_document_factory(topic_key)
+            self._topic_documents[topic_key] = agent
+        return agent
+
+    @staticmethod
+    def _label_document_scope(scope_id: str) -> str:
+        """Nama ramah-baca dari scope_id sesi Document Agent, ditebak dari pola
+        penamaan yang sudah dipakai (lihat app/admin_runtime.py, app/lead.py
+        _customer_document_agent, telegram_main.py) — bukan sumber kebenaran baru,
+        cuma label supaya hasil /cari_riwayat gampang dipahami tanpa tahu scope
+        persis."""
+        if "-TOPIC-telegram-nara" in scope_id:
+            return "Nara (topik Telegram)"
+        if scope_id.startswith("DOCSRC-WHATSAPP-"):
+            return f"Nara (pelanggan WhatsApp {scope_id[len('DOCSRC-WHATSAPP-'):]})"
+        return "Nara (chat pribadi / topik Lead Agent / topik Laras)"
+
+    @staticmethod
+    def _label_content_scope(scope_id: str) -> str:
+        business, _, rest = scope_id.partition(":")
+        platform = rest.split(":", 1)[0] if rest else ""
+        if business and platform:
+            return f"Kirana ({business}/{platform})"
+        return "Kirana (Content Studio)"
+
+    def _search_history(self, keyword: str) -> LeadReply:
+        """Cari lintas SEMUA agen (Nara/Kirana/Laras) sekaligus, dipicu perintah
+        /cari_riwayat dari topik mana pun (Lead Agent tetap "otaknya" — bisa
+        menjawab dari data yang sebenarnya dipegang agen lain, tanpa admin perlu
+        pindah topik dulu). Angka/isi selalu diambil langsung dari store asli
+        masing-masing (tidak pernah dikarang AI), sesuai prinsip guardrail yang
+        sama dengan seluruh Lead Agent."""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return LeadReply(
+                "lead", "membutuhkan_bantuan",
+                "Sebutkan kata kuncinya. Contoh: /cari_riwayat proposal usaha kopi"
+            )
+
+        sections: list[str] = []
+
+        document_store = self.document.session_store if self.document is not None else None
+        if document_store is not None:
+            hits = document_store.search(keyword, limit=5)
+            lines = []
+            for hit in hits:
+                brief = hit["payload"].get("brief", {}) if isinstance(hit["payload"], dict) else {}
+                phase = hit["payload"].get("phase", "-") if isinstance(hit["payload"], dict) else "-"
+                topic_title = (brief.get("topic_title") or "").strip() or "(topik belum ditentukan)"
+                subject = (brief.get("subject") or "").strip()
+                summary = f"{subject} — {topic_title}" if subject else topic_title
+                lines.append(f"  • {self._label_document_scope(hit['scope_id'])}: {summary} (fase: {phase}, {hit['updated_at']})")
+            sections.append("Nara/dokumen:\n" + ("\n".join(lines) if lines else "  (tidak ada yang cocok)"))
+
+        content_store = self.content_studio.content_session if self.content_studio is not None else None
+        if content_store is not None:
+            hits = content_store.search(keyword, limit=5)
+            lines = []
+            for hit in hits:
+                payload = hit["payload"] if isinstance(hit["payload"], dict) else {}
+                snippet = str(payload.get("brief") or payload.get("caption") or payload.get("status") or "-")
+                if len(snippet) > 80:
+                    snippet = snippet[:80] + "..."
+                lines.append(f"  • {self._label_content_scope(hit['scope_id'])}: {snippet} ({hit['updated_at']})")
+            sections.append("Kirana/konten:\n" + ("\n".join(lines) if lines else "  (tidak ada yang cocok)"))
+
+        if self.finance is not None:
+            hits = self.finance.search(keyword, limit=5)
+            lines = []
+            for hit in hits:
+                jenis = "masuk" if hit["kind"] == "income" else "keluar"
+                lines.append(
+                    f"  • {jenis} {_rupiah(hit['amount'])} — {hit['description']} "
+                    f"({hit['category']}, {hit['business']}, {hit['account']}, {hit['created']})"
+                )
+            sections.append("Laras/keuangan:\n" + ("\n".join(lines) if lines else "  (tidak ada yang cocok)"))
+
+        if not sections:
+            return LeadReply("lead", "belum_dikonfigurasi", "Belum ada agen dengan riwayat yang bisa dicari pada runtime ini.")
+
+        return LeadReply(
+            "lead", "berhasil",
+            f"Hasil pencarian \"{keyword}\":\n\n" + "\n\n".join(sections)
+        )
 
     def _auto_sync_after_finance_write(self, raw: str, result) -> str:
         if not self._finance_write_succeeded(raw, result):
@@ -244,13 +408,21 @@ class LeadAgent:
             "Gunakan /sync untuk mencoba lagi."
         )
 
-    def handle_admin_message(self, message: str) -> LeadReply:
+    def handle_admin_message(self, message: str, *, agent_hint: str | None = None) -> LeadReply:
+        """agent_hint datang dari topik Telegram grup admin ("document" untuk topik
+        Nara, "finance" untuk topik Laras, None untuk chat pribadi ATAU topik Lead
+        Agent — keduanya berperilaku identik, tidak berubah sama sekali). Perintah
+        "/..." dan kata kunci eksplisit di bawah TETAP diperiksa lebih dulu apa pun
+        hint-nya (supaya /dp_wajib dkk tetap berfungsi dari topik mana pun) — hint
+        hanya dipakai sebagai jalur terakhir untuk teks bebas yang benar-benar
+        ambigu, lihat akhir fungsi ini."""
         raw = (message or "").strip()
         if not raw:
             return LeadReply("lead", "membutuhkan_bantuan", "Pesan kosong. Ketik /bantuan untuk melihat perintah awal.")
 
         text = raw.casefold()
         command = text.split(maxsplit=1)[0].split("@", 1)[0]
+        document_agent = self._document_for(agent_hint)
 
         if command in {"/start", "/bantuan", "/help"} or text in {"bantuan", "help"}:
             finance_note = "aktif" if self.finance is not None else "belum diaktifkan"
@@ -279,6 +451,7 @@ class LeadAgent:
                 "/sync_status - status Google Sheets Sync\n"
                 "/sync - sinkronkan ledger ke Google Sheets secara manual\n"
                 "/dokumen_status - cek Document Agent\n"
+                "/cari_riwayat <kata kunci> - cari riwayat lintas Nara/Kirana/Laras sekaligus, bisa dari topik mana pun\n"
                 "/dokumen_engine_status - cek mesin DOCX/PDF lokal\n"
                 "/dokumen_demo - buat DOCX/PDF demo tanpa token AI\n"
                 "/research <topik> - cari sumber akademik tanpa token AI\n"
@@ -294,6 +467,16 @@ class LeadAgent:
                 "/harga_set <layanan> | <harga> | <catatan opsional> - simpan/ubah harga layanan\n"
                 "/harga_hapus <layanan> - hapus harga layanan\n"
                 "/harga_list - lihat semua harga tersimpan\n"
+                "/paket_set <nama> | <batas_halaman> | <harga> - simpan/ubah paket harga makalah\n"
+                "/paket_hapus <nama> - hapus paket harga makalah\n"
+                "/paket_list - lihat semua paket harga\n"
+                "/tarif_set <kunci> <nilai> - ubah komponen tarif (mis. rush_persen, dp_persen)\n"
+                "/tarif_list - lihat semua komponen tarif\n"
+                "/hitung_harga <halaman> | <paket opsional> - hitung harga makalah otomatis\n"
+                "/hitung_rapikan <dasar|struktur|khusus> <halaman> - hitung harga jasa rapikan dokumen\n"
+                "/dp_wajib [alasan] - aktifkan DP wajib untuk order baru\n"
+                "/dp_opsional [alasan] - kembalikan DP jadi opsional\n"
+                "/dp_status - cek status kebijakan DP saat ini\n"
                 "/status_set <nomor_wa> <order_id> | <status> - catat status pesanan pelanggan\n"
                 "/status_lihat <nomor_wa> - lihat riwayat status order pelanggan tsb\n"
                 "/pelanggan_nama <nomor_wa> | <nama> | <bisnis opsional> - simpan/ubah nama dan bisnis pelanggan\n"
@@ -316,6 +499,8 @@ class LeadAgent:
                 f"Document Engine: {engine_note}.\n"
                 f"Kill switch: {'siap' if self.kill_switch is not None else 'belum tersedia'}.\n"
                 f"Price list: {'siap' if self.price_list is not None else 'belum tersedia'}.\n"
+                f"Kalkulator harga (paket/tarif): {'siap' if self.pricing is not None else 'belum tersedia'}.\n"
+                f"Kebijakan DP: {('WAJIB' if self.dp_policy.is_mandatory() else 'opsional') if self.dp_policy is not None else 'belum tersedia'}.\n"
                 f"Order status: {'siap' if self.order_status is not None else 'belum tersedia'}.\n"
                 f"Content Studio: {'siap' if self.content_studio is not None and self.content_studio.configured else 'belum tersedia/menunggu API key'}.\n"
                 f"Interaction Log (Fase 5): {'siap' if self.interaction_log is not None else 'belum tersedia'}.\n"
@@ -351,6 +536,10 @@ class LeadAgent:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.status()
             return LeadReply("document", result.status, result.text)
+
+        if command == "/cari_riwayat":
+            _, _, keyword_part = raw.partition(" ")
+            return self._search_history(keyword_part)
 
         if command in {"/matikan_otomatis", "/killswitch_matikan"}:
             if self.kill_switch is None:
@@ -436,6 +625,132 @@ class LeadAgent:
                 return LeadReply("price_list", "berhasil", "Price list masih kosong. Tambah dengan /harga_set.")
             lines = [f"- {entry.display_name}: {entry.price_text}" + (f" ({entry.note})" if entry.note else "") for entry in entries]
             return LeadReply("price_list", "berhasil", "Price list saat ini:\n" + "\n".join(lines))
+
+        if command in {"/paket_set"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            if len(fields) < 3 or not fields[0]:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /paket_set <nama> | <batas_halaman> | <harga>\n"
+                    "Contoh: /paket_set Ekonomis | 3 | 20000",
+                )
+            try:
+                page_limit, price = _parse_amount(fields[1]), _parse_amount(fields[2])
+                tier = self.pricing.set_package(fields[0], page_limit, price, updated_by=f"admin:{self.admin_channel}")
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply("pricing", "berhasil", f"Paket tersimpan: {tier.name} (maks {tier.page_limit} halaman) = {_rupiah(tier.price)}")
+
+        if command in {"/paket_hapus"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            name = parts[1].strip() if len(parts) > 1 else ""
+            if not name:
+                return LeadReply("lead", "format_salah", "Format: /paket_hapus <nama paket>")
+            removed = self.pricing.remove_package(name)
+            return LeadReply(
+                "pricing", "berhasil" if removed else "tidak_ditemukan",
+                f"Paket '{name}' dihapus." if removed else f"Paket '{name}' tidak ditemukan.",
+            )
+
+        if command in {"/paket_list", "/paket_daftar"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            tiers = self.pricing.list_packages()
+            if not tiers:
+                return LeadReply("pricing", "berhasil", "Belum ada paket harga. Tambah dengan /paket_set.")
+            lines = [f"- {tier.name}: maks {tier.page_limit} halaman = {_rupiah(tier.price)}" for tier in tiers]
+            return LeadReply("pricing", "berhasil", "Paket harga saat ini:\n" + "\n".join(lines))
+
+        if command in {"/tarif_set"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            key_value = rest.split(maxsplit=1)
+            if len(key_value) < 2:
+                return LeadReply(
+                    "lead", "format_salah",
+                    "Format: /tarif_set <kunci> <nilai>\n"
+                    f"Kunci yang dikenal: {', '.join(sorted(PRICING_SETTING_KEYS))}",
+                )
+            key, value_text = key_value[0].strip(), key_value[1].strip()
+            try:
+                value = _parse_amount(value_text)
+                self.pricing.set_setting(key, value, updated_by=f"admin:{self.admin_channel}")
+            except ValueError as exc:
+                return LeadReply("lead", "format_salah", str(exc))
+            return LeadReply("pricing", "berhasil", f"Tarif '{key}' diubah menjadi {value}.")
+
+        if command in {"/tarif_list", "/tarif_daftar"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            settings = self.pricing.all_settings()
+            lines = [f"- {key}: {value}" for key, value in sorted(settings.items())]
+            return LeadReply("pricing", "berhasil", "Tarif saat ini:\n" + "\n".join(lines))
+
+        if command in {"/hitung_harga"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            fields = [field.strip() for field in rest.split("|")]
+            package_name = fields[1] if len(fields) > 1 and fields[1] else None
+            try:
+                pages = _parse_amount(fields[0]) if fields and fields[0] else 0
+                quote = make_quote(QuoteRequest(pages=pages, package_name=package_name), self.pricing.load_config())
+            except ValueError as exc:
+                return LeadReply(
+                    "lead", "format_salah",
+                    f"{exc}\nFormat: /hitung_harga <halaman> | <paket opsional>\nContoh: /hitung_harga 8",
+                )
+            return LeadReply("pricing", "berhasil", _format_quote(quote))
+
+        if command in {"/hitung_rapikan"}:
+            if self.pricing is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kalkulator harga belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            rest = parts[1] if len(parts) > 1 else ""
+            level_pages = rest.split(maxsplit=1)
+            try:
+                level = level_pages[0].strip().casefold() if level_pages else ""
+                pages = _parse_amount(level_pages[1]) if len(level_pages) > 1 else 0
+                quote = make_quote(QuoteRequest(tidy_level=level, tidy_pages=pages), self.pricing.load_config())
+            except ValueError as exc:
+                return LeadReply(
+                    "lead", "format_salah",
+                    f"{exc}\nFormat: /hitung_rapikan <dasar|struktur|khusus> <halaman>\nContoh: /hitung_rapikan struktur 12",
+                )
+            return LeadReply("pricing", "berhasil", _format_quote(quote))
+
+        if command in {"/dp_wajib"}:
+            if self.dp_policy is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kebijakan DP belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            reason = parts[1].strip() if len(parts) > 1 else ""
+            self.dp_policy.set_mandatory(reason=reason, changed_by=f"admin:{self.admin_channel}")
+            return LeadReply("dp_policy", "berhasil", "DP sekarang WAJIB untuk order baru." + (f" Alasan: {reason}" if reason else ""))
+
+        if command in {"/dp_opsional"}:
+            if self.dp_policy is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kebijakan DP belum tersedia pada runtime ini.")
+            parts = raw.split(maxsplit=1)
+            reason = parts[1].strip() if len(parts) > 1 else ""
+            self.dp_policy.set_optional(reason=reason, changed_by=f"admin:{self.admin_channel}")
+            return LeadReply("dp_policy", "berhasil", "DP sekarang opsional." + (f" Alasan: {reason}" if reason else ""))
+
+        if command in {"/dp_status"}:
+            if self.dp_policy is None:
+                return LeadReply("lead", "belum_dikonfigurasi", "Kebijakan DP belum tersedia pada runtime ini.")
+            state = self.dp_policy.status()
+            label = "WAJIB" if state.mandatory else "opsional"
+            reason_note = f" Alasan: {state.reason}" if state.reason else ""
+            return LeadReply("dp_policy", "berhasil", f"Kebijakan DP saat ini: {label}.{reason_note}")
 
         if command in {"/status_set", "/status_order_set"}:
             if self.order_status is None:
@@ -737,15 +1052,15 @@ class LeadAgent:
             "/research_save", "/riset_simpan", "/sources", "/sumber",
         }
         if command in document_utility_commands:
-            if self.document is None:
+            if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = self.document.handle(raw)
+            result = document_agent.handle(raw)
             return LeadReply("document", result.status, result.text)
 
         if command in {"/dokumen_baru", "/makalah_baru"}:
-            if self.document is None:
+            if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = self.document.handle(raw)
+            result = document_agent.handle(raw)
             return LeadReply("document", result.status, result.text)
 
         document_commands = {"/makalah", "/dokumen", "/paper", "/laporan"}
@@ -755,9 +1070,9 @@ class LeadAgent:
             "susun dokumen", "buat dokumen"
         )
         if command in document_commands or any(word in text for word in document_words):
-            if self.document is None:
+            if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
-            result = self.document.handle(raw)
+            result = document_agent.handle(raw)
             return LeadReply("document", result.status, result.text)
 
         if command == "/sync_status":
@@ -814,9 +1129,23 @@ class LeadAgent:
                 "Saya mengenali ini sebagai tugas TaqiDesk/DocuTech. Integrasi TaqiDesk belum diaktifkan pada tahap runtime minimum."
             )
 
-        if self._document_session_active():
-            result = self.document.handle(raw)
+        if self._document_session_active(document_agent):
+            result = document_agent.handle(raw)
             return LeadReply("document", result.status, result.text)
+
+        # Jalur terakhir sebelum menyerah: teks bebas yang benar-benar ambigu (tidak
+        # cocok kata kunci/command apa pun di atas) diarahkan sesuai topik Telegram
+        # asal pesan ini — topik Nara/Laras, lihat docstring handle_admin_message.
+        # Topik "Lead Agent" dan chat pribadi (agent_hint None) TIDAK masuk sini,
+        # jatuh ke fallback lama di bawah seperti sebelum fitur topik ada.
+        if agent_hint == "document" and document_agent is not None and not command.startswith("/"):
+            result = document_agent.handle(raw)
+            return LeadReply("document", result.status, result.text)
+
+        if agent_hint == "finance" and self.finance is not None and not command.startswith("/"):
+            result = self.finance.handle(raw)
+            sync_note = self._auto_sync_after_finance_write(raw, result)
+            return LeadReply("finance", result.status, result.text + sync_note)
 
         if command.startswith("/"):
             return LeadReply("lead", "membutuhkan_bantuan", "Perintah belum dikenal. Ketik /bantuan.")

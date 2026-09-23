@@ -85,5 +85,64 @@ class FinanceTests(unittest.TestCase):
         self.assertIn("Arus kas bersih: Rp75.000", reply.text)
 
 
+class FinanceSearchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.db = Path(self.temp.name) / "finance.db"
+        self.finance = FinanceService(self.db)
+
+    def _record(self, **overrides):
+        defaults = dict(
+            kind="expense", amount=80000, account="BCA", business="Taqi Desk",
+            category="Perlengkapan", description="Beli tinta printer",
+        )
+        defaults.update(overrides)
+        return self.finance.record(**defaults)
+
+    def test_search_matches_description(self):
+        self._record(description="Beli tinta printer merek Epson")
+        self.assertEqual(len(self.finance.search("tinta printer")), 1)
+
+    def test_search_matches_category_and_business(self):
+        self._record(category="Bahan Baku", business="Risol Mamqi", description="Belanja cabai")
+        self.assertEqual(len(self.finance.search("bahan baku")), 1)
+        self.assertEqual(len(self.finance.search("risol mamqi")), 1)
+
+    def test_search_is_case_insensitive(self):
+        self._record(description="Top up saldo DANA istri")
+        self.assertEqual(len(self.finance.search("SALDO DANA")), 1)
+
+    def test_search_no_match_returns_empty_list(self):
+        self._record(description="Beli tinta printer")
+        self.assertEqual(self.finance.search("sewa gedung"), [])
+
+    def test_search_empty_keyword_returns_empty_list(self):
+        self._record()
+        self.assertEqual(self.finance.search(""), [])
+        self.assertEqual(self.finance.search("   "), [])
+
+    def test_search_orders_newest_first_and_respects_limit(self):
+        for i in range(3):
+            self._record(description=f"Cicilan sewa booth edisi {i}")
+        hits = self.finance.search("Cicilan sewa booth", limit=2)
+        self.assertEqual(len(hits), 2)
+        self.assertIn("edisi 2", hits[0]["description"])
+
+    def test_search_result_fields(self):
+        self._record(
+            kind="income", amount=150000, account="QRIS", business="Pixiva.ID",
+            category="Jasa Foto", description="DP photobooth ulang tahun",
+        )
+        hits = self.finance.search("photobooth")
+        self.assertEqual(len(hits), 1)
+        hit = hits[0]
+        self.assertEqual(hit["kind"], "income")
+        self.assertEqual(hit["amount"], 150000)
+        self.assertEqual(hit["account"], "QRIS")
+        self.assertEqual(hit["business"], "Pixiva.ID")
+        self.assertEqual(hit["category"], "Jasa Foto")
+
+
 if __name__ == "__main__":
     unittest.main()

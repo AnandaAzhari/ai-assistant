@@ -576,6 +576,34 @@ class FinanceService:
                 })
         return results
 
+    def search(self, keyword: str, *, limit: int = 10) -> list[dict]:
+        """Cari transaksi (confirmed) yang deskripsi/kategori/usahanya mengandung
+        `keyword`, terbaru lebih dulu. Dipakai Lead Agent (/cari_riwayat) supaya
+        angka yang ditampilkan tetap dari data ledger asli (tidak pernah dikarang
+        AI), sama seperti jalur Finance Agent lain di modul ini."""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return []
+        pattern = "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT kind, amount, account, business, category, description, created
+                   FROM finance_transactions
+                   WHERE status='confirmed' AND (
+                       description LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\'
+                       OR business LIKE ? ESCAPE '\\' OR account LIKE ? ESCAPE '\\')
+                   ORDER BY created DESC LIMIT ?""",
+                (pattern, pattern, pattern, pattern, limit),
+            ).fetchall()
+        return [
+            {
+                "kind": row["kind"], "amount": int(row["amount"]), "account": row["account"],
+                "business": row["business"], "category": row["category"],
+                "description": row["description"], "created": row["created"],
+            }
+            for row in rows
+        ]
+
     def _answer_free_form_query(self, raw: str) -> FinanceResult | None:
         """Coba jawab pertanyaan keuangan bebas lewat AI classifier
         (`self.query_interpreter`). AI HANYA mengklasifikasikan field (report_type,

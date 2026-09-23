@@ -12,9 +12,11 @@ import os
 import sqlite3
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 
 @dataclass(frozen=True)
@@ -52,10 +54,22 @@ class GoogleSheetsSync:
             "Google Sheets Sync: siap. Gunakan /sync untuk mengirim snapshot ledger ke dashboard."
         )
 
-    def _connect(self):
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Buka transaksi SQLite dan selalu tutup handle file setelah dipakai.
+
+        sqlite3.Connection sebagai context manager hanya commit/rollback; ia tidak
+        menutup koneksi. Pada Windows hal itu membuat file database sementara tetap
+        terkunci sehingga TemporaryDirectory gagal dibersihkan (WinError 32) — lihat
+        pola yang sama di app/document_preferences.py.
+        """
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def snapshot(self) -> dict:
         """Buat snapshot mirror tanpa mengubah data lokal."""

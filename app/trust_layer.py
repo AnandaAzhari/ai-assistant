@@ -34,9 +34,11 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Iterator
 
 TRUSTED = "TRUSTED"
 LIKELY_CUSTOMER = "LIKELY_CUSTOMER"
@@ -168,10 +170,22 @@ class TrustLayer:
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS idx_trust_events_sender ON trust_events(sender_id, created)")
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Buka transaksi SQLite dan selalu tutup handle file setelah dipakai.
+
+        sqlite3.Connection sebagai context manager hanya commit/rollback; ia tidak
+        menutup koneksi. Pada Windows hal itu membuat file database sementara tetap
+        terkunci sehingga TemporaryDirectory gagal dibersihkan (WinError 32) — lihat
+        pola yang sama di app/document_preferences.py.
+        """
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def evaluate(self, sender_id: str, message: str, *, has_attachment: bool = False) -> TrustResult:
         """Nilai satu pesan pelanggan dan catat hasilnya ke audit log.

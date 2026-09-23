@@ -1,4 +1,14 @@
-"""Private owner Telegram adapter, with bounded retries and durable reply delivery."""
+"""Private owner Telegram adapter, with bounded retries and durable reply delivery.
+
+Selain chat pribadi 1:1 (perilaku asli, tidak berubah), adapter ini juga bisa
+menerima pesan dari topik-topik (forum topics) di SATU grup Telegram tertutup milik
+owner sendiri — mis. grup "Taqi AI — Ruang Admin" dengan topik "🧠 Lead Agent",
+"📁 Nara", "💰 Laras". Setiap topik dipetakan ke satu agent lewat
+`AdminIdentity.topic_agents` (thread_id -> "lead"/"document"/"finance"); topik yang
+tidak dipetakan (termasuk topik "General" bawaan) DIABAIKAN, tidak pernah diproses.
+Balasan selalu dikirim kembali ke thread asal (`message_thread_id`), dan restriksi
+admin (harus akun Telegram pemilik) berlaku SAMA baik di chat pribadi maupun di
+grup — lihat `is_authorized`."""
 from __future__ import annotations
 
 import json
@@ -6,7 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from app.lead import LeadReply
@@ -119,29 +129,51 @@ class TelegramHTTPClient:
             raise TelegramError('Daftar pesan Telegram tidak valid.')
         return result
 
-    def send_message(self, chat_id: int, text: str):
+    def send_message(self, chat_id: int, text: str, *, message_thread_id: int | None = None):
         if not text or len(text.encode('utf-16-le')) // 2 > 4096:
             raise ValueError('Balasan Telegram harus dipisahkan menjadi bagian yang lebih pendek.')
-        return self._post('sendMessage', {
+        data = {
             'chat_id': chat_id, 'text': text,
             'link_preview_options': json.dumps({'is_disabled': True}),
-        }, timeout=20)
+        }
+        if message_thread_id is not None:
+            # Hanya disertakan untuk pesan topik grup; chat pribadi tidak pernah
+            # mengirim ini, jadi payload-nya identik dengan sebelum fitur topik ada.
+            data['message_thread_id'] = message_thread_id
+        return self._post('sendMessage', data, timeout=20)
 
 
 @dataclass(frozen=True)
 class AdminIdentity:
     user_id: int
     chat_id: int | None = None
+    # Id grup Telegram "Ruang Admin" (angka negatif, wajar untuk supergroup) dan peta
+    # thread_id topik -> nama agent ("lead"/"document"/"finance"). Keduanya opsional
+    # (default: fitur topik nonaktif, hanya chat pribadi seperti sebelumnya) — lihat
+    # `telegram_main.py` untuk cara mengisinya dari .env lewat mode --discover-topics.
+    group_chat_id: int | None = None
+    topic_agents: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if type(self.user_id) is not int or self.user_id <= 0:
             raise ValueError('TELEGRAM_ADMIN_USER_ID harus angka positif.')
         if self.chat_id is not None and (type(self.chat_id) is not int or self.chat_id <= 0):
             raise ValueError('Tahap ini memakai chat pribadi; TELEGRAM_ADMIN_CHAT_ID harus angka positif.')
+        if self.group_chat_id is not None and type(self.group_chat_id) is not int:
+            raise ValueError('TELEGRAM_ADMIN_GROUP_CHAT_ID harus angka (biasanya negatif untuk grup/supergroup).')
 
     @property
     def effective_chat_id(self) -> int:
         return self.chat_id if self.chat_id is not None else self.user_id
+
+    def agent_for_topic(self, thread_id: int | None) -> str | None:
+        """Nama agent ("lead"/"document"/"finance") untuk thread_id topik grup
+        tertentu, atau None kalau topik itu belum dipetakan (termasuk topik "General"
+        yang tidak pernah mengirim message_thread_id) — pesan dari topik yang tidak
+        dikenal SENGAJA tidak diproses sama sekali, lihat `is_authorized`."""
+        if thread_id is None:
+            return None
+        return self.topic_agents.get(thread_id)
 
 
 INTERRUPTED_REPLY = (
@@ -153,7 +185,11 @@ INTERRUPTED_REPLY = (
 
 class TelegramAdminAdapter:
     def __init__(self, client: TelegramHTTPClient, identity: AdminIdentity,
-                 handler: Callable[[str], LeadReply], *, store: TelegramUpdateStore | None = None):
+                 handler: Callable[..., LeadReply], *, store: TelegramUpdateStore | None = None):
+        # `handler` dipanggil sebagai handler(text, agent_hint=...) — agent_hint None
+        # untuk chat pribadi/topik "Lead Agent" (perilaku default LeadAgent, tidak
+        # berubah), atau "document"/"finance" untuk topik Nara/Laras (lihat
+        # LeadAgent.handle_admin_message di app/lead.py).
         self.client = client
         self.identity = identity
         self.handler = handler
@@ -161,28 +197,47 @@ class TelegramAdminAdapter:
         self._seen: set[int] = set()
 
     def is_authorized(self, message: dict) -> bool:
+        """Sama seperti sebelumnya untuk chat pribadi (tidak berubah sama sekali).
+        Untuk grup: WAJIB tetap akun Telegram owner yang sama (sender.id, dicek
+        persis seperti chat pribadi) DAN chat_id-nya grup admin yang dikonfigurasi
+        DAN pesannya ada di salah satu topik yang sudah dipetakan ke agent — topik
+        lain (termasuk "General") tidak pernah dianggap terotorisasi."""
         sender, chat = message.get('from'), message.get('chat')
         if not isinstance(sender, dict) or not isinstance(chat, dict):
             return False
-        return (type(sender.get('id')) is int and sender['id'] == self.identity.user_id
-                and not sender.get('is_bot') and chat.get('type') == 'private'
-                and type(chat.get('id')) is int and chat['id'] == self.identity.effective_chat_id)
+        if type(sender.get('id')) is not int or sender['id'] != self.identity.user_id or sender.get('is_bot'):
+            return False
+        chat_type, chat_id = chat.get('type'), chat.get('id')
+        if chat_type == 'private':
+            return type(chat_id) is int and chat_id == self.identity.effective_chat_id
+        if chat_type in {'group', 'supergroup'} and self.identity.group_chat_id is not None:
+            if type(chat_id) is not int or chat_id != self.identity.group_chat_id:
+                return False
+            return self.identity.agent_for_topic(message.get('message_thread_id')) is not None
+        return False
 
-    def _deliver(self, update_id: int, chat_id: int, text: str, sent: int = 0):
+    def _deliver(self, update_id: int, chat_id: int, text: str, thread_id: int | None = None, sent: int = 0):
         chunks = text_chunks(text or 'Permintaan selesai tanpa balasan teks.')
         for index in range(sent, len(chunks)):
-            self.client.send_message(chat_id, chunks[index])
+            self.client.send_message(chat_id, chunks[index], message_thread_id=thread_id)
             if self.store:
                 self.store.delivered(update_id, index + 1, done=index + 1 == len(chunks))
 
     def flush_pending(self):
         if not self.store:
             return
-        for row in self.store.pending(self.identity.effective_chat_id):
-            if row['state'] == 'processing':
-                self.store.complete(row['update_id'], INTERRUPTED_REPLY)
-                row['reply'] = INTERRUPTED_REPLY
-            self._deliver(row['update_id'], row['chat_id'], row['reply'], row['sent_chunks'])
+        # Chat pribadi DAN grup admin (kalau dikonfigurasi) sama-sama punya pesan
+        # tertunda yang mungkin perlu dikirim ulang setelah restart — sebelum topik
+        # ada, hanya chat pribadi yang dicek di sini.
+        chat_ids = [self.identity.effective_chat_id]
+        if self.identity.group_chat_id is not None:
+            chat_ids.append(self.identity.group_chat_id)
+        for chat_id in chat_ids:
+            for row in self.store.pending(chat_id):
+                if row['state'] == 'processing':
+                    self.store.complete(row['update_id'], INTERRUPTED_REPLY)
+                    row['reply'] = INTERRUPTED_REPLY
+                self._deliver(row['update_id'], row['chat_id'], row['reply'], row.get('thread_id'), row['sent_chunks'])
 
     def process_update(self, update: dict) -> bool:
         if not isinstance(update, dict):
@@ -194,8 +249,15 @@ class TelegramAdminAdapter:
         if not self.is_authorized(message):
             return False
         chat_id = message['chat']['id']
+        # thread_id None untuk chat pribadi (tidak pernah mengirim message_thread_id)
+        # ATAU topik "General" grup (juga tidak mengirimnya) — is_authorized sudah
+        # menolak topik grup lain yang tidak dipetakan, jadi kalau sampai sini dan
+        # thread_id ada isinya, itu pasti salah satu dari tiga topik yang dikenal.
+        thread_id = message.get('message_thread_id')
+        thread_id = thread_id if type(thread_id) is int else None
+        agent_hint = self.identity.agent_for_topic(thread_id) if message['chat'].get('type') != 'private' else None
         if self.store:
-            if not self.store.reserve(update_id, chat_id):
+            if not self.store.reserve(update_id, chat_id, thread_id):
                 row = self.store.get(update_id)
                 if row['chat_id'] != chat_id:
                     return False
@@ -204,7 +266,7 @@ class TelegramAdminAdapter:
                 if row['state'] == 'processing':
                     self.store.complete(update_id, INTERRUPTED_REPLY)
                     row['reply'] = INTERRUPTED_REPLY
-                self._deliver(update_id, chat_id, row['reply'], row['sent_chunks'])
+                self._deliver(update_id, chat_id, row['reply'], row.get('thread_id'), row['sent_chunks'])
                 return True
         elif update_id in self._seen:
             return True
@@ -221,7 +283,7 @@ class TelegramAdminAdapter:
                 head, sep, tail = text.strip().partition(' ')
                 if head.startswith('/'):
                     text = head.split('@', 1)[0] + sep + tail
-                reply = self.handler(text)
+                reply = self.handler(text, agent_hint=agent_hint)
                 reply_text = reply.text
             except ValueError:
                 reply_text = 'Permintaan belum dapat diselesaikan. Periksa /hari_ini atau /dokumen_status dan pastikan data lengkap sebelum mencoba lagi.'
@@ -230,7 +292,7 @@ class TelegramAdminAdapter:
                 reply_text = INTERRUPTED_REPLY
         if self.store:
             self.store.complete(update_id, reply_text)
-        self._deliver(update_id, chat_id, reply_text)
+        self._deliver(update_id, chat_id, reply_text, thread_id)
         return True
 
     def run_forever(self, *, poll_timeout: int = 30) -> None:

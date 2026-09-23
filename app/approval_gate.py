@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from sqlite3 import Connection, Row, connect as sqlite_connect
+from typing import Iterator
 
 LEVEL_READ_ONLY = 0
 LEVEL_LOW_RISK = 1
@@ -184,10 +186,22 @@ class ApprovalGate:
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status, created)")
 
-    def connect(self) -> Connection:
+    @contextmanager
+    def connect(self) -> Iterator[Connection]:
+        """Buka transaksi SQLite dan selalu tutup handle file setelah dipakai.
+
+        sqlite3.Connection sebagai context manager hanya commit/rollback; ia tidak
+        menutup koneksi. Pada Windows hal itu membuat file database sementara tetap
+        terkunci sehingga TemporaryDirectory gagal dibersihkan (WinError 32) — lihat
+        pola yang sama di app/document_preferences.py.
+        """
         connection = sqlite_connect(self.db_path, timeout=10)
         connection.row_factory = Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def request(self, action_type: str, *, requested_by: str, summary: str = "",
                 payload: dict | None = None) -> ApprovalDecision:

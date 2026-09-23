@@ -25,15 +25,17 @@ def update(index=10, text='/status', user=123, chat=123, kind='private'):
 class Client:
     def __init__(self):
         self.sent = []
+        self.thread_ids = []
         self.fail_at = None
         self.batches = []
         self.offsets = []
 
-    def send_message(self, chat, text):
+    def send_message(self, chat, text, *, message_thread_id=None):
         if self.fail_at == len(self.sent):
             self.fail_at = None
             raise TelegramError('simulated timeout')
         self.sent.append((chat, text))
+        self.thread_ids.append(message_thread_id)
 
     def get_updates(self, *, offset=None, timeout=30):
         self.offsets.append(offset)
@@ -65,7 +67,7 @@ class TelegramDeliveryTests(unittest.TestCase):
 
     def test_command_suffix_is_normalized(self):
         self.adapter.process_update(update(text='/makalah_baru@existing_bot'))
-        self.handler.assert_called_once_with('/makalah_baru')
+        self.handler.assert_called_once_with('/makalah_baru', agent_hint=None)
 
     def test_repeat_after_restart_does_not_repeat_action_or_reply(self):
         self.adapter.process_update(update())

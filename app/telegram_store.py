@@ -18,9 +18,15 @@ class TelegramUpdateStore:
             db.execute('''CREATE TABLE IF NOT EXISTS telegram_updates (
                 bot_id INTEGER NOT NULL, update_id INTEGER NOT NULL, chat_id INTEGER NOT NULL,
                 state TEXT NOT NULL, reply TEXT NOT NULL DEFAULT '', sent_chunks INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY(bot_id, update_id))''')
+                thread_id INTEGER, PRIMARY KEY(bot_id, update_id))''')
             db.execute('''CREATE TABLE IF NOT EXISTS telegram_cursors (
                 bot_id INTEGER PRIMARY KEY, next_offset INTEGER NOT NULL)''')
+            # Migrasi untuk database lama (sebelum fitur topik grup): tabel sudah ada
+            # tanpa kolom thread_id, jadi CREATE TABLE IF NOT EXISTS di atas tidak
+            # menambahkannya — ditambah manual di sini, aman dijalankan berulang kali.
+            columns = {row[1] for row in db.execute('PRAGMA table_info(telegram_updates)')}
+            if 'thread_id' not in columns:
+                db.execute('ALTER TABLE telegram_updates ADD COLUMN thread_id INTEGER')
 
     @contextmanager
     def connect(self):
@@ -32,10 +38,10 @@ class TelegramUpdateStore:
         finally:
             db.close()
 
-    def reserve(self, update_id: int, chat_id: int) -> bool:
+    def reserve(self, update_id: int, chat_id: int, thread_id: int | None = None) -> bool:
         with self.connect() as db:
-            result = db.execute('''INSERT OR IGNORE INTO telegram_updates(bot_id,update_id,chat_id,state)
-                VALUES(?,?,?,'processing')''', (self.bot_id, update_id, chat_id))
+            result = db.execute('''INSERT OR IGNORE INTO telegram_updates(bot_id,update_id,chat_id,state,thread_id)
+                VALUES(?,?,?,'processing',?)''', (self.bot_id, update_id, chat_id, thread_id))
             return result.rowcount == 1
 
     def get(self, update_id: int):

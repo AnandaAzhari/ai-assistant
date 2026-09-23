@@ -65,6 +65,42 @@ class ContentSessionStoreTests(unittest.TestCase):
         self.assertEqual(self.store.load(scope_a)["stage"], "draft_caption")
         self.assertEqual(self.store.load(scope_b)["stage"], "scheduled")
 
+    def test_search_finds_keyword_inside_payload(self):
+        scope = self.store.build_scope("risol_mamqi", "instagram", "content-5")
+        self.store.save(scope, {"version": 1, "stage": "draft_caption", "caption": "Promo risol pedas minggu ini"})
+        hits = self.store.search("risol pedas")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["scope_id"], scope)
+        self.assertEqual(hits[0]["payload"]["caption"], "Promo risol pedas minggu ini")
+
+    def test_search_is_case_insensitive(self):
+        scope = self.store.build_scope("pixiva_id", "tiktok", "content-6")
+        self.store.save(scope, {"version": 1, "caption": "Diskon Photobooth Akhir Tahun"})
+        self.assertEqual(len(self.store.search("photobooth")), 1)
+        self.assertEqual(len(self.store.search("PHOTOBOOTH")), 1)
+
+    def test_search_no_match_returns_empty_list(self):
+        scope = self.store.build_scope("risol_mamqi", "instagram", "content-7")
+        self.store.save(scope, {"version": 1, "caption": "Ayam geprek baru"})
+        self.assertEqual(self.store.search("tidak ada kaitannya"), [])
+
+    def test_search_empty_keyword_returns_empty_list(self):
+        self.assertEqual(self.store.search(""), [])
+        self.assertEqual(self.store.search("   "), [])
+
+    def test_search_respects_limit_and_orders_newest_first(self):
+        for i in range(3):
+            scope = self.store.build_scope("risol_mamqi", "instagram", f"content-order-{i}")
+            self.store.save(scope, {"version": 1, "caption": f"Promo bulanan edisi {i}"})
+        hits = self.store.search("Promo bulanan", limit=2)
+        self.assertEqual(len(hits), 2)
+
+    def test_search_escapes_like_wildcards_in_keyword(self):
+        scope = self.store.build_scope("risol_mamqi", "instagram", "content-8")
+        self.store.save(scope, {"version": 1, "caption": "Diskon 50% untuk member baru"})
+        self.assertEqual(len(self.store.search("50%")), 1)
+        self.assertEqual(self.store.search("50_"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

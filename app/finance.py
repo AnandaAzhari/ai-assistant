@@ -10,9 +10,11 @@ from __future__ import annotations
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Iterator
 
 from app.finance_query import FinanceQueryInterpreter
 
@@ -235,10 +237,22 @@ class FinanceService:
         self.query_interpreter = query_interpreter
         self._migrate()
 
-    def connect(self):
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Buka transaksi SQLite dan selalu tutup handle file setelah dipakai.
+
+        sqlite3.Connection sebagai context manager hanya commit/rollback; ia tidak
+        menutup koneksi. Pada Windows hal itu membuat file database sementara tetap
+        terkunci sehingga TemporaryDirectory gagal dibersihkan (WinError 32) — lihat
+        pola yang sama di app/document_preferences.py.
+        """
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _migrate(self) -> None:
         with self.connect() as db:
@@ -575,6 +589,34 @@ class FinanceService:
                     "closing": opening + int(period["in_total"]) - int(period["out_total"]),
                 })
         return results
+
+    def search(self, keyword: str, *, limit: int = 10) -> list[dict]:
+        """Cari transaksi (confirmed) yang deskripsi/kategori/usahanya mengandung
+        `keyword`, terbaru lebih dulu. Dipakai Lead Agent (/cari_riwayat) supaya
+        angka yang ditampilkan tetap dari data ledger asli (tidak pernah dikarang
+        AI), sama seperti jalur Finance Agent lain di modul ini."""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return []
+        pattern = "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT kind, amount, account, business, category, description, created
+                   FROM finance_transactions
+                   WHERE status='confirmed' AND (
+                       description LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\'
+                       OR business LIKE ? ESCAPE '\\' OR account LIKE ? ESCAPE '\\')
+                   ORDER BY created DESC LIMIT ?""",
+                (pattern, pattern, pattern, pattern, limit),
+            ).fetchall()
+        return [
+            {
+                "kind": row["kind"], "amount": int(row["amount"]), "account": row["account"],
+                "business": row["business"], "category": row["category"],
+                "description": row["description"], "created": row["created"],
+            }
+            for row in rows
+        ]
 
     def _answer_free_form_query(self, raw: str) -> FinanceResult | None:
         """Coba jawab pertanyaan keuangan bebas lewat AI classifier

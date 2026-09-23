@@ -11,6 +11,7 @@ from app.document_agent import DocumentAgent
 from app.document_engine import DocumentEngine
 from app.document_preferences import DocumentPreferenceStore
 from app.document_session import DocumentSessionStore
+from app.dp_policy import DpPolicyStore
 from app.finance import FinanceService
 from app.finance_query import FinanceQueryInterpreter
 from app.google_sheets_sync import GoogleSheetsSync
@@ -22,6 +23,7 @@ from app.payment_gate import PaymentGateStore
 from app.pdf_compressor import PdfCompressor
 from app.pdf_watermark import PdfWatermarker
 from app.price_list import PriceListStore
+from app.pricing import PricingConfigStore
 from app.providers.deepseek import DeepSeekProvider
 from app.source_registry import SourceRegistry
 
@@ -33,6 +35,21 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         registry=SourceRegistry(db_path), preference_store=DocumentPreferenceStore(db_path),
         source_scope=document_scope, session_store=DocumentSessionStore(db_path),
     )
+
+    def topic_document_factory(topic_key: str) -> DocumentAgent:
+        # DocumentAgent TERPISAH per topik Telegram (mis. topik "Nara" di grup admin
+        # "Taqi AI — Ruang Admin") — dipakai LeadAgent lewat _topic_document_agent
+        # (app/lead.py) supaya sesi susun makalah di topik itu tidak pernah bercampur
+        # dengan chat pribadi atau topik lain. Scope dibangun dari document_scope
+        # dasar runtime ini + topic_key, tetap unik per (bot, admin, topik) dan
+        # tersimpan di database yang sama (DocumentSessionStore/SourceRegistry).
+        base_scope = document_scope or f"DOCSRC-{channel.upper()}"
+        return DocumentAgent(
+            DeepSeekProvider.from_env(), engine=DocumentEngine.from_env(),
+            registry=SourceRegistry(db_path), preference_store=DocumentPreferenceStore(db_path),
+            source_scope=f"{base_scope}-TOPIC-{topic_key}", session_store=DocumentSessionStore(db_path),
+        )
+
     return LeadAgent(
         # Laras (Finance Agent) sekarang bisa menjawab pertanyaan keuangan bebas lewat AI
         # (mis. "pemasukan bulan lalu Risol Mamqi berapa?"), bukan cuma command tetap
@@ -84,4 +101,12 @@ def create_admin_lead(*, channel: str = "web", document_scope: str | None = None
         # pelanggan itu kirim pesan berikutnya (lihat docstring app/payment_gate.py).
         payment_gate=PaymentGateStore(db_path),
         pdf_watermarker=PdfWatermarker.from_env(),
+        # Kalkulator harga (/paket_set, /tarif_set, /hitung_harga, /hitung_rapikan)
+        # dan kebijakan DP wajib/opsional (/dp_wajib, /dp_opsional, /dp_status) —
+        # lihat app/pricing.py dan app/dp_policy.py. Database yang sama dengan
+        # yang lain di runtime ini, supaya angka harga & status DP yang admin
+        # ubah lewat Telegram/Web Admin langsung konsisten di mana pun dibaca.
+        pricing=PricingConfigStore(db_path),
+        dp_policy=DpPolicyStore(db_path),
+        topic_document_factory=topic_document_factory,
     )

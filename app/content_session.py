@@ -59,3 +59,28 @@ class ContentSessionStore:
         """
         with closing(sqlite3.connect(self.db_path, timeout=10)) as db, db:
             db.execute("DELETE FROM content_sessions WHERE scope_id=?", (scope,))
+
+    def search(self, keyword: str, *, limit: int = 5) -> list[dict]:
+        """Cari working memory (lintas semua scope_id "usaha:platform:content_id")
+        yang payload JSON-nya mengandung `keyword`. Sama polanya dengan
+        `DocumentSessionStore.search` — dipakai Lead Agent (/cari_riwayat) supaya
+        draft/brief konten yang sedang atau pernah digarap Kirana ikut tercari."""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return []
+        pattern = "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        with closing(sqlite3.connect(self.db_path, timeout=10)) as db:
+            rows = db.execute(
+                """SELECT scope_id, payload, updated_at FROM content_sessions
+                   WHERE payload LIKE ? ESCAPE '\\'
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (pattern, limit),
+            ).fetchall()
+        results = []
+        for scope_id, payload, updated_at in rows:
+            try:
+                data = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+            results.append({"scope_id": scope_id, "payload": data, "updated_at": updated_at})
+        return results

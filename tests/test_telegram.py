@@ -7,9 +7,11 @@ from app.telegram import AdminIdentity, TelegramAdminAdapter
 class FakeClient:
     def __init__(self):
         self.sent = []
+        self.thread_ids = []
 
-    def send_message(self, chat_id, text):
+    def send_message(self, chat_id, text, *, message_thread_id=None):
         self.sent.append((chat_id, text))
+        self.thread_ids.append(message_thread_id)
 
 
 class TelegramAdminTests(unittest.TestCase):

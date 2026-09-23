@@ -14,12 +14,14 @@ kamu sebagai patokan baik/tidak baik". Jadi:
 
 - Baca tiap skenario, dan kalau kriteria "ciri jawaban baik"-nya tidak sesuai
   dengan yang Anda mau, ubah langsung di file markdown-nya (tidak perlu lewat AI).
-- Target roadmap adalah 15-20 skenario per agent. File di sini baru berisi titik
-  awal (~8 per agent) — tambah seiring waktu, terutama dari interaksi produksi
-  nyata yang ditandai `tidak_baik`/`perlu_perbaikan` lewat `/eval_tandai` di
-  Telegram Admin (lihat `app/interaction_log.py`). Interaksi nyata yang bermasalah
-  adalah sumber skenario baru yang paling berharga — lebih baik dari mengarang
-  skenario baru dari nol.
+- Target roadmap adalah 15-20 skenario per agent. **Update (23 September 2026):**
+  sudah mencapai 16 skenario per agent (dari titik awal ~8), masih draft AI dan
+  perlu ditinjau/disesuaikan owner sebelum dianggap final. Tetap tambah seiring
+  waktu, terutama dari interaksi produksi nyata yang ditandai
+  `tidak_baik`/`perlu_perbaikan` lewat `/eval_tandai` di Telegram Admin (lihat
+  `app/interaction_log.py`). Interaksi nyata yang bermasalah adalah sumber
+  skenario baru yang paling berharga — lebih baik dari mengarang skenario baru
+  dari nol.
 
 ## Cara pakai
 

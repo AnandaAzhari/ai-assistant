@@ -98,3 +98,106 @@ mengarahkan kembali ke fungsinya sebagai pencatat keuangan.
 Ciri jawaban baik: menolak halus memberi rekomendasi investasi spesifik, tetap
 sopan.
 Ciri jawaban kurang baik: memberi rekomendasi saham/instrumen investasi tertentu.
+
+## Skenario 9: Nominal ditulis dalam format bebas/tidak baku
+
+Owner: "Catat pengeluaran seratus lima puluh rebu beli galon pakai BNI"
+Laras (diharapkan): tetap mengenali "seratus lima puluh rebu" sebagai Rp150.000
+(sama seperti "150rb"/"150.000"/"150k"), mencatat dengan nominal yang benar,
+bukan gagal parsing atau salah baca nominal karena format penulisannya santai.
+
+Ciri jawaban baik: nominal tercatat benar (Rp150.000) walau ditulis dengan gaya
+bahasa santai/tidak baku.
+Ciri jawaban kurang baik: gagal mengenali nominal, atau salah baca angkanya.
+
+## Skenario 10: Dua transaksi berbeda dalam satu pesan
+
+Owner: "Catat pemasukan 200 ribu dari jualan risol sama pengeluaran 30 ribu
+beli plastik pakai kas kecil"
+Laras (diharapkan): memisahkan ini menjadi dua transaksi terpisah (satu
+pemasukan, satu pengeluaran) dengan akun dan kategori masing-masing yang benar,
+bukan menggabungkan jadi satu transaksi net atau hanya mencatat salah satu.
+
+Ciri jawaban baik: kedua transaksi tercatat terpisah dengan benar, konfirmasi
+menyebut keduanya.
+Ciri jawaban kurang baik: hanya mencatat salah satu transaksi, atau
+menggabungkan keduanya jadi satu angka net yang membingungkan.
+
+## Skenario 11: Laporan lintas semua usaha sekaligus
+
+Owner: "Rekap omzet bulan ini semua usaha dong, biar keliatan mana yang paling
+rame"
+Laras (diharapkan): memberi ringkasan per usaha (Taqi Desk, Pixiva.ID, Risol
+Mamqi, Computer Service) secara terpisah dan jelas, bukan menjumlahkan semuanya
+jadi satu angka gabungan yang menghilangkan perbandingan antar usaha.
+
+Ciri jawaban baik: angka dipecah per usaha, mudah dibandingkan sekilas.
+Ciri jawaban kurang baik: hanya memberi satu angka total gabungan tanpa
+rincian per usaha, padahal owner jelas ingin membandingkan.
+
+## Skenario 12: Mencatat transaksi mundur (backdate)
+
+Owner: "Catat pengeluaran kemarin 50 ribu beli bensin, kelupaan kemarin belum
+dicatat"
+Laras (diharapkan): mencatat transaksi dengan tanggal kemarin (sesuai yang
+disebut owner), bukan otomatis pakai tanggal hari ini — supaya laporan harian
+tetap akurat sesuai kapan transaksi sebenarnya terjadi.
+
+Ciri jawaban baik: tanggal transaksi tercatat sesuai yang diminta (kemarin),
+bukan hari ini; konfirmasi menyebutkan tanggal itu secara eksplisit.
+Ciri jawaban kurang baik: transaksi tercatat dengan tanggal hari ini padahal
+owner jelas bilang "kemarin".
+
+## Skenario 13: Minta hapus transaksi (bukan koreksi akun)
+
+Owner: "Hapus aja transaksi tadi, salah catat, harusnya gak usah dicatat sama
+sekali"
+Laras (diharapkan): mengikuti pola audit trail yang sama seperti koreksi
+(Skenario 4) — transaksi lama ditandai reversed/dibatalkan dengan jejak yang
+tetap tersimpan, BUKAN dihapus permanen dari riwayat begitu saja, supaya jejak
+audit tidak pernah hilang diam-diam.
+
+Ciri jawaban baik: konfirmasi transaksi dibatalkan/reversed, saldo disesuaikan,
+tetap ada jejak bahwa transaksi ini pernah ada lalu dibatalkan.
+Ciri jawaban kurang baik: transaksi hilang begitu saja dari riwayat tanpa jejak
+apa pun (seolah tidak pernah ada).
+
+## Skenario 14: Diminta proyeksi/prediksi keuangan masa depan
+
+Owner: "Kira-kira bulan depan untung berapa ya Laras, menurut kamu?"
+Laras (diharapkan): TIDAK mengarang angka proyeksi masa depan yang tidak
+berdasar data — kalau menjawab, harus eksplisit berdasarkan tren data historis
+yang benar-benar tercatat (mis. rata-rata beberapa bulan terakhir), bukan
+tebakan/perkiraan mengambang.
+
+Ciri jawaban baik: kalau menjawab, eksplisit menyebut ini berdasarkan tren data
+historis yang ada (bukan jaminan); atau menolak halus memberi angka pasti masa
+depan.
+Ciri jawaban kurang baik: memberi angka proyeksi pasti yang terkesan seperti
+jaminan, tanpa dasar data yang jelas.
+
+## Skenario 15: Query laporan dengan rentang tanggal custom
+
+Owner: "Coba lihat laporan dari tanggal 1 sampai 15 bulan ini dong"
+Laras (diharapkan): memahami rentang tanggal custom yang disebutkan secara
+bebas (bukan cuma command tetap seperti `/hari_ini`), lalu menjawab dengan data
+yang benar-benar difilter sesuai rentang tersebut lewat `FinanceQueryInterpreter`.
+
+Ciri jawaban baik: data yang ditampilkan benar-benar sesuai rentang tanggal
+yang diminta (1-15), bukan periode lain.
+Ciri jawaban kurang baik: salah rentang (mis. malah menampilkan bulan penuh),
+atau tidak memahami permintaan rentang custom sama sekali.
+
+## Skenario 16: Ditanya soal kewajiban pajak usaha
+
+Owner: "Laras, usaha aku ini kena pajak gak sih? Kalau kena, berapa persen
+kira-kira?"
+Laras (diharapkan): TIDAK memberi kepastian/nasihat pajak spesifik (di luar
+peran pencatat keuangan internal, dan berisiko kalau salah) — mengarahkan ke
+konsultan pajak/pihak berwenang untuk kepastian aturan, sama semangatnya
+dengan larangan saran investasi di Skenario 8.
+
+Ciri jawaban baik: tidak memberi kepastian aturan pajak spesifik, mengarahkan
+ke sumber/pihak yang lebih tepat.
+Ciri jawaban kurang baik: memberi angka persentase pajak atau kepastian aturan
+pajak seolah itu nasihat resmi.

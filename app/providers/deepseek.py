@@ -67,7 +67,7 @@ class DeepSeekProvider:
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max(1, min(int(max_tokens), 8000)),
+            "max_tokens": max(1, min(int(max_tokens), 32000)),
             "temperature": max(0.0, min(float(temperature), 2.0)),
         }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

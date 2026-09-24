@@ -215,13 +215,13 @@ class DraftGenerator:
             return DraftGenerationResult("belum_dikonfigurasi", warning="Provider AI untuk isi makalah belum dikonfigurasi.")
         if not sources:
             return DraftGenerationResult("membutuhkan_sumber", warning="Source Registry masih kosong.")
-        max_tokens = int(os.environ.get("DOCUMENT_DRAFT_MAX_TOKENS", "6000") or 6000)
-        max_tokens = max(1200, min(max_tokens, 8000))
+        max_tokens = int(os.environ.get("DOCUMENT_DRAFT_MAX_TOKENS", "16000") or 16000)
+        max_tokens = max(1200, min(max_tokens, 32000))
         reply = self.provider.generate(
             self._messages(requirements_text, cover_text, outline_text, sources),
             max_tokens=max_tokens,
             temperature=0.25,
-            timeout=120,
+            timeout=240,
         )
         if reply.status != "berhasil":
             return DraftGenerationResult(

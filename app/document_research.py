@@ -98,7 +98,7 @@ class DocumentResearch:
                 f"Tanggal: {date.today().isoformat()}\n" + context
                 + "\nKANDIDAT:\n" + json.dumps(records, ensure_ascii=False)
             )},
-        ], max_tokens=2000, temperature=0.0, timeout=45)
+        ], max_tokens=8000, temperature=0.0, timeout=90)
         if selection.status != "berhasil":
             print(f'Seleksi sumber Nara gagal ({selection.status}): {selection.text}', flush=True)
             return AutoResearchResult("sementara_gagal", reason="selection_unavailable")

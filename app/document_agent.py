@@ -781,6 +781,29 @@ class DocumentAgent:
             "lanjut riset", "lanjutkan riset", "lanjut buat draft", "buat draft",
         }
 
+    @classmethod
+    def _deterministic_gate_intent(cls, phase: str, raw: str) -> str | None:
+        """Backstop deterministik untuk gerbang persetujuan (kerangka/riset+draft/file
+        final): kalau PESANNYA SENDIRI cocok PERSIS salah satu frasa tegas yang sudah
+        dikenal aman (`_outline_approved`/`_wants_research`/`_wants_final_file` --
+        semuanya menolak pesan yang mengandung negasi, revisi, atau tanda tanya),
+        intent itu WAJIB menang, apa pun hasil klasifikasi AI ("setuju" TIDAK BOLEH
+        pernah dibaca AI sebagai "masih ada data yang kurang" selama datanya memang
+        sudah lengkap dan kerangkanya sudah diajukan).
+
+        Sama seperti pola guardrail lain di modul ini (`app/topic_guard.py`,
+        pencegahan harga karangan) -- AI-first untuk kasus yang butuh nuansa, tapi
+        TIDAK PERNAH bisa membatalkan pembacaan pasti untuk kasus yang sudah jelas
+        tanpa ambigu. Pesan apa pun yang TIDAK cocok persis (revisi, pertanyaan,
+        kalimat campuran/panjang, dll) tetap sepenuhnya diputuskan AI seperti biasa."""
+        if phase == "outline_confirmation" and cls._outline_approved(raw):
+            return "approve"
+        if phase == "ready_for_draft" and cls._wants_research(raw):
+            return "continue"
+        if phase == "draft_ready" and cls._wants_final_file(raw):
+            return "continue"
+        return None
+
     def _invalidate_content(self) -> None:
         self._automatic_source_ids.clear()
         self._automatic_research_context = ""
@@ -1051,6 +1074,16 @@ class DocumentAgent:
             )
             self._last_intake_result = self._turn_intake
             if self._turn_intake.status == "berhasil" and self._turn_intake.intent != "legacy":
+                forced_intent = self._deterministic_gate_intent(self.phase, raw)
+                if forced_intent and self._turn_intake.intent != forced_intent:
+                    # AI membaca pesan yang sebenarnya tegas/tidak ambigu secara keliru
+                    # (mis. "setuju" diklasifikasikan bukan approve/continue) -> reply/
+                    # clarification buatan AI itu ikut dibuang, TIDAK PERNAH ditampilkan,
+                    # supaya pengguna tidak melihat balasan yang salah membaca datanya
+                    # sendiri sudah lengkap. Lihat docstring `_deterministic_gate_intent`.
+                    self._turn_intake = replace(
+                        self._turn_intake, intent=forced_intent, reply="", clarification="",
+                    )
                 return self._handle_interpreted_turn(raw, self._turn_intake)
 
         if self.phase == "requirements":

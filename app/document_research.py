@@ -100,6 +100,7 @@ class DocumentResearch:
             )},
         ], max_tokens=500, temperature=0.0, timeout=45)
         if selection.status != "berhasil":
+            print(f'Seleksi sumber Nara gagal ({selection.status}): {selection.text}', flush=True)
             return AutoResearchResult("sementara_gagal", reason="selection_unavailable")
         try:
             payload = self._json(selection.text)

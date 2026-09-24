@@ -118,6 +118,17 @@ class DeepSeekProvider:
                 self.model_name,
             )
         if not isinstance(content, str) or not content.strip():
+            finish_reason = ""
+            try:
+                finish_reason = result["choices"][0].get("finish_reason", "")
+            except (KeyError, IndexError, TypeError, AttributeError):
+                pass
+            usage_debug = result.get("usage") if isinstance(result, dict) else {}
+            print(
+                f'DeepSeek balas kosong (model={self.model}, max_tokens={payload["max_tokens"]}, '
+                f'finish_reason={finish_reason!r}, usage={usage_debug!r}).',
+                flush=True,
+            )
             return ModelReply("gagal", "Jawaban DeepSeek kosong.", self.provider_name, self.model_name)
 
         usage = result.get("usage") if isinstance(result, dict) else {}

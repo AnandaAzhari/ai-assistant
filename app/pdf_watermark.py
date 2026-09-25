@@ -108,8 +108,14 @@ class PdfWatermarker:
                 "gagal", "", "Library watermark (`reportlab`/`pypdf`) belum terpasang di server ini.",
             )
 
-        name_seed = order_id or uuid.uuid4().hex[:8]
-        output_path = self.root / f"{name_seed}-preview.pdf"
+        # Nama file pratinjau ikut judul makalah (nama file `source_path` sudah
+        # di-slugify oleh DocumentEngine._safe_name saat file final dibuat, lihat
+        # app/document_engine.py) supaya pelanggan melihat nama yang rapi, bukan
+        # order_id mentah. Suffix acak pendek tetap ditambahkan supaya tidak ada
+        # tabrakan nama file kalau dua order kebetulan berjudul sama; `order_id`
+        # dipakai sebagai fallback kalau nama sumbernya kosong/generik.
+        title_part = source.stem or order_id or "makalah"
+        output_path = self.root / f"{title_part}-{uuid.uuid4().hex[:6]}-preview.pdf"
 
         try:
             reader = PdfReader(str(source))

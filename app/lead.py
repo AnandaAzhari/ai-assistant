@@ -292,6 +292,23 @@ class LeadAgent:
         labels = getattr(requirements, "FIELD_LABELS", {})
         return any(bool(getattr(requirements, key, "")) for key in labels)
 
+    def _document_admin_reply(self, document_agent: DocumentAgent | None, result) -> LeadReply:
+        """Bungkus hasil `DocumentAgent.handle()`/`.status()` jadi `LeadReply` untuk
+        jalur admin (Telegram/Web Admin). Kalau makalah sudah `final_ready`,
+        sertakan Word/PDF sebagai `attachment_paths` — sama seperti jalur pelanggan
+        WhatsApp (`_continue_customer_document` di bawah) — supaya adapter Telegram
+        bisa mengirim file aslinya, bukan cuma path sebagai teks. Best-effort dan
+        aman dipanggil berulang: status `final_ready` yang sama akan menyertakan
+        attachment_paths lagi di setiap balasan berikutnya, konsisten dengan
+        perilaku jalur WhatsApp yang sudah ada."""
+        attachments: tuple[str, ...] = ()
+        if document_agent is not None and result.status == "final_ready" and document_agent.final_docx_path:
+            paths = [document_agent.final_docx_path]
+            if document_agent.final_pdf_path:
+                paths.append(document_agent.final_pdf_path)
+            attachments = tuple(paths)
+        return LeadReply("document", result.status, result.text, attachments)
+
     def _document_for(self, agent_hint: str | None) -> DocumentAgent | None:
         """DocumentAgent yang dipakai untuk pesan admin ini. Topik Telegram "Nara"
         (agent_hint == "document") dapat instance TERSENDIRI lewat
@@ -543,7 +560,7 @@ class LeadAgent:
             if self.document is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = self.document.status()
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(self.document, result)
 
         if command == "/cari_riwayat":
             _, _, keyword_part = raw.partition(" ")
@@ -1063,13 +1080,13 @@ class LeadAgent:
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = document_agent.handle(raw, on_status=on_status)
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(document_agent, result)
 
         if command in {"/dokumen_baru", "/makalah_baru"}:
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = document_agent.handle(raw, on_status=on_status)
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(document_agent, result)
 
         document_commands = {"/makalah", "/dokumen", "/paper", "/laporan"}
         document_words = (
@@ -1081,7 +1098,7 @@ class LeadAgent:
             if document_agent is None:
                 return LeadReply("document", "belum_dikonfigurasi", "Document Agent belum tersedia pada runtime ini.")
             result = document_agent.handle(raw, on_status=on_status)
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(document_agent, result)
 
         if command == "/sync_status":
             if self.sheets_sync is None:
@@ -1139,7 +1156,7 @@ class LeadAgent:
 
         if self._document_session_active(document_agent):
             result = document_agent.handle(raw, on_status=on_status)
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(document_agent, result)
 
         # Jalur terakhir sebelum menyerah: teks bebas yang benar-benar ambigu (tidak
         # cocok kata kunci/command apa pun di atas) diarahkan sesuai topik Telegram
@@ -1148,7 +1165,7 @@ class LeadAgent:
         # jatuh ke fallback lama di bawah seperti sebelum fitur topik ada.
         if agent_hint == "document" and document_agent is not None and not command.startswith("/"):
             result = document_agent.handle(raw, on_status=on_status)
-            return LeadReply("document", result.status, result.text)
+            return self._document_admin_reply(document_agent, result)
 
         if agent_hint == "finance" and self.finance is not None and not command.startswith("/"):
             result = self.finance.handle(raw, on_status=on_status)

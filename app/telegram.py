@@ -16,7 +16,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from app.lead import LeadReply
@@ -82,6 +84,34 @@ class TelegramHTTPClient:
         request = urllib.request.Request(
             f'{self._base}/{method}', data=urllib.parse.urlencode(data).encode('utf-8'),
             headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+        return self._send(request, timeout=timeout)
+
+    def _post_multipart(
+        self, method: str, fields: dict, *, file_field: str, filename: str,
+        file_bytes: bytes, timeout: int = 120,
+    ):
+        """Sama seperti `_post`, tapi mengirim `multipart/form-data` (dibangun manual
+        dengan stdlib, konsisten dengan `_post` yang juga tidak memakai library HTTP
+        eksternal) supaya `file_bytes` bisa disertakan sebagai file asli, bukan
+        field teks biasa. Dipakai satu-satunya oleh `send_document` di bawah."""
+        boundary = uuid.uuid4().hex
+        body = bytearray()
+        for key, value in fields.items():
+            body += (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'
+            ).encode('utf-8')
+        body += (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n'
+        ).encode('utf-8')
+        body += file_bytes
+        body += f'\r\n--{boundary}--\r\n'.encode('utf-8')
+        request = urllib.request.Request(
+            f'{self._base}/{method}', data=bytes(body),
+            headers={'Content-Type': f'multipart/form-data; boundary={boundary}'}, method='POST')
+        return self._send(request, timeout=timeout)
+
+    def _send(self, request: urllib.request.Request, *, timeout: int):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode('utf-8'))
@@ -141,6 +171,24 @@ class TelegramHTTPClient:
             # mengirim ini, jadi payload-nya identik dengan sebelum fitur topik ada.
             data['message_thread_id'] = message_thread_id
         return self._post('sendMessage', data, timeout=20)
+
+    def send_document(self, chat_id: int, file_path: str, *, message_thread_id: int | None = None):
+        """Kirim file (Word/PDF/dll) sebagai attachment asli lewat `sendDocument`,
+        bukan hanya path server dicetak sebagai teks. Nama file yang tampil di
+        Telegram mengikuti nama file asli di `file_path` (mis. judul makalah --
+        lihat `app/document_engine.py`), bukan path server yang panjang. Timeout
+        default lebih longgar dari pesan teks karena upload file (terutama PDF)
+        bisa lebih lambat."""
+        path = Path(file_path)
+        if not path.is_file():
+            raise TelegramError(f'File tidak ditemukan untuk dikirim: {path.name}', retryable=False)
+        fields = {'chat_id': str(chat_id)}
+        if message_thread_id is not None:
+            fields['message_thread_id'] = str(message_thread_id)
+        return self._post_multipart(
+            'sendDocument', fields, file_field='document', filename=path.name,
+            file_bytes=path.read_bytes(), timeout=120,
+        )
 
     def edit_message_text(self, chat_id: int, message_id: int, text: str):
         """Perbarui isi pesan yang sudah terkirim di tempat yang sama (dipakai untuk
@@ -289,6 +337,22 @@ class TelegramAdminAdapter:
             if self.store:
                 self.store.delivered(update_id, index + 1, done=index + 1 == len(chunks))
 
+    def _deliver_attachments(self, chat_id: int, paths: tuple[str, ...], thread_id: int | None) -> None:
+        """Kirim setiap file di `paths` sebagai attachment asli lewat
+        `TelegramHTTPClient.send_document`, SETELAH balasan teks sudah terkirim di
+        `_deliver`. Best-effort seperti `_StatusReporter`: kegagalan mengirim satu
+        file (jaringan, file hilang, dsb.) dicetak ke log tapi tidak pernah
+        menggagalkan pemrosesan update -- balasan teksnya sudah aman terkirim.
+        Catatan: attachment TIDAK disimpan ke `store`, jadi kalau proses terhenti
+        persis di antara balasan teks terkirim dan file terkirim, redelivery
+        setelah restart (lihat `flush_pending`) hanya mengulang teksnya, bukan
+        filenya -- kasus langka yang sengaja belum ditangani di iterasi ini."""
+        for path in paths:
+            try:
+                self.client.send_document(chat_id, path, message_thread_id=thread_id)
+            except TelegramError as exc:
+                print(f'Gagal mengirim lampiran Telegram ({path}): {exc}', flush=True)
+
     def flush_pending(self):
         if not self.store:
             return
@@ -339,6 +403,7 @@ class TelegramAdminAdapter:
         if not self.store:
             self._seen.add(update_id)
         text = message.get('text')
+        attachment_paths: tuple[str, ...] = ()
         if not isinstance(text, str):
             reply_text = 'Telegram saat ini menerima pesan teks. Foto struk, suara, dan lampiran belum diproses; tuliskan keterangannya terlebih dahulu.'
         elif len(text) > 8000:
@@ -352,6 +417,7 @@ class TelegramAdminAdapter:
                     text = head.split('@', 1)[0] + sep + tail
                 reply = self.handler(text, agent_hint=agent_hint, on_status=status_reporter)
                 reply_text = reply.text
+                attachment_paths = getattr(reply, 'attachment_paths', ())
             except ValueError:
                 reply_text = 'Permintaan belum dapat diselesaikan. Periksa /hari_ini atau /dokumen_status dan pastikan data lengkap sebelum mencoba lagi.'
             except Exception as exc:
@@ -365,6 +431,8 @@ class TelegramAdminAdapter:
         if self.store:
             self.store.complete(update_id, reply_text)
         self._deliver(update_id, chat_id, reply_text, thread_id)
+        if attachment_paths:
+            self._deliver_attachments(chat_id, attachment_paths, thread_id)
         return True
 
     def run_forever(self, *, poll_timeout: int = 30) -> None:

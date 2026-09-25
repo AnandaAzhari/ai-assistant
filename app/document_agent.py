@@ -120,6 +120,15 @@ ATURAN KERANGKA:
 class DocumentResult:
     status: str
     text: str
+    # True HANYA pada balasan yang baru saja MENYELESAIKAN build_final() (mengubah
+    # phase ke final_ready dan mengisi _final_docx_path/_final_pdf_path untuk
+    # pertama kalinya), bukan pada pengecekan status berulang saat sesi memang
+    # sudah final_ready dari sebelumnya (lihat build_final(): cabang "sudah
+    # tersedia" di baris ~706 vs cabang "baru dibuat" di baris ~737). Dipakai
+    # pemanggil (app/lead.py) sebagai sinyal aman untuk memicu reset sesi otomatis
+    # tepat sekali di titik pengiriman file, tanpa mereset ulang setiap kali
+    # pelanggan/admin sekadar mengecek status lagi.
+    just_completed: bool = False
 
 
 class DocumentAgent:
@@ -755,7 +764,7 @@ class DocumentAgent:
         lines.append("Catatan kaki dan daftar pustaka dibuat otomatis dari sumber yang dipakai di isi makalah.")
         if result.warning:
             lines.append("Catatan: " + result.warning)
-        return DocumentResult("final_ready", "\n".join(lines))
+        return DocumentResult("final_ready", "\n".join(lines), just_completed=True)
 
     @staticmethod
     def _wants_final_file(text: str) -> bool:

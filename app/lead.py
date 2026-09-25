@@ -300,13 +300,26 @@ class LeadAgent:
         bisa mengirim file aslinya, bukan cuma path sebagai teks. Best-effort dan
         aman dipanggil berulang: status `final_ready` yang sama akan menyertakan
         attachment_paths lagi di setiap balasan berikutnya, konsisten dengan
-        perilaku jalur WhatsApp yang sudah ada."""
+        perilaku jalur WhatsApp yang sudah ada.
+
+        Begitu file final BARU SAJA selesai dibuat (`result.just_completed`, lihat
+        `DocumentAgent.build_final()`), sesi otomatis di-reset lewat
+        `document_agent.reset()` setelah path Word/PDF disalin ke `attachments` di
+        atas — supaya admin bisa langsung minta makalah topik baru tanpa perlu tahu
+        `/dokumen_baru`. Urutan ini WAJIB: attachments harus sudah jadi tuple lokal
+        dulu sebelum reset(), karena reset() mengosongkan
+        `_final_docx_path`/`_final_pdf_path` pada instance yang sama. `just_completed`
+        hanya True sekali (saat build_final() baru menyelesaikan build), jadi
+        pengecekan status berulang pada makalah yang sudah final_ready tidak memicu
+        reset berkali-kali."""
         attachments: tuple[str, ...] = ()
         if document_agent is not None and result.status == "final_ready" and document_agent.final_docx_path:
             paths = [document_agent.final_docx_path]
             if document_agent.final_pdf_path:
                 paths.append(document_agent.final_pdf_path)
             attachments = tuple(paths)
+        if document_agent is not None and getattr(result, "just_completed", False):
+            document_agent.reset()
         return LeadReply("document", result.status, result.text, attachments)
 
     def _document_for(self, agent_hint: str | None) -> DocumentAgent | None:
@@ -1445,6 +1458,18 @@ class LeadAgent:
         if pdf_path:
             attachment_paths.append(pdf_path)
             reply_text = self._maybe_append_pdf_compress_hint(reply_text, pdf_path)
+        # Jalur lama TANPA Payment Gate: docx+pdf di atas sudah file final asli
+        # (bukan preview watermark), jadi ini titik pengiriman sungguhan ke
+        # pelanggan -- sesi dokumen di-reset otomatis di sini supaya pelanggan yang
+        # sama bisa langsung minta makalah topik baru tanpa perlu tahu command admin
+        # (`/dokumen_baru`). Digerbang oleh `result.just_completed` (lihat
+        # DocumentAgent.build_final()) supaya HANYA reset sekali tepat saat file
+        # baru selesai dibuat+dikirim, bukan setiap kali sesi yang sudah final_ready
+        # dicek ulang. attachment_paths di atas sudah jadi list lokal sebelum
+        # reset() dipanggil, jadi tidak kena efek reset() mengosongkan
+        # final_docx_path/final_pdf_path pada instance yang sama.
+        if result.just_completed:
+            document.reset()
         return LeadReply("document", result.status, reply_text, tuple(attachment_paths))
 
     # Target ukuran WAJIB menyebut satuan eksplisit ("kb"/"mb") — sengaja tidak
@@ -1582,6 +1607,17 @@ class LeadAgent:
                     requested_by=f"customer:{sender_id}",
                     summary=f"Kirim file makalah bersih (lunas) ke pelanggan {sender_id}",
                 )
+                # Titik pengiriman SUNGGUHAN ke pelanggan (docx+pdf bersih tanpa
+                # watermark, bukan preview di `_continue_customer_document`) --
+                # sesi dokumen pelanggan ini di-reset otomatis di sini supaya
+                # pelanggan yang sama bisa langsung minta makalah topik baru tanpa
+                # perlu tahu command admin (`/dokumen_baru`). `release` di bawah
+                # sudah membawa path file sendiri (disalin PaymentGateStore saat
+                # `save_pending`, lihat app/payment_gate.py), jadi reset() DocumentAgent
+                # di sini TIDAK memengaruhi attachment yang dikirim di baris return.
+                customer_document = self._customer_document_agent(sender_id)
+                if customer_document is not None:
+                    customer_document.reset()
                 return LeadReply(
                     "payment_gate", "berhasil",
                     "Terima kasih! Pembayaran sudah dikonfirmasi admin — ini dokumen lengkapnya "

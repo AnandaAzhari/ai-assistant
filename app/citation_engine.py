@@ -37,6 +37,13 @@ class CitationEngine:
     IBID_TEXT = "Ibid."
     DEFAULT_REPEAT_MODE = "auto"
     VALID_REPEAT_MODES = ("auto", "short")
+    # Pesan tetap dari _apply_word_footnotes saat server ini bukan Windows (mis. VPS
+    # Linux produksi) sehingga footnote Word COM memang tidak tersedia -- bukan
+    # kegagalan sungguhan. build() memakai konstanta ini (bukan mencocokkan teks
+    # bebas) supaya HANYA kasus "tidak ada Word di platform ini" yang dianggap
+    # non-fatal; error Word COM yang sesungguhnya di Windows (timeout, dokumen
+    # corrupt, dll) tetap dianggap "gagal" seperti sebelumnya.
+    NO_WORD_WARNING = "Footnote Word belum diterapkan: fitur ini membutuhkan Windows + Microsoft Word."
 
     def __init__(self, document_engine: DocumentEngine):
         self.document_engine = document_engine
@@ -288,7 +295,7 @@ class CitationEngine:
         timeout: int = 90,
     ) -> str:
         if os.name != "nt":
-            return "Footnote Word belum diterapkan: fitur ini membutuhkan Windows + Microsoft Word."
+            return CitationEngine.NO_WORD_WARNING
 
         repeat_mode = CitationEngine.normalize_repeat_mode(citation_repeat_mode)
         citation_file = docx_path.with_suffix(".citations.json")
@@ -565,14 +572,27 @@ try {
         except (OSError, ValueError) as exc:
             return CitationBuildResult("gagal", used_refs=used_refs, warning=f"Gagal membuat DOCX: {exc}")
 
-        warning = self._apply_word_footnotes(
+        footnote_warning = self._apply_word_footnotes(
             docx_path,
             used_sources,
             citation_repeat_mode=repeat_mode,
             create_pdf=create_pdf,
         )
-        if warning:
-            return CitationBuildResult("gagal", docx_path=str(docx_path), used_refs=used_refs, warning=warning)
+        # Dulu: warning apa pun di sini (termasuk "server ini bukan Windows") membuat
+        # build() langsung "gagal" total -- akibatnya di VPS Linux (tidak pernah punya
+        # Microsoft Word) status final_ready TIDAK PERNAH bisa tercapai sama sekali,
+        # walau DOCX (OOXML murni lewat DocumentEngine.build_docx, tidak butuh Word)
+        # dan PDF (lewat LibreOffice di convert_to_pdf, lihat app/document_engine.py)
+        # sebenarnya tetap berhasil dibuat tanpa Word sama sekali. Sekarang HANYA kasus
+        # "tidak ada Word di platform ini" (NO_WORD_WARNING) yang diperlakukan sebagai
+        # catatan non-fatal -- proses tetap lanjut ke "berhasil" supaya pelanggan/admin
+        # tetap menerima DOCX+PDF (footnote otomatis Word saja yang belum diterapkan).
+        # Error Word COM yang sesungguhnya di Windows (timeout, dokumen corrupt, dll)
+        # tetap dianggap "gagal" seperti perilaku lama.
+        if footnote_warning and footnote_warning != CitationEngine.NO_WORD_WARNING:
+            return CitationBuildResult(
+                "gagal", docx_path=str(docx_path), used_refs=used_refs, warning=footnote_warning,
+            )
 
         pdf_path: Path | None = None
         pdf_warning = ""
@@ -583,10 +603,11 @@ try {
             else:
                 pdf_path, pdf_warning = self.document_engine.convert_to_pdf(docx_path)
 
+        combined_warning = " ".join(w for w in (footnote_warning, pdf_warning) if w)
         return CitationBuildResult(
             "berhasil",
             docx_path=str(docx_path),
             pdf_path=str(pdf_path) if pdf_path else "",
             used_refs=used_refs,
-            warning=pdf_warning,
+            warning=combined_warning,
         )
